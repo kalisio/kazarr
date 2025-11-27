@@ -1,0 +1,8 @@
+# IDE
+.vscode
+
+# Git
+.git
+
+# Python
+__pycache__
