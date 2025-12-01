@@ -37,7 +37,7 @@ done
 init_lib_infos "$ROOT_DIR"
 
 ensure_yq
-NAME=$(get_lib_name)
+NAME=$(yq -p toml '.project.name' "$ROOT_DIR/pyproject.toml")
 VERSION=$(yq -p toml '.project.version' "$ROOT_DIR/pyproject.toml")
 GIT_TAG=$(get_lib_tag)
 
