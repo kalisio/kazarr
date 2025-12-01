@@ -18,7 +18,8 @@ def load(path):
     s3_store = s3fs.S3Map(root=os.path.join(bucket, path), s3=s3fs.S3FileSystem(anon=False))
     # Will try to open consolidated metadata first (https://docs.xarray.dev/en/latest/generated/xarray.open_zarr.html#xarray.open_zarr)
     # Will try to determine zarr_format (v2 or v3) automatically
-    dataset = xr.open_zarr(s3_store)
+    # chunks must be defined to enable dask lazy loading
+    dataset = xr.open_zarr(s3_store, chunks="auto")
   except NoCredentialsError as e:
     raise exceptions.GenericInternalError("S3 credentials not found.")
   except Exception as e:
@@ -52,11 +53,13 @@ def load_dataset(dataset_id):
   dataset = load(dataset_path)
   return dataset, config
 
+# Ensure xindex is set for a variable in the dataset
 def set_xindex(dataset, var_name):
   if var_name not in dataset.xindexes:
     dataset = dataset.set_xindex(var_name)
   return dataset
 
+# Check if a variable is monotonic
 def is_monotonic_var(dataset, var_name):
   try:
     var_data = dataset[var_name].values
@@ -65,6 +68,7 @@ def is_monotonic_var(dataset, var_name):
     is_monotonic = False
   return is_monotonic
 
+# Get dimensions and coordinates that must be provided for a selection, and not already defined
 def get_required_dims_and_coords(dataset, config, variables, fixed_coords, fixed_dims, request, optional_dims=[]):
   dims_to_var = None
   def find_corresponding_var(dim):
@@ -115,6 +119,7 @@ def get_required_dims_and_coords(dataset, config, variables, fixed_coords, fixed
     raise exceptions.MissingDimensionsOrVariables(missing_dims)
   return fixed_coords, fixed_dims
 
+# Smart selection on a dataset variable with coordinates and dimensions
 def sel(dataset, variable, fixed_coords, fixed_dims):
   # Ensure xindexes are set for all fixed coords
   for coord in fixed_coords:
@@ -131,6 +136,7 @@ def sel(dataset, variable, fixed_coords, fixed_dims):
   data = dataset.sel(monotonic_fixed_vars, method='nearest').sel(non_monotonic_fixed_vars).isel(fixed_dims)[variable]
   return data  
 
+# Deep get from nested dict (mimic lodash get)
 def dget(d, key, default=None):
   keys = key.split('.')
   for k in keys:
@@ -140,6 +146,7 @@ def dget(d, key, default=None):
       return default
   return d
 
+# Deep get multiple keys from nested dict
 def dgets(d, keys, default=None):
   values = []
   for key in keys if isinstance(keys, list) else [keys]:

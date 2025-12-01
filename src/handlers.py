@@ -1,8 +1,9 @@
 from fastapi import Request, HTTPException
 import matplotlib.pyplot as plt
 import numpy as np
+import xarray as xr
 
-from src.utils import dget, dgets, sel, load_datasets, load_dataset, get_required_dims_and_coords
+from src.utils import dget, dgets, sel, load_datasets, load_dataset, get_required_dims_and_coords, is_monotonic_var
 
 def list_datasets():
   datasets = load_datasets()
@@ -29,30 +30,63 @@ def dataset_infos(dataset_id):
   }
 
 def extract(dataset, variable, request, time = None, bounding_box = None):
-  lon_min, lat_min, lon_max, lat_max = None, None, None, None if bounding_box is None else bounding_box
+  lon_min, lat_min, lon_max, lat_max = (None, None, None, None) if bounding_box is None else bounding_box
   has_bb_lon = lon_min is not None or lon_max is not None
   has_bb_lat = lat_min is not None or lat_max is not None
 
   dataset, config = load_dataset(dataset)
 
-
   fixed_coords, fixed_dims = dgets(config, ['variables.fixed', 'dimensions.fixed'], {})
 
   lon_dim, lat_dim = dgets(config, ['dimensions.lon', 'dimensions.lat'])
-  if has_bb_lon and lon_dim is None:
-    raise exceptions.MissingConfigurationElement("dimensions.lon")
-  if has_bb_lat and lat_dim is None:
-    raise exceptions.MissingConfigurationElement("dimensions.lat")
+  lon_var, lat_var = dgets(config, ['variables.lon', 'variables.lat'])
+  missing_vars = []
+  if has_bb_lon and lon_var is None:
+    raise exceptions.MissingConfigurationElement("variables.lon")
+    if lon_var not in dataset:
+      missing_vars.append(f"lon ({lon_var})")
+  if has_bb_lat and lat_var is None:
+    raise exceptions.MissingConfigurationElement("variables.lat")
+    if lat_var not in dataset:
+      missing_vars.append(f"lat ({lat_var})")
+  if len(missing_vars) > 0:
+    raise exceptions.BadConfigurationVariable(missing_vars)
 
   time_var = dget(config, 'variables.time')
   if time is not None and time_var is not None:
     fixed_coords[time_var] = time
 
   fixed_coords, fixed_dims = get_required_dims_and_coords(dataset, config, variable, fixed_coords, fixed_dims, request, [lon_dim, lat_dim])
-  # TODO Apply bounding box selection if lon/lat bounds are provided
 
-  data = sel(dataset, variable, fixed_coords, fixed_dims)
-  return data.values.tolist()
+  data = None
+  if has_bb_lon or has_bb_lat:
+    # Apply bounding box selection if lon/lat bounds are provided
+    lons = dataset[lon_var]
+    lats = dataset[lat_var]
+    mask = xr.ones_like(lons, dtype=bool)
+    if has_bb_lon:
+      mask = mask & (lons >= lon_min) & (lons <= lon_max)
+    if has_bb_lat:
+      mask = mask & (lats >= lat_min) & (lats <= lat_max)
+
+    if has_bb_lon or has_bb_lat:
+      mask = mask.compute()
+      data = dataset.where(mask)
+
+  data = sel(dataset if data is None else data, variable, fixed_coords, fixed_dims)
+
+  lons_sel = sel(dataset, lon_var, fixed_coords, fixed_dims)
+  lats_sel = sel(dataset, lat_var, fixed_coords, fixed_dims)
+  out = []
+  for lon_val, lat_val, data_val in zip(lons_sel.values.flatten(), lats_sel.values.flatten(), data.values.flatten()):
+    if np.isnan(data_val):
+      continue
+    out.append({
+      "lon": lon_val.item(),
+      "lat": lat_val.item(),
+      "value": data_val.item()
+    })
+  return out
 
 def probe(dataset, variables, lon, lat, request, height = None):
   variables = variables if isinstance(variables, list) else [variables]
