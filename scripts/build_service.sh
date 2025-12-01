@@ -34,12 +34,10 @@ done
 ## Init workspace
 ##
 
-init_lib_infos "$ROOT_DIR"
-
 ensure_yq
 NAME=$(yq -p toml '.project.name' "$ROOT_DIR/pyproject.toml")
 VERSION=$(yq -p toml '.project.version' "$ROOT_DIR/pyproject.toml")
-GIT_TAG=$(get_lib_tag)
+GIT_TAG=$(get_git_tag "$ROOT_DIR")
 
 # Strip @kalisio part
 NAME=${NAME#*/}
