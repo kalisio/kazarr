@@ -1,0 +1,4 @@
+[project]
+name = "kazarr"
+version = "0.1.0"
+description = "A lightweight FastAPI service that exposes endpoints to interact with Zarr datasets stored in a Simple Storage Service (S3)"
