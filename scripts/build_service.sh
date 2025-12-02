@@ -32,8 +32,8 @@ done
 ## Init workspace
 ##
 
-NAME=$(get_toml_value 'project.name' "$ROOT_DIR/pyproject.toml")
-VERSION=$(get_toml_value 'project.version' "$ROOT_DIR/pyproject.toml")
+NAME=$(get_toml_value "$ROOT_DIR/pyproject.toml" 'project.name')
+VERSION=$(get_toml_value "$ROOT_DIR/pyproject.toml" 'project.version')
 GIT_TAG=$(get_git_tag "$ROOT_DIR")
 
 echo "About to build $NAME v$VERSION ..."
