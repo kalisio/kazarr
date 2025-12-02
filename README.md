@@ -80,6 +80,20 @@ The `isoline` endpoint accepts the following query parameters:
 > [!IMPORTANT]
 > You may need to specify additional non-generic variables or dimensions according to your dataset. To do so, you can add query parameters with `&my_additional_variable={VALUE}`
 
+## Configuring
+
+### Environment variables
+
+| Variable              | Description                                              | Default value |
+|-----------------------|----------------------------------------------------------|---------------|
+| PORT                  | The port to be used when exposing the service            | 8000          |
+| HOSTNAME              | The hostname to be used when exposing the service        | localhost     |
+| AWS_ACCESS_KEY_ID     | Access key ID of the S3 in which zarr data is stored     |               |
+| AWS_SECRET_ACCESS_KEY | Secret access key of the S3 in which zarr data is stored |               |
+| AWS_REGION            | Region of the S3 in which zarr data is stored            |               |
+| AWS_ENDPOINT_URL      | Endpoint URL of the S3 in which zarr data is stored      |               |
+| BUCKET_NAME           | The name of the bucket in which zarr data is stored      |               |
+
 ## Building
 
 ### Manual build
