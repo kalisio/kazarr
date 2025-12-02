@@ -12,8 +12,6 @@ WORKSPACE_DIR="$(dirname "$ROOT_DIR")"
 ## Parse options
 ##
 
-DEFAULT_DEBIAN_VER=bookworm
-DEBIAN_VER=$DEFAULT_DEBIAN_VER
 PUBLISH=false
 CI_STEP_NAME="Build service"
 while getopts "pr:" option; do
@@ -34,13 +32,9 @@ done
 ## Init workspace
 ##
 
-ensure_yq
-NAME=$(yq -p toml '.project.name' "$ROOT_DIR/pyproject.toml")
-VERSION=$(yq -p toml '.project.version' "$ROOT_DIR/pyproject.toml")
+NAME=$(get_toml_value 'project.name' "$ROOT_DIR/pyproject.toml")
+VERSION=$(get_toml_value 'project.version' "$ROOT_DIR/pyproject.toml")
 GIT_TAG=$(get_git_tag "$ROOT_DIR")
-
-# Strip @kalisio part
-NAME=${NAME#*/}
 
 echo "About to build $NAME v$VERSION ..."
 
@@ -51,13 +45,11 @@ load_value_files "$WORKSPACE_DIR/development/common/KALISIO_DOCKERHUB_PASSWORD.e
 ##
 
 IMAGE_NAME="$KALISIO_DOCKERHUB_URL/kalisio/$NAME"
-IMAGE_SHORT_TAG=latest
+IMAGE_TAG=latest
 
 if [[ -n "$GIT_TAG" ]]; then
-    IMAGE_SHORT_TAG=$VERSION
+    IMAGE_TAG=$VERSION
 fi
-
-IMAGE_TAG="$IMAGE_SHORT_TAG"
 
 begin_group "Building container $IMAGE_NAME:$IMAGE_TAG ..."
 
