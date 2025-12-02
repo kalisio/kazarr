@@ -16,8 +16,9 @@ RUN micromamba install -y -n base -c conda-forge \
   pyproj \
   dask \
   s3fs \
+  matplotlib \
   && micromamba clean --all --yes
 
 EXPOSE 8000
 
-CMD ["micromamba", "run", "-n", "base", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["micromamba", "run", "-n", "base", "python", "main.py", "start-api", "--host", "0.0.0.0", "--port", "8000"]
