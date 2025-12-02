@@ -17,7 +17,11 @@ app = FastAPI(
   }
 )
 
-@app.get("/")
+@app.get(
+  "/",
+  summary="API Root",
+  description="Provides basic information about the KaZarr API."
+)
 def read_root():
   return {
     "name": "KaZarr API",
@@ -33,7 +37,11 @@ def read_root():
     ]
   }
 
-@app.get("/health")
+@app.get(
+  "/health",
+  summary="Health Check",
+  description="Check the health status of the KaZarr API."
+)
 def health_check():
   return {"status": "ok"}
 
@@ -67,8 +75,8 @@ def dataset_infos(dataset: str = Path(..., description="The name of the dataset 
 
 @app.get(
   "/datasets/{dataset}/extract",
-  summary="",
-  description=""
+  summary="Get data at a specific time",
+  description="Retrieve data for a specified variable at a specific time and within an optional bounding box."
 )
 def extract_data(
   request: Request,
@@ -92,8 +100,8 @@ def extract_data(
 
 @app.get(
   "/datasets/{dataset}/probe",
-  summary="",
-  description=""
+  summary="Get data at specific coordinates over time",
+  description="Retrieve data for specified variables at specific coordinates over time."
 )
 def probe_data(
   request: Request,
@@ -115,8 +123,8 @@ def probe_data(
 
 @app.get(
   "/datasets/{dataset}/isoline",
-  summary="",
-  description=""
+  summary="Get isolines for a specific variable at a specific time",
+  description="Generate isolines for a specified variable at a specific time and for given levels."
 )
 def isoline_data(
   request: Request,

@@ -27,6 +27,7 @@ def load(path):
   return dataset
 
 # Load datasets config file from S3
+@lru_cache(maxsize=1)
 def load_datasets(path = "datasets.json"):
   s3_store = s3fs.S3FileSystem(anon=False)
   bucket = os.getenv("BUCKET_NAME")

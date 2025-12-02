@@ -21,6 +21,8 @@ def dataset_infos(dataset_id):
       "shape": dataset[var].shape,
       "attrs": dataset[var].attrs
     }
+    if len(dataset[var].dims) == 0:
+      variables[var]["value"] = dataset[var].values.item()
 
   return {
     "id": dataset_id,
