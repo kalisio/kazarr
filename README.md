@@ -94,7 +94,7 @@ The `isoline` endpoint accepts the following query parameters:
 | AWS_ENDPOINT_URL      | Endpoint URL of the S3 in which zarr data is stored      |               |
 | BUCKET_NAME           | The name of the bucket in which zarr data is stored      |               |
 
-## Building
+## Usage
 
 ### Manual build
 
@@ -102,6 +102,43 @@ You can build the image with the following command:
 
 ```bash
 docker build -t <your-image-name> .
+```
+
+And then start the service with:
+
+```bash
+docker run -p 8000:8000 <your-image-name>
+```
+
+### Run locally
+
+You will need to install multiple Python packages to run this app.
+To simplify, you can install Anaconda and run these commands :
+
+```bash
+conda create -y -n kazarr_env python=3.11
+```
+
+```bash
+conda install -y -n kazarr_env -c conda-forge \
+  fastapi \
+  uvicorn \
+  xarray \
+  zarr \
+  cfgrib \
+  numpy \
+  pyproj \
+  dask \
+  s3fs \
+  matplotlib
+```
+
+```bash
+conda activate kazarr_env
+```
+
+```bash
+python main.py start-api
 ```
 
 ## Contributing
