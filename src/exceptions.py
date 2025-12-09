@@ -50,12 +50,21 @@ class VariableNotFound(UserInputBasedException):
       message = "Variables '" + "', '".join(variable_name[:-1]) + "' and '" + variable_name[-1] + "' not found in dataset."
     super().__init__("VARIABLE_NOT_FOUND", message, variable_name)
 
-class MissingDimensionsOrVariables(UserInputBasedException):
+class MissingDimensionsOrCoordinates(UserInputBasedException):
   def __init__(self, dimensions):
-    if not isinstance(dimensions, list):
-      dimensions = [dimensions]
-    if len(dimensions) == 1:
-      message = f"Missing required dimension or variable related to dimension: '{dimensions[0]}'."
-    if isinstance(dimensions, list) and len(dimensions) > 1:
-      message = "Missing required dimensions or variables related to dimensions: '" + "', '".join(dimensions[:-1]) + "' and '" + dimensions[-1] + "'."
-    super().__init__("MISSING_DIMENSIONS_OR_VARIABLES", message, dimensions)
+    message = "Missing required dimensions or coordinates: "
+    elems = []
+    payload = []
+    for dim, coords in dimensions.items():
+      elems.append(f"dimension '{dim}' or coordinate{'s' if len(coords) > 1 else ''} " + "', '".join(coords))
+      payload.append({ "dimension": dim, "coordinates": coords })
+    message += ", ".join(elems) + "."
+    super().__init__("MISSING_DIMENSIONS_OR_COORDINATES", message, payload)
+
+class TooFewPoints(UserInputBasedException):
+  def __init__(self):
+    super().__init__("TOO_FEW_POINTS", "Not enough points with this bounding box to generate mesh data.")
+
+class NoDataInSelection(UserInputBasedException):
+  def __init__(self):
+    super().__init__("NO_DATA_IN_SELECTION", "No data available in the selected area and time.")

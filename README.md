@@ -130,7 +130,8 @@ conda install -y -n kazarr_env -c conda-forge \
   pyproj \
   dask \
   s3fs \
-  matplotlib
+  matplotlib \
+  pyvista
 ```
 
 ```bash

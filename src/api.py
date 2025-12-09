@@ -1,30 +1,39 @@
 import sys, os
 
 from fastapi import FastAPI, Path, Query, Request, HTTPException
+from fastapi.openapi.docs import get_swagger_ui_html
+from pydantic import BaseModel
 
 import src.utils as utils
 import src.handlers as handlers
 import src.exceptions as exceptions
 
+class RegisterDatasetRequest(BaseModel):
+  name: str
+  path: str
+  description: str = ""
+  config: dict = {}
+
 app = FastAPI(
-  title="KaZarr API",
+  title="kazarr API",
   version=os.getenv("APP_VERSION", "0.1.0"),
   description="A lightweight FastAPI service that exposes endpoints to interact with Zarr datasets stored in a Simple Storage Service (S3)",
   contact={
     "name": "Kalisio",
     "url": "https://kalisio.xyz",
     "email": "contact@kalisio.xyz"
-  }
+  },
+  docs_url=None
 )
 
 @app.get(
   "/",
   summary="API Root",
-  description="Provides basic information about the KaZarr API."
+  description="Provides basic information about the kazarr API."
 )
 def read_root():
   return {
-    "name": "KaZarr API",
+    "name": "kazarr API",
     "version": os.getenv("APP_VERSION", "0.1.0"),
     "description": "A lightweight FastAPI service that exposes endpoints to interact with Zarr datasets stored in a Simple Storage Service (S3)",
     "endpoints": [
@@ -37,10 +46,23 @@ def read_root():
     ]
   }
 
+@app.get("/docs", include_in_schema=False)
+async def custom_swagger_ui_html(request: Request):
+  """
+  Handle passing JWT token from query params to Swagger UI for authenticated requests
+  """
+  token = request.query_params.get("jwt")
+  print("Token received in docs request:", token)
+  return get_swagger_ui_html(
+    openapi_url=app.openapi_url + (f"?jwt={token}" if token else ""),
+    title=app.title + " - Swagger UI",
+    swagger_ui_parameters={"defaultModelsExpandDepth": -1, "persistAuthorization": True}
+  )
+
 @app.get(
   "/health",
   summary="Health Check",
-  description="Check the health status of the KaZarr API."
+  description="Check the health status of the kazarr API."
 )
 def health_check():
   return {"status": "ok"}
@@ -86,10 +108,22 @@ def extract_data(
   lat_min: float | None = Query(None, description="Minimum latitude of the bounding box"),
   lon_max: float | None = Query(None, description="Maximum longitude of the bounding box"),
   lat_max: float | None = Query(None, description="Maximum latitude of the bounding box"),
-  time: str | None = Query(None, description="The time value to extract")
+  time: str | None = Query(None, description="The time value to extract"),
+  resolution_limit: float | None = Query(None, description="The resolution limit for data extraction"),
+  as_mesh: bool = Query(False, description="Whether to return the data as a mesh"),
+  as_dims: list[str] = Query([], description="If some variables have the same name as dimensions, will force them to be treated as dimensions")
 ):
   try:
-    return handlers.extract(dataset, variable, request, time=time, bounding_box=(lon_min, lat_min, lon_max, lat_max))
+    return handlers.extract(
+      dataset,
+      variable,
+      request,
+      time=time,
+      bounding_box=(lon_min, lat_min, lon_max, lat_max),
+      resolution_limit=resolution_limit,
+      as_mesh=as_mesh,
+      as_dims=as_dims
+    )
   except exceptions.GenericInternalError as e:
     sys.stderr.write(f"[ERR {e.error_code}]: {e.message}\n")
     raise HTTPException(status_code=500, detail="An internal error occured")
@@ -109,10 +143,11 @@ def probe_data(
   variables: list[str] = Query(..., description="The variables to probe"),
   lon: float = Query(..., description="The longitude coordinate to probe"),
   lat: float = Query(..., description="The latitude coordinate to probe"),
-  height: float | None = Query(None, description="The height coordinate to probe")
+  height: float | None = Query(None, description="The height coordinate to probe"),
+  as_dims: list[str] = Query([], description="If some variables have the same name as dimensions, will force them to be treated as dimensions")
 ):
   try:
-    return handlers.probe(dataset, variables, lon, lat, request, height=height)
+    return handlers.probe(dataset, variables, lon, lat, request, height=height, as_dims=as_dims)
   except exceptions.GenericInternalError as e:
     sys.stderr.write(f"[ERR {e.error_code}]: {e.message}\n")
     raise HTTPException(status_code=500, detail="An internal error occured")
@@ -131,10 +166,50 @@ def isoline_data(
   dataset: str = Path(..., description="The name of the dataset to generate isolines from"),
   variable: str = Query(..., description="The variable to generate isolines for"),
   time: str | None = Query(None, description="The time value to use for isoline generation"),
-  levels: list[float] = Query(..., description="Comma-separated list of levels for isoline generation")
+  levels: list[float] = Query(..., description="List of levels for isoline generation"),
+  as_dims: list[str] = Query([], description="If some variables have the same name as dimensions, will force them to be treated as dimensions")
 ):
   try:
-    return handlers.isoline(dataset, variable, levels, request, time=time)
+    return handlers.isoline(dataset, variable, levels, request, time=time, as_dims=as_dims)
+  except exceptions.GenericInternalError as e:
+    sys.stderr.write(f"[ERR {e.error_code}]: {e.message}\n")
+    raise HTTPException(status_code=500, detail="An internal error occured")
+  except exceptions.ConfigurationBasedException as e:
+    raise HTTPException(status_code=500, detail=e.get())
+  except exceptions.UserInputBasedException as e:
+    raise HTTPException(status_code=404, detail=e.get())
+
+@app.get(
+  "/datasets/{dataset}/select",
+  summary="Get data for free selection of dimensions and coordinates",
+  description="Retrieve data for a specified variable based on free selection of dimensions and coordinates."
+)
+def free_selection_data(
+  request: Request,
+  dataset: str = Path(..., description="The name of the dataset to perform selection on"),
+  variable: str = Query(..., description="The variable to perform selection on"),
+  as_dims: list[str] = Query([], description="If some variables have the same name as dimensions, will force them to be treated as dimensions")
+):
+  try:
+    return handlers.free_selection(dataset, variable, request, as_dims=as_dims)
+  except exceptions.GenericInternalError as e:
+    sys.stderr.write(f"[ERR {e.error_code}]: {e.message}\n")
+    raise HTTPException(status_code=500, detail="An internal error occured")
+  except exceptions.ConfigurationBasedException as e:
+    raise HTTPException(status_code=500, detail=e.get())
+  except exceptions.UserInputBasedException as e:
+    raise HTTPException(status_code=404, detail=e.get())
+
+@app.post(
+  "/datasets",
+  summary="Register a new dataset",
+  description="Register a new Zarr dataset."
+)
+def register_dataset(
+  request: RegisterDatasetRequest
+):
+  try:
+    return handlers.register_dataset(request.name, request.path, request.description, request.config)
   except exceptions.GenericInternalError as e:
     sys.stderr.write(f"[ERR {e.error_code}]: {e.message}\n")
     raise HTTPException(status_code=500, detail="An internal error occured")

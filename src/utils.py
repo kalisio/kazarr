@@ -1,4 +1,4 @@
-import os, json
+import os, json, time
 from functools import lru_cache
 
 import s3fs
@@ -15,7 +15,7 @@ def load(path):
   if bucket is None:
     raise exceptions.GenericInternalError("BUCKET_NAME environment variable not set.")
   try:
-    s3_store = s3fs.S3Map(root=os.path.join(bucket, path), s3=s3fs.S3FileSystem(anon=False))
+    s3_store = s3fs.S3Map(root=os.path.join(bucket, path.replace('s3://', '')), s3=s3fs.S3FileSystem(anon=False))
     # Will try to open consolidated metadata first (https://docs.xarray.dev/en/latest/generated/xarray.open_zarr.html#xarray.open_zarr)
     # Will try to determine zarr_format (v2 or v3) automatically
     # chunks must be defined to enable dask lazy loading
@@ -23,7 +23,7 @@ def load(path):
   except NoCredentialsError as e:
     raise exceptions.GenericInternalError("S3 credentials not found.")
   except Exception as e:
-    raise exceptions.GenericInternalError("Unable to access S3")
+    raise exceptions.GenericInternalError("Unable to access S3: " + str(e))
   return dataset
 
 # Load datasets config file from S3
@@ -39,8 +39,21 @@ def load_datasets(path = "datasets.json"):
   except NoCredentialsError as e:
     raise exceptions.GenericInternalError("S3 credentials not found.")
   except Exception as e:
-    raise exceptions.GenericInternalError("Unable to access S3")
+    raise exceptions.GenericInternalError("Unable to access S3: " + str(e))
   return datasets
+
+def save_datasets(datasets, path = "datasets.json"):
+  s3_store = s3fs.S3FileSystem(anon=False)
+  bucket = os.getenv("BUCKET_NAME")
+  if bucket is None:
+    raise exceptions.GenericInternalError("BUCKET_NAME environment variable not set.")
+  try:
+    with s3_store.open(os.path.join(bucket, path), 'w') as f:
+      json.dump(datasets, f, indent=2)
+  except NoCredentialsError as e:
+    raise exceptions.GenericInternalError("S3 credentials not found.")
+  except Exception as e:
+    raise exceptions.GenericInternalError("Unable to access S3: " + str(e))
 
 # Load a dataset and its configuration from its ID
 def load_dataset(dataset_id):
@@ -70,54 +83,48 @@ def is_monotonic_var(dataset, var_name):
   return is_monotonic
 
 # Get dimensions and coordinates that must be provided for a selection, and not already defined
-def get_required_dims_and_coords(dataset, config, variables, fixed_coords, fixed_dims, request, optional_dims=[]):
-  dims_to_var = None
-  def find_corresponding_var(dim):
-    nonlocal dims_to_var
-    if dims_to_var is not None:
-      return dims_to_var[dim] if dim in dims_to_var else None
+def get_required_dims_and_coords(dataset, config, variables, fixed_coords, fixed_dims, request, optional_coords=[], optional_dims=[], as_dims=[]):
+  # Find optional dimensions from optional coordinates
+  for coord in optional_coords if isinstance(optional_coords, list) else [optional_coords]:
+    if coord in dataset:
+      for dim in dataset[coord].dims:
+        if dim not in optional_dims:
+          optional_dims.append(dim) 
 
-    dims_to_var = {}
-    for coord in dataset.coords:
-      target_dims = list(dataset[coord].dims)
-      # We only support 1D coords for now
-      if len(target_dims) == 1:
-        dims_to_var[target_dims[0]] = coord
-    return find_corresponding_var(dim)
-
-  # Check if all variables exist in dataset
-  variables = variables if isinstance(variables, list) else [variables]
-  missing_variables = []
-  for variable in variables:
-    if variable not in dataset:
-      missing_variables.append(variable)
-  if len(missing_variables) > 0:
-    raise exception.VariableNotFound(missing_variables)
-
-  needed_dims = []
-  needed_vars = []
-  for variable in variables:
+  needed_dims = {}
+  for variable in variables if isinstance(variables, list) else [variables]:
     for dim in dataset[variable].dims:
-      if dim not in fixed_dims and dim not in needed_dims and dim not in optional_dims:
-        corresponding_var = find_corresponding_var(dim)
-        if corresponding_var is None or corresponding_var not in fixed_coords:
-          needed_dims.append(dim)
-          needed_vars.append(corresponding_var)
+      if dim not in fixed_dims and dim not in optional_dims:
+        needed = True
+        assigned_coords = []
+        # Find coordinates related to this dimension
+        for coord in dataset.coords:
+          if dim in dataset[coord].dims and coord not in as_dims and coord not in assigned_coords:
+            assigned_coords.append(coord)
+            if coord in fixed_coords or coord in optional_coords:
+              needed = False
+        if needed:
+          needed_dims[dim] = assigned_coords
 
-  # Check if needed dimensions/variables are provided in query params
-  missing_dims = []
-  for i, dim in enumerate(needed_dims):
+  # Check if all needed dimensions/coordinates are provided in query params
+  missing_dims = {}
+  for dim, coords in needed_dims.items():
     dim_value = request.query_params.get(dim)
-    var_value = request.query_params.get(needed_vars[i])
     if dim_value is not None:
       fixed_dims[dim] = int(dim_value)
-    elif var_value is not None:
-      fixed_coords[needed_vars[i]] = var_value
-    elif dim not in optional_dims:
-      missing_dims.append(dim)
+    else:
+      coord_found = False
+      for coord in coords:
+        coord_value = request.query_params.get(coord)
+        if coord_value is not None:
+          fixed_coords[coord] = coord_value
+          coord_found = True
+          break
+      if not coord_found:
+        missing_dims[dim] = coords
 
   if len(missing_dims) > 0:
-    raise exceptions.MissingDimensionsOrVariables(missing_dims)
+    raise exceptions.MissingDimensionsOrCoordinates(missing_dims)
   return fixed_coords, fixed_dims
 
 # Smart selection on a dataset variable with coordinates and dimensions
@@ -144,7 +151,7 @@ def dget(d, key, default=None):
     if isinstance(d, dict) and k in d:
       d = d[k]
     else:
-      return default
+      return default.copy() if isinstance(default, dict) else default
   return d
 
 # Deep get multiple keys from nested dict
