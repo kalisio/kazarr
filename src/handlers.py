@@ -37,11 +37,41 @@ def dataset_infos(dataset_id):
     if len(dataset[coord].dims) == 0:
       variables[coord]["value"] = dataset[coord].values.item()
 
+  # Check if bounding box can be defined
+  lon_var, lat_var, height_var = dgets(config, ['variables.lon', 'variables.lat', 'variables.height'])
+  bounding_box = False
+  if lon_var in dataset and lat_var in dataset:
+    bounding_box = {
+      "lon": {
+        "min": float(dataset[lon_var].min()),
+        "max": float(dataset[lon_var].max())
+      },
+      "lat": {
+        "min": float(dataset[lat_var].min()),
+        "max": float(dataset[lat_var].max())
+      }
+    }
+    if height_var in dataset:
+      bounding_box["height"] = {
+        "min": float(dataset[height_var].min()),
+        "max": float(dataset[height_var].max())
+      }
+    
+  # Check if time bounds can be defined
+  time_var = dget(config, 'variables.time')
+  time_bounds = False
+  if time_var in dataset:
+    time_data = dataset[time_var].values
+    if np.issubdtype(time_data.dtype, np.datetime64):
+      time_bounds = { "min": str(np.datetime_as_string(np.min(time_data))), "max": str(np.datetime_as_string(np.max(time_data))) }
+
   return {
     "id": dataset_id,
     "description": config.get("description", ""),
     "variables": variables,
     "coords": coords,
+    "bounding_box": bounding_box if bounding_box else None,
+    "time_bounds": time_bounds if time_bounds else None,
     "attrs": dataset.attrs
   }
 

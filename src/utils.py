@@ -1,4 +1,4 @@
-import os, json, time
+import os, json, time, copy
 from functools import lru_cache
 
 import s3fs
@@ -60,7 +60,7 @@ def load_dataset(dataset_id):
   datasets = load_datasets()
   if dataset_id not in datasets:
     raise exceptions.DatasetNotFound(dataset_id)
-  config = datasets[dataset_id]
+  config = copy.deepcopy(datasets[dataset_id])
   dataset_path = config.get("path")
   if dataset_path is None:
     raise exceptions.MissingConfigurationElement("path")
@@ -92,7 +92,7 @@ def get_required_dims_and_coords(dataset, config, variables, fixed_coords, fixed
       if coord in dataset:
         for dim in dataset[coord].dims:
           if dim not in optional_dims:
-            optional_dims.append(dim) 
+            optional_dims.append(dim)
 
     for variable in variables if isinstance(variables, list) else [variables]:
       if variable not in dataset:
