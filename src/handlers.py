@@ -55,6 +55,9 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
 
   fixed_coords, fixed_dims = dgets(config, ['variables.fixed', 'dimensions.fixed'], {})
 
+  if variable not in dataset:
+    raise exceptions.VariableNotFound([variable])
+
   lon_var, lat_var = dgets(config, ['variables.lon', 'variables.lat'])
   missing_vars = []
   if has_bb_lon and lon_var is None:
@@ -211,7 +214,14 @@ def probe(dataset, variables, lon, lat, request, height = None, as_dims = []):
   fixed_coords, fixed_dims = dgets(config, ['variables.fixed', 'dimensions.fixed'], {})
 
   lon_var, lat_var, height_var, time_var = dgets(config, ['variables.lon', 'variables.lat', 'variables.height', 'variables.time'])
-  lon_dim, lat_dim, height_dim, time_dim = dgets(config, ['dimensions.lon', 'dimensions.lat', 'dimensions.height', 'dimensions.time'])
+  time_dim = dget(config, 'dimensions.time')
+
+  not_found_vars = []
+  for var in variables:
+    if var not in dataset:
+      not_found_vars.append(var)
+  if len(not_found_vars) > 0:
+    raise exceptions.VariableNotFound(not_found_vars)
 
   missing_vars = []
   if lon_var is None or lon_var not in dataset:
@@ -223,8 +233,8 @@ def probe(dataset, variables, lon, lat, request, height = None, as_dims = []):
   if len(missing_vars) > 0:
     raise exceptions.BadConfigurationVariable(missing_vars)
 
-  longitudes = dataset[lon_var].values
-  latitudes = dataset[lat_var].values
+  longitudes = dataset[lon_var]
+  latitudes = dataset[lat_var]
   if longitudes.ndim == 1 and latitudes.ndim == 1:
     fixed_coords[lon_var] = lon
     fixed_coords[lat_var] = lat
@@ -234,11 +244,11 @@ def probe(dataset, variables, lon, lat, request, height = None, as_dims = []):
       dist = np.sqrt((longitudes - lon)**2 + (latitudes - lat)**2 + (heights - height)**2)
     else:
       dist = np.sqrt((longitudes - lon)**2 + (latitudes - lat)**2)
-    k, j, i = np.unravel_index(np.argmin(dist), dist.shape)
-    fixed_dims[lon_dim] = i
-    fixed_dims[lat_dim] = j
-    if with_height:
-      fixed_dims[height_dim] = k
+    dist_values = dist.values
+    min_idx_flat = np.argmin(dist_values)
+    indices = np.unravel_index(min_idx_flat, dist_values.shape)
+    for dim_name, indice in zip(dist.dims, indices):
+      fixed_dims[dim_name] = indice
 
   # Time is optional, so add to both optional coords and dims, as one or the other may be defined in config
   optional_coords = [time_var] if time_var is not None else []
@@ -268,6 +278,9 @@ def isoline(dataset, variable, levels, request, time = None, as_dims = []):
   dataset, config = load_dataset(dataset)
 
   fixed_coords, fixed_dims = dgets(config, ['variables.fixed', 'dimensions.fixed'], {})
+
+  if variable not in dataset:
+    raise exceptions.VariableNotFound([variable])
 
   lon_var, lat_var = dgets(config, ['variables.lon', 'variables.lat'])
   missing_vars = []

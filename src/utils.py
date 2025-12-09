@@ -84,27 +84,31 @@ def is_monotonic_var(dataset, var_name):
 
 # Get dimensions and coordinates that must be provided for a selection, and not already defined
 def get_required_dims_and_coords(dataset, config, variables, fixed_coords, fixed_dims, request, optional_coords=[], optional_dims=[], as_dims=[]):
-  # Find optional dimensions from optional coordinates
-  for coord in optional_coords if isinstance(optional_coords, list) else [optional_coords]:
-    if coord in dataset:
-      for dim in dataset[coord].dims:
-        if dim not in optional_dims:
-          optional_dims.append(dim) 
-
   needed_dims = {}
-  for variable in variables if isinstance(variables, list) else [variables]:
-    for dim in dataset[variable].dims:
-      if dim not in fixed_dims and dim not in optional_dims:
-        needed = True
-        assigned_coords = []
-        # Find coordinates related to this dimension
-        for coord in dataset.coords:
-          if dim in dataset[coord].dims and coord not in as_dims and coord not in assigned_coords:
-            assigned_coords.append(coord)
-            if coord in fixed_coords or coord in optional_coords:
-              needed = False
-        if needed:
-          needed_dims[dim] = assigned_coords
+
+  if optional_coords != "*" and optional_dims != "*":
+    # Find optional dimensions from optional coordinates
+    for coord in optional_coords if isinstance(optional_coords, list) else [optional_coords]:
+      if coord in dataset:
+        for dim in dataset[coord].dims:
+          if dim not in optional_dims:
+            optional_dims.append(dim) 
+
+    for variable in variables if isinstance(variables, list) else [variables]:
+      if variable not in dataset:
+        continue
+      for dim in dataset[variable].dims:
+        if dim not in fixed_dims and dim not in optional_dims:
+          needed = True
+          assigned_coords = []
+          # Find coordinates related to this dimension
+          for coord in dataset.coords:
+            if dim in dataset[coord].dims and coord not in as_dims and coord not in assigned_coords:
+              assigned_coords.append(coord)
+              if coord in fixed_coords or coord in optional_coords:
+                needed = False
+          if needed:
+            needed_dims[dim] = assigned_coords
 
   # Check if all needed dimensions/coordinates are provided in query params
   missing_dims = {}

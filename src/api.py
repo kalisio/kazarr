@@ -54,7 +54,7 @@ async def custom_swagger_ui_html(request: Request):
   token = request.query_params.get("jwt")
   print("Token received in docs request:", token)
   return get_swagger_ui_html(
-    openapi_url=app.openapi_url + (f"?jwt={token}" if token else ""),
+    openapi_url=app.openapi_url.lstrip("/") + (f"?jwt={token}" if token else ""),
     title=app.title + " - Swagger UI",
     swagger_ui_parameters={"defaultModelsExpandDepth": -1, "persistAuthorization": True}
   )
