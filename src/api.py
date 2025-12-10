@@ -43,6 +43,7 @@ def read_root():
       "/datasets/{dataset}/extract",
       "/datasets/{dataset}/probe",
       "/datasets/{dataset}/isoline",
+      "/datasets/{dataset}/select"
     ]
   }
 
@@ -52,7 +53,6 @@ async def custom_swagger_ui_html(request: Request):
   Handle passing JWT token from query params to Swagger UI for authenticated requests
   """
   token = request.query_params.get("jwt")
-  print("Token received in docs request:", token)
   return get_swagger_ui_html(
     openapi_url=app.openapi_url.lstrip("/") + (f"?jwt={token}" if token else ""),
     title=app.title + " - Swagger UI",

@@ -35,7 +35,7 @@ def dataset_infos(dataset_id):
       "attrs": dataset[coord].attrs
     }
     if len(dataset[coord].dims) == 0:
-      variables[coord]["value"] = dataset[coord].values.item()
+      coords[coord]["value"] = dataset[coord].values.item()
 
   # Check if bounding box can be defined
   lon_var, lat_var, height_var = dgets(config, ['variables.lon', 'variables.lat', 'variables.height'])
