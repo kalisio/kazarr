@@ -22,4 +22,4 @@ RUN micromamba install -y -n base -c conda-forge \
 
 EXPOSE 8000
 
-CMD ["micromamba", "run", "-n", "base", "python", "main.py", "-p", "8000"]
+CMD ["micromamba", "run", "-n", "base", "python", "main.py", "-H", "0.0.0.0", "-p", "8000"]
