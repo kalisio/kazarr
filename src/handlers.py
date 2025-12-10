@@ -60,12 +60,13 @@ def dataset_infos(dataset_id):
   # Check if time bounds can be defined
   time_var = dget(config, 'variables.time')
   time_bounds = False
-  if time_var in dataset and np.issubdtype(dataset[time_var].dtype, np.datetime64):
+  if time_var in dataset and np.issubdtype(dataset[time_var].dtype, np.datetime64) and dataset[time_var].ndim == 1:
     # Warning: we suppose here, that time is ordered (as it will most of the time be the case)
     # dataset[time_var].min()/max() will not work as Dask tries to add values, and its not supported for datetime64
     # np.min()/max() will load all data in memory, which is not optimized
-    t_min = da_time.isel({time_var: 0}).values
-    t_max = da_time.isel({time_var: -1}).values
+    t_dim = dataset[time_var].dims[0]
+    t_min = dataset[time_var].isel({t_dim: 0}).values
+    t_max = dataset[time_var].isel({t_dim: -1}).values
     time_bounds = { "min": str(np.datetime_as_string(t_min)), "max": str(np.datetime_as_string(t_max)) }
 
   return {
