@@ -169,12 +169,12 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
 
   # Apply bounding box and resolution limit
   # Now that values are sliced, with bounding box and resolution limit, we can load them in memory
-  vals = np.ascontiguousarray(vals[row_min:row_max+1:step_row, col_min:col_max+1:step_col].values)
-  lons = np.ascontiguousarray(lons[row_min:row_max+1:step_row, col_min:col_max+1:step_col])
-  lats = np.ascontiguousarray(lats[row_min:row_max+1:step_row, col_min:col_max+1:step_col])
+  vals = vals[row_min:row_max+1:step_row, col_min:col_max+1:step_col].values
+  lons = lons[row_min:row_max+1:step_row, col_min:col_max+1:step_col]
+  lats = lats[row_min:row_max+1:step_row, col_min:col_max+1:step_col]
 
   if has_bb:
-    mask_cropped = np.ascontiguousarray(mask[row_min:row_max+1:step_row, col_min:col_max+1:step_col])
+    mask_cropped = mask[row_min:row_max+1:step_row, col_min:col_max+1:step_col]
   else:
     mask_cropped = None
 
@@ -196,7 +196,7 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
     xi = np.linspace(t_lon_min, t_lon_max, target_w)
     yi = np.linspace(t_lat_min, t_lat_max, target_h)
     
-    xi_mesh, yi_mesh = np.meshgrid(xi, yi)
+    xi_mesh, yi_mesh = np.meshgrid(xi, yi, indexing='ij')
     
     src_lons = lons.ravel()
     src_lats = lats.ravel()
@@ -223,6 +223,21 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
     mask_cropped = np.isfinite(vals)
 
   if as_mesh:
+    if interpolation_shape is None:
+      # use copy to ensure contiguous arrays for pyvista
+      mesh_lons = lons.T.copy()
+      mesh_lats = lats.T.copy()
+      mesh_vals = vals.T.copy()
+      if mask_cropped is not None:
+        mesh_mask = mask_cropped.T.copy()
+      else:
+        mesh_mask = None
+    else:
+      mesh_lons = lons
+      mesh_lats = lats
+      mesh_vals = vals
+      mesh_mask = mask_cropped
+
     # TODO Handle 3D
     z_zeros = np.zeros_like(lons)
     grid = pv.StructuredGrid(lons, lats, z_zeros)
