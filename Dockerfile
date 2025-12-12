@@ -17,6 +17,7 @@ RUN micromamba install -y -n base -c conda-forge \
   s3fs \
   matplotlib \
   pyvista \
+  scipy \
   && micromamba clean --all --yes
 
 EXPOSE 8000

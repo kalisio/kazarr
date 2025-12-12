@@ -116,8 +116,8 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
 
   # Don't use .values (Numpy array) on vals, to avoid loading all data in memory
   vals = sel(dataset, variable, fixed_coords, fixed_dims)
-  lons = sel(dataset, lon_var, fixed_coords, fixed_dims)
-  lats = sel(dataset, lat_var, fixed_coords, fixed_dims)
+  lons = sel(dataset, lon_var, fixed_coords, fixed_dims).values
+  lats = sel(dataset, lat_var, fixed_coords, fixed_dims).values
 
   is_regular_grid = lons.ndim == 1 and lats.ndim == 1
   pad = 2 if interpolation_shape is not None else 0
