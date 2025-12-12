@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
 import pyvista as pv
+from scipy.interpolate import griddata
 
 from src.utils import dget, dgets, sel, load_datasets, load_dataset, save_datasets, get_required_dims_and_coords, is_monotonic_var
 from src import exceptions
@@ -79,7 +80,7 @@ def dataset_infos(dataset_id):
     "attrs": dataset.attrs
   }
 
-def extract(dataset, variable, request, time = None, bounding_box = None, resolution_limit = None, as_mesh = False, as_dims = []):
+def extract(dataset, variable, request, time = None, bounding_box = None, resolution_limit = None, interpolation_shape=None, as_mesh = False, as_dims = []):
   lon_min, lat_min, lon_max, lat_max = (None, None, None, None) if bounding_box is None else bounding_box
   has_bb_lon = lon_min is not None or lon_max is not None
   has_bb_lat = lat_min is not None or lat_max is not None
@@ -113,13 +114,18 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
 
   fixed_coords, fixed_dims = get_required_dims_and_coords(dataset, config, variable, fixed_coords, fixed_dims, request, optional_coords=[lon_var, lat_var], as_dims=as_dims)
 
-  vals = sel(dataset, variable, fixed_coords, fixed_dims).values
-  lons = sel(dataset, lon_var, fixed_coords, fixed_dims).values
-  lats = sel(dataset, lat_var, fixed_coords, fixed_dims).values
+  # Don't use .values (Numpy array) on vals, to avoid loading all data in memory
+  vals = sel(dataset, variable, fixed_coords, fixed_dims)
+  lons = sel(dataset, lon_var, fixed_coords, fixed_dims)
+  lats = sel(dataset, lat_var, fixed_coords, fixed_dims)
+
+  is_regular_grid = lons.ndim == 1 and lats.ndim == 1
+  pad = 2 if interpolation_shape is not None else 0
 
   if lons.ndim == 1 and lats.ndim == 1:
     lons, lats = np.meshgrid(lons, lats)
 
+  # Get rows/cols in bounding box
   if has_bb:
     mask = np.ones(lons.shape, dtype=bool) 
     if has_bb_lon:
@@ -138,8 +144,9 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
     # Crop to bounding box
     # Don't use slice as it will not work with non regular grids
     rows, cols = np.where(mask)
-    row_min, row_max = rows.min(), rows.max()
-    col_min, col_max = cols.min(), cols.max()
+    # Keep some padding to avoid edge effects during interpolation
+    row_min, row_max = max(0, rows.min() - pad), min(lons.shape[0] - 1, rows.max() + pad)
+    col_min, col_max = max(0, cols.min() - pad), min(lons.shape[1] - 1, cols.max() + pad)
 
     height_raw = row_max - row_min + 1
     width_raw = col_max - col_min + 1
@@ -152,6 +159,7 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
     # Not enough data to extract
     raise exceptions.TooFewPoints()
 
+  # Determine step to apply to respect resolution limit
   step_row, step_col = 1, 1
   if resolution_limit is not None:
     if height_raw > resolution_limit:
@@ -159,20 +167,60 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
     if width_raw > resolution_limit:
       step_col = math.ceil(width_raw / resolution_limit)
 
-  vals = vals[row_min:row_max+1:step_row, col_min:col_max+1:step_col]
-  lons = lons[row_min:row_max+1:step_row, col_min:col_max+1:step_col]
-  lats = lats[row_min:row_max+1:step_row, col_min:col_max+1:step_col]
+  # Apply bounding box and resolution limit
+  # Now that values are sliced, with bounding box and resolution limit, we can load them in memory
+  vals = np.ascontiguousarray(vals[row_min:row_max+1:step_row, col_min:col_max+1:step_col].values)
+  lons = np.ascontiguousarray(lons[row_min:row_max+1:step_row, col_min:col_max+1:step_col])
+  lats = np.ascontiguousarray(lats[row_min:row_max+1:step_row, col_min:col_max+1:step_col])
 
   if has_bb:
-    mask_cropped = mask[row_min:row_max+1:step_row, col_min:col_max+1:step_col]
+    mask_cropped = np.ascontiguousarray(mask[row_min:row_max+1:step_row, col_min:col_max+1:step_col])
   else:
     mask_cropped = None
 
   # Convert to float so we can assign NaN
   # Exclude values outside bounding box
   vals = vals.astype(float)
-  if mask_cropped is not None:
+  if mask_cropped is not None and interpolation_shape is None:
     vals[~mask_cropped] = np.nan
+
+  # Interpolate to target shape if needed
+  if interpolation_shape is not None:
+    t_lon_min = lon_min if (bounding_box and lon_min is not None) else lons.min()
+    t_lon_max = lon_max if (bounding_box and lon_max is not None) else lons.max()
+    t_lat_min = lat_min if (bounding_box and lat_min is not None) else lats.min()
+    t_lat_max = lat_max if (bounding_box and lat_max is not None) else lats.max()
+
+    target_h, target_w = interpolation_shape
+
+    xi = np.linspace(t_lon_min, t_lon_max, target_w)
+    yi = np.linspace(t_lat_min, t_lat_max, target_h)
+    
+    xi_mesh, yi_mesh = np.meshgrid(xi, yi)
+    
+    src_lons = lons.ravel()
+    src_lats = lats.ravel()
+    src_vals = vals.ravel()
+    
+    valid_mask = np.isfinite(src_vals)
+    points = np.column_stack((src_lons[valid_mask], src_lats[valid_mask]))
+    values = src_vals[valid_mask]
+
+    if points.shape[0] < 4:
+        raise exceptions.TooFewPoints("Not enough valid points for interpolation")
+
+    try:
+        # method='linear' is fast and precise. 'nearest' does pixel art.
+        interpolated_vals = griddata(points, values, (xi_mesh, yi_mesh), method='linear')
+    except Exception as e:
+        raise exceptions.GenericInternalError(f"Interpolation failed: {str(e)}")
+
+    lons = xi_mesh
+    lats = yi_mesh
+    vals = interpolated_vals
+
+    # Recreate mask_cropped based on NaNs from griddata
+    mask_cropped = np.isfinite(vals)
 
   if as_mesh:
     # TODO Handle 3D
@@ -331,7 +379,7 @@ def isoline(dataset, variable, levels, request, time = None, as_dims = []):
   if len(missing_vars) > 0:
     raise exceptions.BadConfigurationVariable(missing_vars)
 
-  fixed_coords, fixed_dims = get_required_dims_and_coords(dataset, config, variable, fixed_coords, fixed_dims, request, as_dims=as_dims)
+  fixed_coords, fixed_dims = get_required_dims_and_coords(dataset, config, variable, fixed_coords, fixed_dims, request, optional_coords=[lon_var, lat_var], as_dims=as_dims)
 
   lon = sel(dataset, lon_var, fixed_coords, fixed_dims)
   lat = sel(dataset, lat_var, fixed_coords, fixed_dims)

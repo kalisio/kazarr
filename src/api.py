@@ -110,6 +110,7 @@ def extract_data(
   lat_max: float | None = Query(None, description="Maximum latitude of the bounding box"),
   time: str | None = Query(None, description="The time value to extract"),
   resolution_limit: float | None = Query(None, description="The resolution limit for data extraction"),
+  interpolation_grid_size: int | None = Query(None, description="The size of the interpolation grid to use when extracting data"),
   as_mesh: bool = Query(False, description="Whether to return the data as a mesh"),
   as_dims: list[str] = Query([], description="If some variables have the same name as dimensions, will force them to be treated as dimensions")
 ):
@@ -121,6 +122,7 @@ def extract_data(
       time=time,
       bounding_box=(lon_min, lat_min, lon_max, lat_max),
       resolution_limit=resolution_limit,
+      interpolation_shape=(interpolation_grid_size, interpolation_grid_size) if interpolation_grid_size is not None else None,
       as_mesh=as_mesh,
       as_dims=as_dims
     )

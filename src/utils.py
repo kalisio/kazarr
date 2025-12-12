@@ -1,12 +1,35 @@
-import os, json, time, copy
+import os, json, time, copy, logging
 from functools import lru_cache
+import shutil
+from pathlib import Path
 
 import s3fs
 import xarray as xr
 import numpy as np
+import fsspec
 from botocore.exceptions import NoCredentialsError
 
 import src.exceptions as exceptions
+
+class KazarrLoggerHandler(logging.Handler):
+  def __init__(self):
+    super().__init__()
+
+  def emit(self, record):
+    formatted_record = self.format(record)
+    if formatted_record.startswith("CALL: get_object"):
+      try:
+        data = json.loads(formatted_record.split(" - ")[-1].replace("'", '"'))
+        print(f"[Kazarr - S3FS] Try downloading {data.get('Bucket')}/{data.get('Key')}")
+      except Exception as e:
+        pass
+
+def enable_s3fs_debug_logging():
+  handler = KazarrLoggerHandler()
+  handler.setLevel(logging.DEBUG)
+  logger = logging.getLogger("s3fs")
+  logger.setLevel(logging.DEBUG)
+  logger.addHandler(handler)
 
 # Open Zarr dataset as XArray dataset from S3
 @lru_cache(maxsize=5)
@@ -15,14 +38,29 @@ def load(path):
   if bucket is None:
     raise exceptions.GenericInternalError("BUCKET_NAME environment variable not set.")
   try:
-    s3_store = s3fs.S3Map(root=os.path.join(bucket, path.replace('s3://', '')), s3=s3fs.S3FileSystem(anon=False))
+    cache_size = os.getenv("CACHE_SIZE", "512MB")
+    cache_path = os.getenv("CACHE_DIR")
+    use_cache = cache_path is not None and get_cache_size_bytes(cache_size) is not None
+    if not use_cache:
+      store = s3fs.S3Map(root=os.path.join(bucket, path.replace('s3://', '')), s3=s3fs.S3FileSystem(anon=False))
+    else:
+      fs = fsspec.filesystem(
+        "simplecache", 
+        target_protocol='s3',
+        cache_storage=cache_path,
+        target_options={'anon': False},
+        expiry_time=60 * 60 * 24 * 7 * 4 # 4 weeks
+      )
+      store = fs.get_mapper(os.path.join(bucket, path.replace('s3://', '')))
+
     # Will try to open consolidated metadata first (https://docs.xarray.dev/en/latest/generated/xarray.open_zarr.html#xarray.open_zarr)
     # Will try to determine zarr_format (v2 or v3) automatically
     # chunks must be defined to enable dask lazy loading
-    dataset = xr.open_zarr(s3_store, chunks="auto")
+    dataset = xr.open_zarr(store, chunks="auto")
   except NoCredentialsError as e:
     raise exceptions.GenericInternalError("S3 credentials not found.")
   except Exception as e:
+    raise e
     raise exceptions.GenericInternalError("Unable to access S3: " + str(e))
   return dataset
 
@@ -65,6 +103,12 @@ def load_dataset(dataset_id):
   if dataset_path is None:
     raise exceptions.MissingConfigurationElement("path")
   dataset = load(dataset_path)
+  cache_size = os.getenv("CACHE_SIZE", "512MB")
+  cache_path = os.getenv("CACHE_DIR")
+  use_cache = cache_path is not None and get_cache_size_bytes(cache_size) is not None
+  if use_cache:
+    # Enforce cache size limit after loading
+    enforce_cache_limit(cache_path, max_size=cache_size)
   return dataset, config
 
 # Ensure xindex is set for a variable in the dataset
@@ -164,3 +208,57 @@ def dgets(d, keys, default=None):
   for key in keys if isinstance(keys, list) else [keys]:
     values.append(dget(d, key, default=default))
   return tuple(values)
+
+# Convert cache size string (e.g., "1024MB") to bytes
+def get_cache_size_bytes(cache_size_str):
+  size_unit = cache_size_str[-2:].upper()
+  size_value = cache_size_str[:-2]
+  try:
+    size = int(size_value)
+  except ValueError:
+    return None
+  if size_unit == "KB":
+    size_bytes = size * 1024
+  elif size_unit == "MB":
+    size_bytes = size * 1024 * 1024
+  elif size_unit == "GB":
+    size_bytes = size * 1024 * 1024 * 1024
+  else:
+    return None
+  return size_bytes
+
+# Enforce cache size limit by deleting old files
+def enforce_cache_limit(cache_dir, max_size="512MB"):
+  cache_path = Path(cache_dir)
+  if not cache_path.exists():
+    return
+  max_size_bytes = get_cache_size_bytes(max_size)
+  if max_size_bytes is None:
+    return
+  
+  # 1. Compute total cache size
+  total_size = sum(f.stat().st_size for f in cache_path.glob('**/*') if f.is_file())
+  if total_size < max_size_bytes:
+    return
+
+  if os.getenv("DEBUG") == "1":
+    print(f"[Kazarr - Cache] Cache exceeding max size of {max_size_bytes / 1e6:.2f} MB. Starting cleanup...")
+
+  # 2. Retrieve all files with their modification date
+  files = []
+  for f in cache_path.glob('**/*'):
+    if f.is_file():
+      files.append((f, f.stat().st_mtime, f.stat().st_size))
+  
+  # 3. Sort by date (oldest to newest)
+  files.sort(key=lambda x: x[1])
+
+  # 4. Delete old files until under limit
+  for f_path, _, f_size in files:
+    try:
+      os.remove(f_path)
+      total_size -= f_size
+      if total_size < max_size_bytes:
+          break
+    except OSError:
+      pass # File may be in use or already deleted
