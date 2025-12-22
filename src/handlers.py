@@ -223,20 +223,7 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
     mask_cropped = np.isfinite(vals)
 
   if as_mesh:
-    if interpolation_shape is None:
-      # use copy to ensure contiguous arrays for pyvista
-      mesh_lons = lons.T.copy()
-      mesh_lats = lats.T.copy()
-      mesh_vals = vals.T.copy()
-      if mask_cropped is not None:
-        mesh_mask = mask_cropped.T.copy()
-      else:
-        mesh_mask = None
-    else:
-      mesh_lons = lons
-      mesh_lats = lats
-      mesh_vals = vals
-      mesh_mask = mask_cropped
+    vals = vals.T
 
     # TODO Handle 3D
     z_zeros = np.zeros_like(lons)
