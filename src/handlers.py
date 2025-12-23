@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
 import pyvista as pv
-from scipy.interpolate import griddata
+from scipy.interpolate import griddata, RegularGridInterpolator
 
 from src.utils import dget, dgets, sel, load_datasets, load_dataset, save_datasets, get_required_dims_and_coords, is_monotonic_var
 from src import exceptions
@@ -114,46 +114,78 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
 
   fixed_coords, fixed_dims = get_required_dims_and_coords(dataset, config, variable, fixed_coords, fixed_dims, request, optional_coords=[lon_var, lat_var], as_dims=as_dims)
 
-  # Don't use .values (Numpy array) on vals, to avoid loading all data in memory
-  vals = sel(dataset, variable, fixed_coords, fixed_dims)
-  lons = sel(dataset, lon_var, fixed_coords, fixed_dims).values
-  lats = sel(dataset, lat_var, fixed_coords, fixed_dims).values
+  lons = sel(dataset, lon_var, fixed_coords, fixed_dims)
+  lats = sel(dataset, lat_var, fixed_coords, fixed_dims)
 
   is_regular_grid = lons.ndim == 1 and lats.ndim == 1
   pad = 2 if interpolation_shape is not None else 0
 
-  if lons.ndim == 1 and lats.ndim == 1:
-    lons, lats = np.meshgrid(lons, lats)
-
-  # Get rows/cols in bounding box
-  if has_bb:
-    mask = np.ones(lons.shape, dtype=bool) 
+  if is_regular_grid and has_bb:
+    lons_1d = lons.values
+    lats_1d = lats.values
+    # Check if bounding box intersects data
     if has_bb_lon:
-      valid_lon_min = lon_min if lon_min is not None else -np.inf
-      valid_lon_max = lon_max if lon_max is not None else np.inf
-      mask &= (lons >= valid_lon_min) & (lons <= valid_lon_max)
+      lon_min_val, lon_max_val = lons_1d.min(), lons_1d.max()
+      bb_lon_min = lon_min if lon_min is not None else -np.inf
+      bb_lon_max = lon_max if lon_max is not None else np.inf
+      if bb_lon_min > lon_max_val or bb_lon_max < lon_min_val:
+        raise exceptions.NoDataInSelection()
     if has_bb_lat:
-      valid_lat_min = lat_min if lat_min is not None else -np.inf
-      valid_lat_max = lat_max if lat_max is not None else np.inf
-      mask &= (lats >= valid_lat_min) & (lats <= valid_lat_max)
+      lat_min_val, lat_max_val =  lats_1d.min(), lats_1d.max()
+      bb_lat_min = lat_min if lat_min is not None else -np.inf
+      bb_lat_max = lat_max if lat_max is not None else np.inf
+      if bb_lat_min > lat_max_val or bb_lat_max < lat_min_val:
+        raise exceptions.NoDataInSelection()
+      
+    # Get indices in bounding box
+    if has_bb_lon:
+      idx_start = (np.abs(lons_1d - bb_lon_min)).argmin()
+      idx_end = (np.abs(lons_1d - bb_lon_max)).argmin()
+      i_min, i_max = min(idx_start, idx_end), max(idx_start, idx_end)
+    else:
+      i_min, i_max = 0, lons_1d.shape[0] - 1
+    if has_bb_lat:
+      idx_start = (np.abs(lats_1d - bb_lat_min)).argmin()
+      idx_end = (np.abs(lats_1d - bb_lat_max)).argmin()
+      j_min, j_max = min(idx_start, idx_end), max(idx_start, idx_end)
+    else:
+      j_min, j_max = 0, lats_1d.shape[0] - 1
 
-    if not np.any(mask):
-      # No data in bounding box
-      raise exceptions.NoDataInSelection()
-
-    # Crop to bounding box
-    # Don't use slice as it will not work with non regular grids
-    rows, cols = np.where(mask)
     # Keep some padding to avoid edge effects during interpolation
-    row_min, row_max = max(0, rows.min() - pad), min(lons.shape[0] - 1, rows.max() + pad)
-    col_min, col_max = max(0, cols.min() - pad), min(lons.shape[1] - 1, cols.max() + pad)
-
+    col_min = max(0, i_min - pad)
+    col_max = min(lons_1d.shape[0] - 1, i_max + pad)
+    row_min = max(0, j_min - pad)
+    row_max = min(lats_1d.shape[0] - 1, j_max + pad)
+    width_raw = col_max - col_min + 1
+    height_raw = row_max - row_min + 1
+  else:
+    lons_vals = lons.values
+    lats_vals = lats.values
+    if is_regular_grid:
+      lons_vals, lats_vals = np.meshgrid(lons_vals, lats_vals)
+    
+    if has_bb:
+      mask = np.ones(lons_vals.shape, dtype=bool)
+      if has_bb_lon:
+        bb_lon_min = lon_min if lon_min is not None else -np.inf
+        bb_lon_max = lon_max if lon_max is not None else np.inf
+        mask &= (lons_vals >= bb_lon_min) & (lons_vals <= bb_lon_max)
+      if has_bb_lat:
+        bb_lat_min = lat_min if lat_min is not None else -np.inf
+        bb_lat_max = lat_max if lat_max is not None else np.inf
+        mask &= (lats_vals >= bb_lat_min) & (lats_vals <= bb_lat_max)
+      
+      if not np.any(mask):
+        raise exceptions.NoDataInSelection()
+      
+      rows, cols = np.where(mask)
+      row_min, row_max = max(0, rows.min() - pad), min(lons_vals.shape[0] - 1, rows.max() + pad)
+      col_min, col_max = max(0, cols.min() - pad), min(lons_vals.shape[1] - 1, cols.max() + pad)
+    else:
+      row_min, row_max = 0, lons_vals.shape[0] - 1
+      col_min, col_max = 0, lons_vals.shape[1] - 1
     height_raw = row_max - row_min + 1
     width_raw = col_max - col_min + 1
-  else:
-    row_min, row_max = 0, lons.shape[0] - 1
-    col_min, col_max = 0, lons.shape[1] - 1
-    height_raw, width_raw = lons.shape
 
   if height_raw < 2 or width_raw < 2:
     # Not enough data to extract
@@ -167,22 +199,39 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
     if width_raw > resolution_limit:
       step_col = math.ceil(width_raw / resolution_limit)
 
+  # Load values
   # Apply bounding box and resolution limit
   # Now that values are sliced, with bounding box and resolution limit, we can load them in memory
+  vals = sel(dataset, variable, fixed_coords, fixed_dims)
   vals = vals[row_min:row_max+1:step_row, col_min:col_max+1:step_col].values
-  lons = lons[row_min:row_max+1:step_row, col_min:col_max+1:step_col]
-  lats = lats[row_min:row_max+1:step_row, col_min:col_max+1:step_col]
+  # Convert to float so we can assign NaN
+  vals = vals.astype(float)
+
+  lons_1d, lats_1d = None, None
+  if is_regular_grid:
+    lons_1d = lons[col_min:col_max+1:step_col]
+    lats_1d = lats[row_min:row_max+1:step_row]
+    lons, lats = np.meshgrid(lons_1d, lats_1d)
+  else:
+    lons = lons_vals[row_min:row_max+1:step_row, col_min:col_max+1:step_col]
+    lats = lats_vals[row_min:row_max+1:step_row, col_min:col_max+1:step_col]
 
   if has_bb:
-    mask_cropped = mask[row_min:row_max+1:step_row, col_min:col_max+1:step_col]
+    mask_cropped = np.ones(lons.shape, dtype=bool)
+    if has_bb_lon:
+      bb_lon_min = lon_min if lon_min is not None else -np.inf
+      bb_lon_max = lon_max if lon_max is not None else np.inf
+      mask_cropped &= (lons >= bb_lon_min) & (lons <= bb_lon_max)
+    if has_bb_lat:
+      bb_lat_min = lat_min if lat_min is not None else -np.inf
+      bb_lat_max = lat_max if lat_max is not None else np.inf
+      mask_cropped &= (lats >= bb_lat_min) & (lats <= bb_lat_max)
+
+    if interpolation_shape is None:
+      # Set values outside bounding box to NaN
+      vals[~mask_cropped] = np.nan
   else:
     mask_cropped = None
-
-  # Convert to float so we can assign NaN
-  # Exclude values outside bounding box
-  vals = vals.astype(float)
-  if mask_cropped is not None and interpolation_shape is None:
-    vals[~mask_cropped] = np.nan
 
   # Interpolate to target shape if needed
   if interpolation_shape is not None:
@@ -197,32 +246,36 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
     yi = np.linspace(t_lat_min, t_lat_max, target_h)
     
     xi_mesh, yi_mesh = np.meshgrid(xi, yi, indexing='ij')
-    
-    src_lons = lons.ravel()
-    src_lats = lats.ravel()
-    src_vals = vals.ravel()
-    
-    valid_mask = np.isfinite(src_vals)
-    points = np.column_stack((src_lons[valid_mask], src_lats[valid_mask]))
-    values = src_vals[valid_mask]
 
-    if points.shape[0] < 4:
+    if is_regular_grid and lons_1d is not None:
+      # Use RegularGridInterpolator for better performance on regular grids
+      try:
+        rgi = RegularGridInterpolator((lats_1d, lons_1d), vals, bounds_error=False, fill_value=np.nan)
+        pts = np.stack([yi_mesh.ravel(), xi_mesh.ravel()], axis=-1)
+        interpolated_vals = rgi(pts).reshape(xi_mesh.shape)
+      except Exception as e:
+        raise exceptions.GenericInternalError(f"Interpolation failed: {str(e)}")
+    else:
+      # Use griddata for non regular grids (slower)
+      valid_mask = np.isfinite(vals)
+      points = np.column_stack((lons[valid_mask], lats[valid_mask]))
+      values = vals[valid_mask]
+
+      if points.shape[0] < 4:
         raise exceptions.TooFewPoints("Not enough valid points for interpolation")
-
-    try:
+      
+      try:
         # method='linear' is fast and precise. 'nearest' does pixel art.
         interpolated_vals = griddata(points, values, (xi_mesh, yi_mesh), method='linear')
-    except Exception as e:
+      except Exception as e:
         raise exceptions.GenericInternalError(f"Interpolation failed: {str(e)}")
 
-    lons = xi_mesh
-    lats = yi_mesh
-    vals = interpolated_vals
-
+    lons, lats, vals = xi_mesh, yi_mesh, interpolated_vals
     # Recreate mask_cropped based on NaNs from griddata
     mask_cropped = np.isfinite(vals)
 
   if as_mesh:
+    # Transpose for pyvista (masked_cropped should also be transposed)
     vals = vals.T
 
     # TODO Handle 3D
@@ -231,7 +284,7 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
     grid.point_data[variable] = vals.ravel()
     if mask_cropped is not None:
       # Create a valid mask for thresholding (bool to float)
-      grid.point_data["valid_mask"] = mask_cropped.ravel().astype(float)
+      grid.point_data["valid_mask"] = mask_cropped.T.ravel().astype(float)
       # Set NaN values to 0 in valid_mask
       grid.point_data["valid_mask"][np.isnan(vals.ravel())] = 0
       try:
@@ -250,6 +303,7 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
     # we need to reshape and skip first values
     indices = tri_grid.cells.reshape((-1, 4))[:, 1:].flatten()
     values = tri_grid.point_data[variable]
+    # This line is slow but as NaN are not supported in JSON, we need to convert them to None (null in JSON)
     clean_values = [v if np.isfinite(v) else None for v in values]
 
     # As bounding can

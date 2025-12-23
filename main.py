@@ -1,4 +1,4 @@
-import os, argparse, logging
+import os, argparse
 
 import src.api as api
 from src.utils import enable_s3fs_debug_logging
