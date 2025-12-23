@@ -4,7 +4,7 @@ set -euo pipefail
 
 THIS_FILE=$(readlink -f "${BASH_SOURCE[0]}")
 THIS_DIR=$(dirname "$THIS_FILE")
-ROOT_DIR=$(dirname "$THIS_DIR")/../conversion_tool
+ROOT_DIR=$(dirname "$THIS_DIR")/conversion_tool
 WORKSPACE_DIR="$(dirname "$ROOT_DIR")"
 
 . "$THIS_DIR/kash/kash.sh"
