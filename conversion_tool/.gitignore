@@ -1,0 +1,11 @@
+# IDE
+.vscode
+
+# Git
+.git
+
+# Python
+__pycache__
+build
+dist
+*.spec

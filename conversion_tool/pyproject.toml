@@ -1,0 +1,4 @@
+[project]
+name = "kazarr-conversion-tool"
+version = "0.1.0"
+description = "A tool to convert various data formats to Zarr datasets compatible with the kazarr service"

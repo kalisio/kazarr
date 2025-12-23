@@ -15,6 +15,10 @@ init_github_build_service() {
     install_reqs age sops
 }
 
+init_github_build_conversion_tool() {
+    install_reqs age sops
+}
+
 begin_group "Init $CI_ID for $JOB_ID"
 
 init_"${CI_ID}_${JOB_ID}"
