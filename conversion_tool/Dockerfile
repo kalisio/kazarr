@@ -1,11 +1,14 @@
 FROM python:3.11-bookworm
+LABEL maintainer="<contact@kalisio.xyz>"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
   gcc \
   libc6-dev \
   && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
+ENV HOME=/app
+COPY . ${HOME}
+WORKDIR ${HOME}
 
 RUN pip install \
   python-dotenv \
@@ -21,6 +24,4 @@ RUN pip install \
   pyvista \
   pyinstaller
 
-COPY . .
-
-RUN pyinstaller -F main.py
+RUN pyinstaller -F -n conversion_tool main.py
