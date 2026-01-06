@@ -1,10 +1,10 @@
 import json, argparse
 
 import src.pipelines as pipelines
-from src.utils import load_datasets, load_dataset_config, merge
+from src.utils import load_json, load_dataset_config, merge
 
 def list_datasets(datasets_path="datasets.json"):
-  datasets = load_datasets(datasets_path)
+  datasets = load_json(datasets_path)
 
   print("Available datasets:")
   for dataset in datasets.keys():
@@ -37,11 +37,11 @@ def new_dataset(
 ):
   pipeline_config = {}
   if template is not None:
-    templates = load_datasets(templates_path)
+    templates = load_json(templates_path)
     if template in templates:
       pipeline_config = merge(templates[template], config)
   if config_file is not None:
-    config_file_content = load_datasets(config_file)
+    config_file_content = load_json(config_file)
     pipeline_config = merge(pipeline_config, config_file_content)
   pipeline_config = merge(pipeline_config, {
     "name": dataset_name,
@@ -55,7 +55,7 @@ def new_dataset(
   dataset, config = pipelines.pipeline(pipeline_config, pipeline_name)
 
 def list_templates(templates_path="templates.json"):
-  templates = load_datasets(templates_path)
+  templates = load_json(templates_path)
 
   print("Available templates:")
   for template in templates.keys():

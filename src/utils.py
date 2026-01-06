@@ -31,6 +31,9 @@ def enable_s3fs_debug_logging():
   logger.setLevel(logging.DEBUG)
   logger.addHandler(handler)
 
+def get_datasets_path():
+  return os.getenv("DATASETS_PATH", "datasets.json")
+
 # Open Zarr dataset as XArray dataset from S3
 @lru_cache(maxsize=5)
 def load(path):
@@ -64,9 +67,8 @@ def load(path):
     raise exceptions.GenericInternalError("Unable to access S3: " + str(e))
   return dataset
 
-# Load datasets config file from S3
-@lru_cache(maxsize=1)
-def load_datasets(path = "datasets.json"):
+# Load JSON file from S3
+def load_json(path):
   s3_store = s3fs.S3FileSystem(anon=False)
   bucket = os.getenv("BUCKET_NAME")
   if bucket is None:
@@ -80,13 +82,17 @@ def load_datasets(path = "datasets.json"):
     raise exceptions.GenericInternalError("Unable to access S3: " + str(e))
   return datasets
 
-def save_datasets(datasets, path = "datasets.json"):
+@lru_cache(maxsize=1)
+def load_datasets():
+  return load_json(get_datasets_path())
+
+def save_datasets(datasets):
   s3_store = s3fs.S3FileSystem(anon=False)
   bucket = os.getenv("BUCKET_NAME")
   if bucket is None:
     raise exceptions.GenericInternalError("BUCKET_NAME environment variable not set.")
   try:
-    with s3_store.open(os.path.join(bucket, path), 'w') as f:
+    with s3_store.open(os.path.join(bucket, get_datasets_path()), 'w') as f:
       json.dump(datasets, f, indent=2)
   except NoCredentialsError as e:
     raise exceptions.GenericInternalError("S3 credentials not found.")

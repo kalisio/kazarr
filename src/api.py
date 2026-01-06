@@ -4,7 +4,6 @@ from fastapi import FastAPI, Path, Query, Request, HTTPException
 from fastapi.openapi.docs import get_swagger_ui_html
 from pydantic import BaseModel
 
-import src.utils as utils
 import src.handlers as handlers
 import src.exceptions as exceptions
 
@@ -110,8 +109,8 @@ def extract_data(
   lat_max: float | None = Query(None, description="Maximum latitude of the bounding box"),
   time: str | None = Query(None, description="The time value to extract"),
   resolution_limit: float | None = Query(None, description="The resolution limit for data extraction"),
-  interpolation_grid_size: int | None = Query(None, description="The size of the interpolation grid to use when extracting data"),
-  as_mesh: bool = Query(False, description="Whether to return the data as a mesh"),
+  mesh_tile_size: int | None = Query(None, description="The size of the mesh tile to use when extracting data"),
+  mesh_interpolate: bool = Query(False, description="Whether to interpolate the mesh"),
   as_dims: list[str] = Query([], description="If some variables have the same name as dimensions, will force them to be treated as dimensions")
 ):
   try:
@@ -122,8 +121,8 @@ def extract_data(
       time=time,
       bounding_box=(lon_min, lat_min, lon_max, lat_max),
       resolution_limit=resolution_limit,
-      interpolation_shape=(interpolation_grid_size, interpolation_grid_size) if interpolation_grid_size is not None else None,
-      as_mesh=as_mesh,
+      mesh_tile_shape=(mesh_tile_size, mesh_tile_size) if mesh_tile_size is not None else None,
+      mesh_interpolate=mesh_interpolate,
       as_dims=as_dims
     )
   except exceptions.GenericInternalError as e:

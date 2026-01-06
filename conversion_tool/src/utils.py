@@ -3,8 +3,8 @@ import os, time, json
 import s3fs
 from botocore.exceptions import NoCredentialsError
 
-# Load datasets config file
-def load_datasets(path="datasets.json"):
+# Load JSON file
+def load_json(path="datasets.json"):
   if path.startswith("s3://"):
     path = path[5:]
     s3_store = s3fs.S3FileSystem(anon=False)
@@ -26,15 +26,16 @@ def load_datasets(path="datasets.json"):
       raise ValueError("Unable to access local file: " + str(e))
   return datasets
 
-def load_dataset_config(dataset_name, datasets_path="datasets.json"):
-  datasets = load_datasets(datasets_path)
+# Load dataset configuration by name
+def load_dataset_config(dataset_name, datasets_path="datasets.json", template_path="templates.json"):
+  datasets = load_json(datasets_path)
 
   if dataset_name not in datasets:
     raise ValueError(f"Dataset {dataset_name} not found.")
 
   template = datasets[dataset_name].get("template")
   if template:
-    templates = load_datasets("templates.json")
+    templates = load_json(template_path)
     if template in templates:
       datasets[dataset_name] = merge(templates[template], datasets[dataset_name])
   return datasets[dataset_name]
@@ -73,7 +74,7 @@ def dget(d, key, default=None):
       return default.copy() if isinstance(default, dict) else default
   return d
 
-# Get value from dict with camelCase or snake_case key
+# Get value (case insensitive) from dict with camelCase or snake_case key
 def get_ci(d, key, default=None, message=None):
   value = dget(d, key)
   if value is not None:

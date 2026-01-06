@@ -35,7 +35,7 @@ def pipeline(config, name, dataset=None):
       print_duration(process_start_time, f"Completed process \"{process_name}\"")
     except AttributeError as e:
       try:
-        target_process = getattr(proc, utils.camel_to_snake(process_name))
+        target_process = getattr(proc, camel_to_snake(process_name))
         dataset, config = target_process(dataset, {**config, **process_params})
         print_duration(process_start_time, f"")
       except Exception as e2:

@@ -80,7 +80,7 @@ def dataset_infos(dataset_id):
     "attrs": dataset.attrs
   }
 
-def extract(dataset, variable, request, time = None, bounding_box = None, resolution_limit = None, interpolation_shape=None, as_mesh = False, as_dims = []):
+def extract(dataset, variable, request, time = None, bounding_box = None, resolution_limit = None, mesh_tile_shape = None, mesh_interpolate = False, as_dims = []):
   lon_min, lat_min, lon_max, lat_max = (None, None, None, None) if bounding_box is None else bounding_box
   has_bb_lon = lon_min is not None or lon_max is not None
   has_bb_lat = lat_min is not None or lat_max is not None
@@ -118,7 +118,7 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
   lats = sel(dataset, lat_var, fixed_coords, fixed_dims)
 
   is_regular_grid = lons.ndim == 1 and lats.ndim == 1
-  pad = 2 if interpolation_shape is not None else 0
+  pad = 2 if mesh_tile_shape is not None else 0
 
   if is_regular_grid and has_bb:
     lons_1d = lons.values
@@ -176,11 +176,27 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
         mask &= (lats_vals >= bb_lat_min) & (lats_vals <= bb_lat_max)
       
       if not np.any(mask):
-        raise exceptions.NoDataInSelection()
-      
-      rows, cols = np.where(mask)
-      row_min, row_max = max(0, rows.min() - pad), min(lons_vals.shape[0] - 1, rows.max() + pad)
-      col_min, col_max = max(0, cols.min() - pad), min(lons_vals.shape[1] - 1, cols.max() + pad)
+        # Case where bounding box is smaller than grid mesh
+        
+        # Compute center of bounding box
+        center_lon = (bb_lon_min + bb_lon_max) / 2.0
+        center_lat = (bb_lat_min + bb_lat_max) / 2.0
+        
+        # Find index (i, j) of nearest point (squared Euclidean distance)
+        dist = (lons_vals - center_lon)**2 + (lats_vals - center_lat)**2
+        nearest_idx = np.argmin(dist)
+        nearest_row, nearest_col = np.unravel_index(nearest_idx, lons_vals.shape)
+        
+        fallback_pad = max(pad, 1)
+        
+        row_min = max(0, nearest_row - fallback_pad)
+        row_max = min(lons_vals.shape[0] - 1, nearest_row + fallback_pad)
+        col_min = max(0, nearest_col - fallback_pad)
+        col_max = min(lons_vals.shape[1] - 1, nearest_col + fallback_pad)
+      else:
+        rows, cols = np.where(mask)
+        row_min, row_max = max(0, rows.min() - pad), min(lons_vals.shape[0] - 1, rows.max() + pad)
+        col_min, col_max = max(0, cols.min() - pad), min(lons_vals.shape[1] - 1, cols.max() + pad)
     else:
       row_min, row_max = 0, lons_vals.shape[0] - 1
       col_min, col_max = 0, lons_vals.shape[1] - 1
@@ -227,20 +243,21 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
       bb_lat_max = lat_max if lat_max is not None else np.inf
       mask_cropped &= (lats >= bb_lat_min) & (lats <= bb_lat_max)
 
-    if interpolation_shape is None:
+    if mesh_tile_shape is None:
       # Set values outside bounding box to NaN
       vals[~mask_cropped] = np.nan
   else:
     mask_cropped = None
 
   # Interpolate to target shape if needed
-  if interpolation_shape is not None:
+  if mesh_tile_shape is not None:
     t_lon_min = lon_min if (bounding_box and lon_min is not None) else lons.min()
     t_lon_max = lon_max if (bounding_box and lon_max is not None) else lons.max()
     t_lat_min = lat_min if (bounding_box and lat_min is not None) else lats.min()
     t_lat_max = lat_max if (bounding_box and lat_max is not None) else lats.max()
 
-    target_h, target_w = interpolation_shape
+    target_h, target_w = mesh_tile_shape
+    interpolation_method = "linear" if mesh_interpolate else "nearest"
 
     xi = np.linspace(t_lon_min, t_lon_max, target_w)
     yi = np.linspace(t_lat_min, t_lat_max, target_h)
@@ -250,7 +267,7 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
     if is_regular_grid and lons_1d is not None:
       # Use RegularGridInterpolator for better performance on regular grids
       try:
-        rgi = RegularGridInterpolator((lats_1d, lons_1d), vals, bounds_error=False, fill_value=np.nan)
+        rgi = RegularGridInterpolator((lats_1d, lons_1d), vals, bounds_error=False, method=interpolation_method, fill_value=np.nan)
         pts = np.stack([yi_mesh.ravel(), xi_mesh.ravel()], axis=-1)
         interpolated_vals = rgi(pts).reshape(xi_mesh.shape)
       except Exception as e:
@@ -266,7 +283,7 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
       
       try:
         # method='linear' is fast and precise. 'nearest' does pixel art.
-        interpolated_vals = griddata(points, values, (xi_mesh, yi_mesh), method='linear')
+        interpolated_vals = griddata(points, values, (xi_mesh, yi_mesh), method=interpolation_method)
       except Exception as e:
         raise exceptions.GenericInternalError(f"Interpolation failed: {str(e)}")
 
@@ -274,7 +291,7 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
     # Recreate mask_cropped based on NaNs from griddata
     mask_cropped = np.isfinite(vals)
 
-  if as_mesh:
+  if mesh_tile_shape is not None:
     # Transpose for pyvista (masked_cropped should also be transposed)
     vals = vals.T
 
@@ -458,7 +475,6 @@ def free_selection(dataset, variable, request, as_dims = []):
   if variable not in dataset:
     raise exceptions.VariableNotFound([variable])
 
-  # TODO Even remove fixed vars/dims ?
   fixed_coords, fixed_dims = dgets(config, ['variables.fixed', 'dimensions.fixed'], {})
   fixed_coords, fixed_dims = get_required_dims_and_coords(dataset, config, variable, fixed_coords, fixed_dims, request, optional_dims="*", as_dims=as_dims)
 
