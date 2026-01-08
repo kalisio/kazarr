@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
 import pyvista as pv
-from scipy.interpolate import griddata, RegularGridInterpolator
+from scipy.interpolate import griddata, RegularGridInterpolator, NearestNDInterpolator
 
 from src.utils import dget, dgets, sel, load_datasets, load_dataset, save_datasets, get_required_dims_and_coords, is_monotonic_var
 from src import exceptions
@@ -117,10 +117,34 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
   lons = sel(dataset, lon_var, fixed_coords, fixed_dims)
   lats = sel(dataset, lat_var, fixed_coords, fixed_dims)
 
-  is_regular_grid = lons.ndim == 1 and lats.ndim == 1
+  is_regular_grid = lons.ndim == 1 and lats.ndim == 1 and lons.dims != lats.dims
+  is_point_list = lons.ndim == 1 and lats.ndim == 1 and lons.dims == lats.dims
+  print(is_point_list, lons.dims, lats.dims)
   pad = 2 if mesh_tile_shape is not None else 0
 
-  if is_regular_grid and has_bb:
+  if is_point_list:
+    lons_vals = lons.values
+    lats_vals = lats.values
+
+    mask = np.ones(lons_vals.shape, dtype=bool)
+    if has_bb_lon:
+      bb_lon_min = lon_min if lon_min is not None else -np.inf
+      bb_lon_max = lon_max if lon_max is not None else np.inf
+      mask &= (lons_vals >= bb_lon_min) & (lons_vals <= bb_lon_max)
+    if has_bb_lat:
+      bb_lat_min = lat_min if lat_min is not None else -np.inf
+      bb_lat_max = lat_max if lat_max is not None else np.inf
+      mask &= (lats_vals >= bb_lat_min) & (lats_vals <= bb_lat_max)
+
+    point_indices = np.where(mask)[0]
+    
+    n_points = len(point_indices)
+    if n_points == 0:
+      raise exceptions.NoDataInSelection()
+
+    height_raw, width_raw = n_points, 1
+
+  elif is_regular_grid and has_bb:
     lons_1d = lons.values
     lats_1d = lats.values
     # Check if bounding box intersects data
@@ -203,28 +227,38 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
     height_raw = row_max - row_min + 1
     width_raw = col_max - col_min + 1
 
-  if height_raw < 2 or width_raw < 2:
+  if not is_point_list and (height_raw < 2 or width_raw < 2):
     # Not enough data to extract
     raise exceptions.TooFewPoints()
 
   # Determine step to apply to respect resolution limit
   step_row, step_col = 1, 1
   if resolution_limit is not None:
-    if height_raw > resolution_limit:
-      step_row = math.ceil(height_raw / resolution_limit)
-    if width_raw > resolution_limit:
-      step_col = math.ceil(width_raw / resolution_limit)
+    if is_point_list and n_points > resolution_limit:
+      step_row = math.ceil(n_points / resolution_limit)
+      point_indices = point_indices[::step_row]
+    else:
+      if height_raw > resolution_limit:
+        step_row = math.ceil(height_raw / resolution_limit)
+      if width_raw > resolution_limit:
+        step_col = math.ceil(width_raw / resolution_limit)
 
   # Load values
   # Apply bounding box and resolution limit
   # Now that values are sliced, with bounding box and resolution limit, we can load them in memory
-  vals = sel(dataset, variable, fixed_coords, fixed_dims)
-  vals = vals[row_min:row_max+1:step_row, col_min:col_max+1:step_col].values
+  vals_da = sel(dataset, variable, fixed_coords, fixed_dims)
+  if is_point_list:
+    vals = vals_da.values[point_indices]
+  else:
+    vals = vals_da[row_min:row_max+1:step_row, col_min:col_max+1:step_col].values
   # Convert to float so we can assign NaN
   vals = vals.astype(float)
 
   lons_1d, lats_1d = None, None
-  if is_regular_grid:
+  if is_point_list:
+    lons = lons_vals[point_indices]
+    lats = lats_vals[point_indices]
+  elif is_regular_grid:
     lons_1d = lons[col_min:col_max+1:step_col]
     lats_1d = lats[row_min:row_max+1:step_row]
     lons, lats = np.meshgrid(lons_1d, lats_1d)
@@ -264,7 +298,7 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
     
     xi_mesh, yi_mesh = np.meshgrid(xi, yi, indexing='ij')
 
-    if is_regular_grid and lons_1d is not None:
+    if is_regular_grid and lons_1d is not None and not is_point_list:
       # Use RegularGridInterpolator for better performance on regular grids
       try:
         rgi = RegularGridInterpolator((lats_1d, lons_1d), vals, bounds_error=False, method=interpolation_method, fill_value=np.nan)
@@ -273,10 +307,14 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
       except Exception as e:
         raise exceptions.GenericInternalError(f"Interpolation failed: {str(e)}")
     else:
+      lons_flat = lons.ravel()
+      lats_flat = lats.ravel()
+      vals_flat = vals.ravel()
+      
       # Use griddata for non regular grids (slower)
-      valid_mask = np.isfinite(vals)
-      points = np.column_stack((lons[valid_mask], lats[valid_mask]))
-      values = vals[valid_mask]
+      valid_mask = np.isfinite(vals_flat)
+      points = np.column_stack((lons_flat[valid_mask], lats_flat[valid_mask]))
+      values = vals_flat[valid_mask]
 
       if points.shape[0] < 4:
         raise exceptions.TooFewPoints("Not enough valid points for interpolation")
@@ -284,6 +322,13 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
       try:
         # method='linear' is fast and precise. 'nearest' does pixel art.
         interpolated_vals = griddata(points, values, (xi_mesh, yi_mesh), method=interpolation_method)
+
+        # If missing values after linear interpolation, fill with nearest neighbor
+        # if np.any(np.isnan(interpolated_vals)):
+        #   mask_nan = np.isnan(interpolated_vals)
+        #   nn_interp = NearestNDInterpolator(points, values)
+        #   points_missing = np.column_stack((xi_mesh[mask_nan], yi_mesh[mask_nan]))
+        #   interpolated_vals[mask_nan] = nn_interp(points_missing)
       except Exception as e:
         raise exceptions.GenericInternalError(f"Interpolation failed: {str(e)}")
 

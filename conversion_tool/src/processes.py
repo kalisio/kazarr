@@ -244,6 +244,8 @@ def delta_time_to_datetime(dataset, config):
   time_var = get_ci(config, 'variables.time', message="Missing 'variables.time' config parameter for delta_time_to_datetime process.")
   
   time_dim = get_ci(config, 'dimensions.time')
+  
+  update_time_var = get_ci(config, 'updateTimeVar', default=True)
 
   units = {
     'years': 'Y', 'year': 'Y',
@@ -274,9 +276,12 @@ def delta_time_to_datetime(dataset, config):
   time_deltas = dataset[time_var].values
   time_values = np.array([np.datetime64(time_ref) + np.timedelta64(int(td), delta_unit) for td in time_deltas])
   if time_dim is not None:
-    dataset = dataset.assign_coords({"datetimes": time_values})
+    dataset = dataset.assign_coords(datetimes=(time_dim, time_values))
   else:
     dataset["datetimes"] = (dataset[time_var].dims, time_values)
+
+  if update_time_var:
+    config['variables']['time'] = 'datetimes'  # Update config to use new datetime variable
 
   return dataset, config
 

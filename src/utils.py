@@ -63,7 +63,6 @@ def load(path):
   except NoCredentialsError as e:
     raise exceptions.GenericInternalError("S3 credentials not found.")
   except Exception as e:
-    raise e
     raise exceptions.GenericInternalError("Unable to access S3: " + str(e))
   return dataset
 
