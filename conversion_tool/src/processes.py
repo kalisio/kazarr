@@ -343,6 +343,27 @@ def save(dataset, config):
       raise ValueError("BUCKET_NAME environment variable not set.")
     final_path = path.replace("s3://", "s3://" + bucket + "/")
 
+  # if os.getenv("AWS_ENDPOINT_URL", "").endswith("cloud.ovh.net"):
+  #   # Special case for OVH S3 to disable payload signing
+  #   # (error: botocore.exceptions.ClientError: An error occurred (InvalidArgument) when calling the PutObject operation: x-amz-content-sha256 must be UNSIGNED-PAYLOAD, or a valid sha256 value.)
+  #   # Either define the environment variables (only the first one seems necessary)
+  #   os.environ["AWS_REQUEST_CHECKSUM_CALCULATION"] = "when_required"
+  #   os.environ["AWS_RESPONSE_CHECKSUM_VALIDATION"] = "when_required"
+  #   # Either create a custom s3fs S3FileSystem with config kwargs
+  #   fs = s3fs.S3FileSystem(
+  #     config_kwargs={
+  #       'signature_version': 's3v4',
+  #       's3': {
+  #         'payload_signing_enabled': False,
+  #         'addressing_style': 'path',
+  #       },
+  #       'request_checksum_calculation': 'when_required',
+  #       'response_checksum_validation': 'when_required',
+  #     }
+  #   )
+  #   store = fs.get_mapper(final_path)
+  #   dataset.to_zarr(store=store, mode="w", consolidated=(version == 2), zarr_format=version)
+  # else:
   dataset.to_zarr(final_path, mode="w", consolidated=(version==2), zarr_format=version)
   return dataset, config
 

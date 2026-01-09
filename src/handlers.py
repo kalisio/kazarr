@@ -80,7 +80,7 @@ def dataset_infos(dataset_id):
     "attrs": dataset.attrs
   }
 
-def extract(dataset, variable, request, time = None, bounding_box = None, resolution_limit = None, mesh_tile_shape = None, mesh_interpolate = False, as_dims = []):
+def extract(dataset, variable, request, time = None, bounding_box = None, resolution_limit = None, format = "raw", mesh_tile_shape = None, mesh_interpolate = False, as_dims = []):
   lon_min, lat_min, lon_max, lat_max = (None, None, None, None) if bounding_box is None else bounding_box
   has_bb_lon = lon_min is not None or lon_max is not None
   has_bb_lat = lat_min is not None or lat_max is not None
@@ -119,7 +119,6 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
 
   is_regular_grid = lons.ndim == 1 and lats.ndim == 1 and lons.dims != lats.dims
   is_point_list = lons.ndim == 1 and lats.ndim == 1 and lons.dims == lats.dims
-  print(is_point_list, lons.dims, lats.dims)
   pad = 2 if mesh_tile_shape is not None else 0
 
   if is_point_list:
@@ -391,19 +390,43 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
     if valid_vals.size == 0:
       raise exceptions.NoDataInSelection()
 
-    return {
-      "shape": vals.shape,
-      "bounds": {
-        "min": np.min(valid_vals).item(),
-        "max": np.max(valid_vals).item()
-      },
-      "resolution_factor": { "row": step_row, "col": step_col },
-      "data": {
-        "longitudes": flat_lons.tolist(),
-        "latitudes": flat_lats.tolist(),
-        "values": [None if np.isnan(v) else v.item() for v in flat_vals]
+    if format == "raw":
+      return {
+        "shape": vals.shape,
+        "bounds": {
+          "min": np.min(valid_vals).item(),
+          "max": np.max(valid_vals).item()
+        },
+        "resolution_factor": { "row": step_row, "col": step_col },
+        "data": {
+          "longitudes": flat_lons.tolist(),
+          "latitudes": flat_lats.tolist(),
+          "values": [None if np.isnan(v) else v.item() for v in flat_vals]
+        }
       }
-    }
+    elif format == "geojson":
+      features = []
+      for i in range(flat_vals.shape[0]):
+        if not np.isnan(flat_vals[i]):
+          features.append({
+            "type": "Feature",
+            "geometry": {
+              "type": "Point",
+              "coordinates": [float(flat_lons[i]), float(flat_lats[i])]
+            },
+            "properties": {
+              "value": float(flat_vals[i])
+            }
+          })
+      return {
+        "type": "FeatureCollection",
+        "bounds": {
+          "min": np.min(valid_vals).item(),
+          "max": np.max(valid_vals).item()
+        },
+        "resolution_factor": { "row": step_row, "col": step_col },
+        "features": features
+      }
 
 def probe(dataset, variables, lon, lat, request, height = None, as_dims = []):
   variables = variables if isinstance(variables, list) else [variables]
@@ -474,7 +497,7 @@ def probe(dataset, variables, lon, lat, request, height = None, as_dims = []):
     out["times"] = times
   return out
 
-def isoline(dataset, variable, levels, request, time = None, as_dims = []):
+def isoline(dataset, variable, levels, request, time = None, format = "raw", as_dims = []):
   dataset, config = load_dataset(dataset)
 
   fixed_coords, fixed_dims = dgets(config, ['variables.fixed', 'dimensions.fixed'], {})
@@ -508,11 +531,29 @@ def isoline(dataset, variable, levels, request, time = None, as_dims = []):
   for paths in contours.get_paths():
     isolines.append(paths.vertices.tolist())
 
-  out = {}
-  for i, level in enumerate(levels):
-    out[level] = isolines[i]
+  if format == "raw":
+    out = {}
+    for i, level in enumerate(levels):
+      out[level] = isolines[i]
 
-  return out
+    return out
+  elif format == "geojson":
+    features = []
+    for i, level in enumerate(levels):
+      features.append({
+        "type": "Feature",
+        "geometry": {
+          "type": "LineString",
+          "coordinates": [[float(coord[0]), float(coord[1])] for coord in isolines[i]]
+        },
+        "properties": {
+          "level": level
+        }
+      })
+    return {
+      "type": "FeatureCollection",
+      "features": features
+    }
 
 def free_selection(dataset, variable, request, as_dims = []):
   dataset, config = load_dataset(dataset)

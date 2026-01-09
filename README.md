@@ -34,14 +34,19 @@ Extracts a subset of the data based on a bounding box and a specific variable.
 
 The `extract` endpoint accepts the following query parameters:
 
-| Name       | Description                                  | Optional |
-|------------|----------------------------------------------|:--------:|
-| `variable` | The variable to extract.                     |    ✗     |
-| `lon_min`  | Minimum longitude of the bounding box.       |    ✓     |
-| `lat_min`  | Minimum latitude of the bounding box.        |    ✓     |
-| `lon_max`  | Maximum longitude of the bounding box.       |    ✓     |
-| `lat_max`  | Maximum latitude of the bounding box.        |    ✓     |
-| `time`     | The time value/slice to extract.             |    ✓     |
+| Name               | Description                                                                                               | Optional |
+|--------------------|-----------------------------------------------------------------------------------------------------------|:--------:|
+| `variable`         | The variable to extract.                                                                                  |    ✗     |
+| `lon_min`          | Minimum longitude of the bounding box.                                                                    |    ✓     |
+| `lat_min`          | Minimum latitude of the bounding box.                                                                     |    ✓     |
+| `lon_max`          | Maximum longitude of the bounding box.                                                                    |    ✓     |
+| `lat_max`          | Maximum latitude of the bounding box.                                                                     |    ✓     |
+| `time`             | The time value/slice to extract.                                                                          |    ✓     |
+| `resolution_limit` | Limit the amount of data for lat/lon axis (decimate)                                                      |    ✓     |
+| `format`           | Format of the extracted data (Supported: `raw`, `geojson`). Ignored when `mesh_tile_size` is defined      |    ✓     |
+| `mesh_tile_size`   | Return data as mesh, with a grid of `mesh_tile_size`x`mesh_tile_size`                                     |    ✓     |
+| `mesh_interpolate` | Apply interpolation to mesh values                                                                        |    ✓     |
+| `as_dims`          | If a variable has the same name as a dim, force query parameters in this list to be treated as dimensions |    ✓     |
 
 > [!IMPORTANT]
 > You may need to specify additional non-generic variables or dimensions according to your dataset. To do so, you can add query parameters with `&my_additional_variable={VALUE}`
@@ -52,12 +57,13 @@ Retrieves the values of specified variables at a specific geographical location 
 
 The `probe` endpoint accepts the following query parameters:
 
-| Name        | Description                                  | Optional |
-|-------------|----------------------------------------------|:--------:|
-| `variables` | The list of variables to probe.              |    ✗     |
-| `lon`       | The longitude coordinate to probe.           |    ✗     |
-| `lat`       | The latitude coordinate to probe.            |    ✗     |
-| `height`    | The height coordinate to probe (if 3D data). |    ✓     |
+| Name        | Description                                                                                               | Optional |
+|-------------|-----------------------------------------------------------------------------------------------------------|:--------:|
+| `variables` | The list of variables to probe.                                                                           |    ✗     |
+| `lon`       | The longitude coordinate to probe.                                                                        |    ✗     |
+| `lat`       | The latitude coordinate to probe.                                                                         |    ✗     |
+| `height`    | The height coordinate to probe (if 3D data).                                                              |    ✓     |
+| `as_dims`   | If a variable has the same name as a dim, force query parameters in this list to be treated as dimensions |    ✓     |
 
 > [!IMPORTANT]
 > You may need to specify additional non-generic variables or dimensions according to your dataset. To do so, you can add query parameters with `&my_additional_variable={VALUE}`
@@ -71,28 +77,46 @@ Computes isolines (contour lines) for a given variable and specific levels.
 
 The `isoline` endpoint accepts the following query parameters:
 
-| Name       | Description                                                   | Optional |
-|------------|---------------------------------------------------------------|:--------:|
-| `variable` | The variable to generate isolines for.                        |    ✗     |
-| `levels`   | Comma-separated list of levels for isoline generation.        |    ✗     |
-| `time`     | The time value to use for isoline generation.                 |    ✓     |
+| Name       | Description                                                                                               | Optional |
+|------------|-----------------------------------------------------------------------------------------------------------|:--------:|
+| `variable` | The variable to generate isolines for.                                                                    |    ✗     |
+| `levels`   | Comma-separated list of levels for isoline generation.                                                    |    ✗     |
+| `time`     | The time value to use for isoline generation.                                                             |    ✓     |
+| `format`   | Format of the extracted data (Supported: `raw`, `geojson`). Ignored when `mesh_tile_size` is defined      |    ✓     |
+| `as_dims`  | If a variable has the same name as a dim, force query parameters in this list to be treated as dimensions |    ✓     |
 
 > [!IMPORTANT]
 > You may need to specify additional non-generic variables or dimensions according to your dataset. To do so, you can add query parameters with `&my_additional_variable={VALUE}`
+
+### /datasets/{dataset}/select (GET)
+
+You can select data in a generic way with this endpoint, as raw multi-dimensional arrays. If you just specify the `variable` parameter, you will get all the data, but you are free to add additional parameters to fix some variables/dimensions
+
+The `select` endpoint accepts the following query parameters:
+| Name       | Description                                                                                               | Optional |
+| ---------- | --------------------------------------------------------------------------------------------------------- | :------: |
+| `variable` | The variable from which you want to select the data.                                                      |    ✗     |
+| `as_dims`  | If a variable has the same name as a dim, force query parameters in this list to be treated as dimensions |    ✓     |
 
 ## Configuring
 
 ### Environment variables
 
-| Variable              | Description                                              | Default value |
-|-----------------------|----------------------------------------------------------|---------------|
-| PORT                  | The port to be used when exposing the service            | 8000          |
-| HOSTNAME              | The hostname to be used when exposing the service        | localhost     |
-| AWS_ACCESS_KEY_ID     | Access key ID of the S3 in which zarr data is stored     |               |
-| AWS_SECRET_ACCESS_KEY | Secret access key of the S3 in which zarr data is stored |               |
-| AWS_REGION            | Region of the S3 in which zarr data is stored            |               |
-| AWS_ENDPOINT_URL      | Endpoint URL of the S3 in which zarr data is stored      |               |
-| BUCKET_NAME           | The name of the bucket in which zarr data is stored      |               |
+| Variable              | Description                                                                                               | Default value |
+|-----------------------|-----------------------------------------------------------------------------------------------------------|---------------|
+| PORT                  | The port to be used when exposing the service                                                             | 8000          |
+| HOSTNAME              | The hostname to be used when exposing the service                                                         | localhost     |
+| AWS_ACCESS_KEY_ID     | Access key ID of the S3 in which zarr data is stored                                                      |               |
+| AWS_SECRET_ACCESS_KEY | Secret access key of the S3 in which zarr data is stored                                                  |               |
+| AWS_DEFAULT_REGION    | Region of the S3 in which zarr data is stored                                                             |               |
+| AWS_ENDPOINT_URL      | Endpoint URL of the S3 in which zarr data is stored                                                       |               |
+| BUCKET_NAME           | The name of the bucket in which zarr data is stored                                                       |               |
+| DATASETS_PATH         | Path to the JSON file containing datasets description                                                     | datasets.json |
+| CACHE_DIR             | Path to the directory where cache will be stored. Cache will not be used if this variable is not provided |               |
+| CACHE_SIZE            | Max size of cache folder (e.g. 1024KB, 512MB, 4GB)                                                        | 512MB         |
+
+> [!IMPORTANT]
+> With some S3 provider, some errors about checksum calculation can occur (error: `botocore.exceptions.ClientError: An error occurred (InvalidArgument) when calling the PutObject operation: x-amz-content-sha256 must be UNSIGNED-PAYLOAD, or a valid sha256 value.`). In that case, you should set `AWS_REQUEST_CHECKSUM_CALCULATION` environment variable to `when_required`
 
 ## Usage
 
@@ -139,7 +163,7 @@ conda activate kazarr_env
 ```
 
 ```bash
-python main.py start-api
+python main.py
 ```
 
 ## Contributing
@@ -149,6 +173,10 @@ Please read the [Contributing file](https://github.com/kalisio/k2/blob/master/.g
 ## Versioning
 
 We use [SemVer](https://semver.org/) for versioning. For the versions available, see the tags on this repository.
+
+## Preparing Datasets
+
+An extra tool allow you to generate Zarr datasets from NetCDF or GRIB2 files. For more detail, check the [conversion tool](./conversion_tool/README.md)
 
 ## Authors
 

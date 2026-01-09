@@ -2,6 +2,7 @@ import sys, os
 
 from fastapi import FastAPI, Path, Query, Request, HTTPException
 from fastapi.openapi.docs import get_swagger_ui_html
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 import src.handlers as handlers
@@ -50,13 +51,44 @@ def read_root():
 async def custom_swagger_ui_html(request: Request):
   """
   Handle passing JWT token from query params to Swagger UI for authenticated requests
+  Handle passing JWT token from query params to "Try it out" requests in Swagger UI
   """
   token = request.query_params.get("jwt")
-  return get_swagger_ui_html(
-    openapi_url=app.openapi_url.lstrip("/") + (f"?jwt={token}" if token else ""),
+
+  openapi_url = app.openapi_url.lstrip("/")
+  if token:
+    openapi_url += f"?jwt={token}"
+  
+  response = get_swagger_ui_html(
+    openapi_url=openapi_url,
     title=app.title + " - Swagger UI",
-    swagger_ui_parameters={"defaultModelsExpandDepth": -1, "persistAuthorization": True}
+    swagger_ui_parameters={
+      "defaultModelsExpandDepth": -1, 
+      "persistAuthorization": True,
+    }
   )
+
+  js_intercept_token = f"""
+    const urlParams = new URLSearchParams(window.location.search);
+    const jwt = urlParams.get('jwt');
+    console.log("Intercepting JWT token for Swagger UI requests:", jwt);
+    if (jwt) {{
+      ui.initOAuth({{"persistAuthorization": true}}); 
+      // Configuration de l'intercepteur de requête
+      const originalFetch = window.fetch;
+      window.fetch = function() {{
+        let url = arguments[0];
+        if (typeof url === 'string' && !url.includes('jwt=')) {{
+          const separator = url.includes('?') ? '&' : '?';
+          arguments[0] = url + separator + 'jwt=' + jwt;
+        }}
+        return originalFetch.apply(this, arguments);
+      }};
+    }}
+  """
+
+  new_content = response.body.decode().replace("</body>", f"<script>{js_intercept_token}</script></body>")
+  return HTMLResponse(content=new_content)
 
 @app.get(
   "/health",
@@ -109,6 +141,7 @@ def extract_data(
   lat_max: float | None = Query(None, description="Maximum latitude of the bounding box"),
   time: str | None = Query(None, description="The time value to extract"),
   resolution_limit: float | None = Query(None, description="The resolution limit for data extraction"),
+  format: str = Query("raw", description="The format of the extracted data (Currently supported: 'raw', 'geojson')"),
   mesh_tile_size: int | None = Query(None, description="The size of the mesh tile to use when extracting data"),
   mesh_interpolate: bool = Query(False, description="Whether to interpolate the mesh"),
   as_dims: list[str] = Query([], description="If some variables have the same name as dimensions, will force them to be treated as dimensions")
@@ -121,6 +154,7 @@ def extract_data(
       time=time,
       bounding_box=(lon_min, lat_min, lon_max, lat_max),
       resolution_limit=resolution_limit,
+      format=format,
       mesh_tile_shape=(mesh_tile_size, mesh_tile_size) if mesh_tile_size is not None else None,
       mesh_interpolate=mesh_interpolate,
       as_dims=as_dims
@@ -168,10 +202,11 @@ def isoline_data(
   variable: str = Query(..., description="The variable to generate isolines for"),
   time: str | None = Query(None, description="The time value to use for isoline generation"),
   levels: list[float] = Query(..., description="List of levels for isoline generation"),
+  format: str = Query("raw", description="The format of the extracted data (Currently supported: 'raw', 'geojson')"),
   as_dims: list[str] = Query([], description="If some variables have the same name as dimensions, will force them to be treated as dimensions")
 ):
   try:
-    return handlers.isoline(dataset, variable, levels, request, time=time, as_dims=as_dims)
+    return handlers.isoline(dataset, variable, levels, request, time=time, format=format, as_dims=as_dims)
   except exceptions.GenericInternalError as e:
     sys.stderr.write(f"[ERR {e.error_code}]: {e.message}\n")
     raise HTTPException(status_code=500, detail="An internal error occured")
