@@ -71,20 +71,27 @@ async def custom_swagger_ui_html(request: Request):
   js_intercept_token = f"""
     const urlParams = new URLSearchParams(window.location.search);
     const jwt = urlParams.get('jwt');
-    console.log("Intercepting JWT token for Swagger UI requests:", jwt);
+    const path = window.location.pathname;
+    const basePath = path.substring(0, path.lastIndexOf('/docs'));
     if (jwt) {{
       ui.initOAuth({{"persistAuthorization": true}}); 
-      // Configuration de l'intercepteur de requête
-      const originalFetch = window.fetch;
-      window.fetch = function() {{
-        let url = arguments[0];
-        if (typeof url === 'string' && !url.includes('jwt=')) {{
+    }}
+
+    const originalFetch = window.fetch;
+    window.fetch = function() {{
+      let url = arguments[0];
+      if (typeof url === 'string') {{
+        if (basePath && url.startsWith('/') && !url.startsWith(basePath)) {{
+          url = basePath + url;
+          arguments[0] = url;
+        }}
+        if (jwt && !url.includes('jwt=')) {{
           const separator = url.includes('?') ? '&' : '?';
           arguments[0] = url + separator + 'jwt=' + jwt;
         }}
-        return originalFetch.apply(this, arguments);
-      }};
-    }}
+      }}
+      return originalFetch.apply(this, arguments);
+    }};
   """
 
   new_content = response.body.decode().replace("</body>", f"<script>{js_intercept_token}</script></body>")
