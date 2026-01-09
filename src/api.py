@@ -3,6 +3,7 @@ import sys, os
 from fastapi import FastAPI, Path, Query, Request, HTTPException
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import HTMLResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 import src.handlers as handlers
@@ -24,6 +25,14 @@ app = FastAPI(
     "email": "contact@kalisio.xyz"
   },
   docs_url=None
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 @app.get(
