@@ -81,13 +81,22 @@ async def custom_swagger_ui_html(request: Request):
     window.fetch = function() {{
       let url = arguments[0];
       if (typeof url === 'string') {{
-        if (basePath && url.startsWith('/') && !url.startsWith(basePath)) {{
-          url = basePath + url;
-          arguments[0] = url;
+        if (basePath) {{
+          // Absolute URL
+          if (url.startsWith(origin) && !url.startsWith(origin + basePath)) {{
+            url = url.replace(origin, origin + basePath);
+          }}
+          // Relative URL
+          else if (url.startsWith('/') && !url.startsWith(basePath)) {{
+            url = basePath + url;
+          }}
         }}
+        // Add token if not already present in URL
         if (jwt && !url.includes('jwt=')) {{
           const separator = url.includes('?') ? '&' : '?';
           arguments[0] = url + separator + 'jwt=' + jwt;
+        }} else {{
+          arguments[0] = url;
         }}
       }}
       return originalFetch.apply(this, arguments);
