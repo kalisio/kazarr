@@ -137,7 +137,7 @@ docker run -p 8000:8000 <your-image-name>
 ### Run locally
 
 You will need to install multiple Python packages to run this app.
-To simplify, you can install Anaconda and run these commands :
+To simplify, you can install Anaconda (or micromamba) and run these commands :
 
 ```bash
 conda create -y -n kazarr_env python=3.11
@@ -166,6 +166,48 @@ conda activate kazarr_env
 ```bash
 python main.py
 ```
+
+#### Local S3
+
+You can run a local object storage with S3-compliant API using [garage](https://garagehq.deuxfleurs.fr/) with CLI access using [s3cmd](https://s3tools.org/s3cmd) (`pipx install s3cmd`).
+
+First, generate a secret with `openssl rand -base64 32` and create a garage configuration file:
+```toml
+metadata_dir = "/home/luc/Development/GeoData/s3-meta"
+data_dir = "/home/luc/Development/GeoData/s3"
+db_engine = "sqlite"
+
+replication_factor = 1
+
+rpc_bind_addr = "[::]:3901"
+rpc_public_addr = "127.0.0.1:3901"
+rpc_secret = "your secret"
+
+[s3_api]
+s3_region = "localhost"
+api_bind_addr = "[::]:3900"
+root_domain = ".s3.garage.localhost"
+
+[s3_web]
+bind_addr = "[::]:3902"
+root_domain = ".web.garage.localhost"
+index = "index.html"
+```
+Then launch the server with `garage -c ./garage.toml server` in a terminal and get your node ID in another terminal with `garage -c garage.toml status`.
+Create the layout of your cluster with `garage -c garage.toml layout assign -z localhost -c 500G nodeID && garage -c garage.toml layout apply --version 1`.
+Create a bucket with `garage -c garage.toml bucket create zarr-data`.
+Create an access key with `garage -c garage.toml key create zarr-data-key`.
+Allow the key to access your bucket `garage -c garage.toml bucket allow --read --write --owner zarr-data --key zarr-data-key`.
+Create a s3cmd configuration file:
+```
+[default]
+access_key = your-key-id
+secret_key = your-key-secret
+host_base = http://localhost:3900
+host_bucket = http://localhost:3900
+use_https = False
+```
+Then synchronize any data from your local file system to garage with `s3cmd -c s3cmd.cfg sync ./zarr-data/ s3://zarr-data`.
 
 ## Contributing
 
