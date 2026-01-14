@@ -193,15 +193,15 @@ bind_addr = "[::]:3902"
 root_domain = ".web.garage.localhost"
 index = "index.html"
 ```
-Then launch the server with `garage -c ./garage.toml server` in a terminal and get your node ID in another terminal with `garage -c garage.toml status`.
+Then launch the server with `garage -c ./garage.toml server` in a terminal and get your node ID in another terminal with `garage -c ./garage.toml status`.
 
-Create the layout of your cluster with `garage -c garage.toml layout assign -z localhost -c 500G nodeID && garage -c garage.toml layout apply --version 1`.
+Create the layout of your cluster with `garage -c ./garage.toml layout assign -z localhost -c 500G nodeID && garage -c ./garage.toml layout apply --version 1`.
 
-Create a bucket with `garage -c garage.toml bucket create zarr-data`.
+Create a bucket with `garage -c ./garage.toml bucket create zarr-data`.
 
-Create an access key with `garage -c garage.toml key create zarr-data-key`.
+Create an access key with `garage -c ./garage.toml key create zarr-data-key`.
 
-Allow the key to access your bucket `garage -c garage.toml bucket allow --read --write --owner zarr-data --key zarr-data-key`.
+Allow the key to access your bucket `garage -c ./garage.toml bucket allow --read --write --owner zarr-data --key zarr-data-key`.
 
 Create a s3cmd configuration file:
 ```
@@ -212,7 +212,7 @@ host_base = http://localhost:3900
 host_bucket = http://localhost:3900
 use_https = False
 ```
-Then synchronize any data from your local file system to garage with `s3cmd -c s3cmd.cfg sync ./zarr-data/ s3://zarr-data`.
+Then synchronize any data from your local file system to garage with `s3cmd -c ./s3cmd.cfg sync ./zarr-data/ s3://zarr-data`.
 
 ## Contributing
 
