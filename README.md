@@ -194,10 +194,15 @@ root_domain = ".web.garage.localhost"
 index = "index.html"
 ```
 Then launch the server with `garage -c ./garage.toml server` in a terminal and get your node ID in another terminal with `garage -c garage.toml status`.
+
 Create the layout of your cluster with `garage -c garage.toml layout assign -z localhost -c 500G nodeID && garage -c garage.toml layout apply --version 1`.
+
 Create a bucket with `garage -c garage.toml bucket create zarr-data`.
+
 Create an access key with `garage -c garage.toml key create zarr-data-key`.
+
 Allow the key to access your bucket `garage -c garage.toml bucket allow --read --write --owner zarr-data --key zarr-data-key`.
+
 Create a s3cmd configuration file:
 ```
 [default]
