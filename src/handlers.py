@@ -548,6 +548,7 @@ def isoline(dataset, variable, levels, request, time = None, format = "raw", as_
           "coordinates": [[float(coord[0]), float(coord[1])] for coord in isolines[i]]
         },
         "properties": {
+          "id": i,
           "level": level
         }
       })
