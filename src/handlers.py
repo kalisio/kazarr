@@ -415,6 +415,7 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
               "coordinates": [float(flat_lons[i]), float(flat_lats[i])]
             },
             "properties": {
+              "id": i,
               "value": float(flat_vals[i])
             }
           })
