@@ -2,8 +2,9 @@ FROM mambaorg/micromamba
 LABEL maintainer="<contact@kalisio.xyz>"
 
 ENV HOME=/kazarr
-COPY . ${HOME}
+COPY --chown=mambauser:mambauser . ${HOME}
 WORKDIR ${HOME}
+USER mambauser
 
 RUN micromamba install -y -n base -c conda-forge \
   python=3.11 \
