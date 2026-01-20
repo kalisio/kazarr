@@ -8,7 +8,7 @@ import uvicorn
 # Get host and port from environment variables or use defaults
 HOST = os.getenv("HOST", "127.0.0.1")
 PORT = int(os.getenv("PORT", 8000))
-WORKERS_COUNT = int(os.getenv("WORKERS_COUNT", 4))
+WORKERS_COUNT = int(os.getenv("WORKERS_COUNT", 1))
 
 def start_api(host, port, workers, datasets_path, enable_debug=False):
   if enable_debug:

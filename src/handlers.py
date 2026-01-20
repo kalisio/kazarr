@@ -7,7 +7,7 @@ import xarray as xr
 import pyvista as pv
 from scipy.interpolate import griddata, RegularGridInterpolator, NearestNDInterpolator
 
-from src.utils import dget, dgets, sel, load_datasets, load_dataset, save_datasets, get_required_dims_and_coords, is_monotonic_var
+from src.utils import dget, dgets, sel, load_datasets, load_dataset, save_datasets, get_required_dims_and_coords, is_monotonic_var, StepDurationLogger
 from src import exceptions
 
 def list_datasets():
@@ -86,6 +86,9 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
   has_bb_lat = lat_min is not None or lat_max is not None
   has_bb = has_bb_lon or has_bb_lat
 
+  step_logger = StepDurationLogger("extract", parameters=(dataset, variable, bounding_box, time, resolution_limit, format, mesh_tile_shape, mesh_interpolate, as_dims))
+
+  step_logger.step_start("Load dataset and config")
   dataset, config = load_dataset(dataset)
 
   fixed_coords, fixed_dims = dgets(config, ['variables.fixed', 'dimensions.fixed'], {})
@@ -122,6 +125,7 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
   pad = 2 if mesh_tile_shape is not None else 0
 
   if is_point_list:
+    step_logger.step_start("Point list: apply bounding box")
     lons_vals = lons.values
     lats_vals = lats.values
 
@@ -144,6 +148,7 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
     height_raw, width_raw = n_points, 1
 
   elif is_regular_grid and has_bb:
+    step_logger.step_start("Regular grid: apply bounding box")
     lons_1d = lons.values
     lats_1d = lats.values
     # Check if bounding box intersects data
@@ -182,6 +187,7 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
     width_raw = col_max - col_min + 1
     height_raw = row_max - row_min + 1
   else:
+    step_logger.step_start("Unstructured grid: apply bounding box")
     lons_vals = lons.values
     lats_vals = lats.values
     if is_regular_grid:
@@ -245,6 +251,7 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
   # Load values
   # Apply bounding box and resolution limit
   # Now that values are sliced, with bounding box and resolution limit, we can load them in memory
+  step_logger.step_start("Load variable values")
   vals_da = sel(dataset, variable, fixed_coords, fixed_dims)
   if is_point_list:
     vals = vals_da.values[point_indices]
@@ -253,6 +260,7 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
   # Convert to float so we can assign NaN
   vals = vals.astype(float)
 
+  step_logger.step_start("Crop latitude and longitude")
   lons_1d, lats_1d = None, None
   if is_point_list:
     lons = lons_vals[point_indices]
@@ -284,6 +292,7 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
 
   # Interpolate to target shape if needed
   if mesh_tile_shape is not None:
+    step_logger.step_start("Generate meshgrid")
     t_lon_min = lon_min if (bounding_box and lon_min is not None) else lons.min()
     t_lon_max = lon_max if (bounding_box and lon_max is not None) else lons.max()
     t_lat_min = lat_min if (bounding_box and lat_min is not None) else lats.min()
@@ -300,6 +309,7 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
     if is_regular_grid and lons_1d is not None and not is_point_list:
       # Use RegularGridInterpolator for better performance on regular grids
       try:
+        step_logger.step_start("Interpolate regular grid")
         rgi = RegularGridInterpolator((lats_1d, lons_1d), vals, bounds_error=False, method=interpolation_method, fill_value=np.nan)
         pts = np.stack([yi_mesh.ravel(), xi_mesh.ravel()], axis=-1)
         interpolated_vals = rgi(pts).reshape(xi_mesh.shape)
@@ -320,6 +330,7 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
       
       try:
         # method='linear' is fast and precise. 'nearest' does pixel art.
+        step_logger.step_start("Interpolate unstructured grid")
         interpolated_vals = griddata(points, values, (xi_mesh, yi_mesh), method=interpolation_method)
 
         # If missing values after linear interpolation, fill with nearest neighbor
@@ -336,6 +347,7 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
     mask_cropped = np.isfinite(vals)
 
   if mesh_tile_shape is not None:
+    step_logger.step_start("Clean data for PyVista")
     # Transpose for pyvista (masked_cropped should also be transposed)
     vals = vals.T
 
@@ -358,23 +370,25 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
     if thresholded.n_points == 0:
       raise exceptions.NoDataInSelection()
 
+    step_logger.step_start("Generate mesh data")
     tri_grid = thresholded.triangulate()
     vertices = tri_grid.points.flatten()
     # As cells are stored as (N, 4) with first value being number of points per cell (3 for triangle)
     # we need to reshape and skip first values
     indices = tri_grid.cells.reshape((-1, 4))[:, 1:].flatten()
     values = tri_grid.point_data[variable]
+
+    step_logger.step_start("Prepare output (mesh)")
     # This line is slow but as NaN are not supported in JSON, we need to convert them to None (null in JSON)
     clean_values = [v if np.isfinite(v) else None for v in values]
 
-    # As bounding can
     valid_numbers = values[np.isfinite(values)]
     if valid_numbers.size == 0:
       val_min, val_max = None, None
     else:
       val_min, val_max = float(valid_numbers.min()), float(valid_numbers.max())
 
-    return {
+    out = {
       "bounds": { "min": val_min, "max": val_max },
       "resolution_factor": { "row": step_row, "col": step_col },
       "vertices": vertices.tolist(),
@@ -391,7 +405,8 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
       raise exceptions.NoDataInSelection()
 
     if format == "raw":
-      return {
+      step_logger.step_start("Prepare output (raw)")
+      out = {
         "shape": vals.shape,
         "bounds": {
           "min": np.min(valid_vals).item(),
@@ -405,6 +420,7 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
         }
       }
     elif format == "geojson":
+      step_logger.step_start("Prepare output (GeoJSON)")
       features = []
       for i in range(flat_vals.shape[0]):
         if not np.isnan(flat_vals[i]):
@@ -419,7 +435,7 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
               "value": float(flat_vals[i])
             }
           })
-      return {
+      out = {
         "type": "FeatureCollection",
         "bounds": {
           "min": np.min(valid_vals).item(),
@@ -428,6 +444,9 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
         "resolution_factor": { "row": step_row, "col": step_col },
         "features": features
       }
+
+  step_logger.end()
+  return out
 
 def probe(dataset, variables, lon, lat, request, height = None, as_dims = []):
   variables = variables if isinstance(variables, list) else [variables]

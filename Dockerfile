@@ -19,6 +19,8 @@ RUN micromamba install -y -n base -c conda-forge \
   matplotlib \
   pyvista \
   scipy \
+  uvloop \
+  loguru \
   && micromamba clean --all --yes
 
 EXPOSE 8000
