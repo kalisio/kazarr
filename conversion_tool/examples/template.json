@@ -1,0 +1,34 @@
+{
+  "templateName": {
+    "variables": {
+      "lon": "MyLongitudeVar",
+      "lat": "MyLatitudeVar",
+      "height": "MyHeightVar",
+      "time": "MyTimeVar"
+    },
+    "dimensions": {
+      "fixed": {
+        "MyDimensionWithAFixedValue": 0
+      }
+    },
+    "assignCoords": {
+      "MyIndexedVariable{n}": { "dim": "MyIndexedDim{n}", "variables": { "n": { "min": 0, "max": 8 } } },
+      "MyOtherVariable": "MyOtherDim"
+    },
+    "referenceTime": {
+      "variable": "MyTimeRefVar",
+      "format": "%d/%m/%Y %H:%M:%S"
+    },
+    "pipelines": {
+      "pipelineName": [
+        { "type": "process", "name": "load_from_netcdf", "params": { "concatDim": "MyOtherDim" } },
+        { "type": "process", "name": "rename_variables", "params": { "renameMap": { "MyOtherVariable": "MyVariableWithANewName" } } },
+        "delta_time_to_datetime",
+        "assign_coords",
+        "unify_chunks",
+        "save",
+        "register_on_api"
+      ]
+    }
+  }
+}
