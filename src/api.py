@@ -168,6 +168,8 @@ def dataset_infos(
   format: Literal["raw", "geojson", "mesh"] = Query("raw", include_in_schema=False),
   mesh_tile_size: int | None = Query(None, include_in_schema=False),
   mesh_interpolate: bool = Query(False, include_in_schema=False),
+  mesh_data_mapping: str | None = Query(None, include_in_schema=False),
+  time_interpolate: bool = Query(False, include_in_schema=False),
   as_dims: list[str] = Query([], include_in_schema=False),
 
   # == Probe parameters == #
@@ -182,10 +184,12 @@ def dataset_infos(
   # time => already defined in extraction parameters
   levels: list[float] = Query(None, include_in_schema=False), #! Must be defined for isoline
   # format => already defined in extraction parameters
+  # time_interpolate => already defined in extraction parameters
   # as_dims => already defined in extraction parameters
 
   # == Free selection parameters == #
   # variable => already defined in extraction parameters
+  interp_vars: list[float] = Query([], include_in_schema=False),
   # as_dims => already defined in extraction parameters
 ):
   try:
@@ -194,6 +198,7 @@ def dataset_infos(
         raise exceptions.UserInputBasedException("The 'variable' parameter is required for data extraction")
       
       format = { "type": format }
+      format["force_data_mapping"] = mesh_data_mapping
       if format["type"] == "mesh":
         format["shape"] = (mesh_tile_size, mesh_tile_size) if mesh_tile_size is not None else None
         format["interpolate"] = mesh_interpolate
@@ -206,6 +211,7 @@ def dataset_infos(
         bounding_box=(lon_min, lat_min, lon_max, lat_max),
         resolution_limit=resolution_limit,
         format=format,
+        time_interpolate=time_interpolate,
         as_dims=as_dims
       )
     elif dataset.endswith("/probe"):
@@ -219,11 +225,11 @@ def dataset_infos(
         raise exceptions.UserInputBasedException("The 'variable' parameter is required for isoline generation")
       if levels is None:
         raise exceptions.UserInputBasedException("The 'levels' parameter is required for isoline generation")
-      return handlers.isoline(dataset[:-8], variable, levels, request, time=time, format=format, as_dims=as_dims)
+      return handlers.isoline(dataset[:-8], variable, levels, request, time=time, format=format, time_interpolate=time_interpolate, as_dims=as_dims)
     elif dataset.endswith("/select"):
       if variable is None:
         raise exceptions.UserInputBasedException("The 'variable' parameter is required for free selection")
-      return handlers.free_selection(dataset[:-7], variable, request, as_dims=as_dims)
+      return handlers.free_selection(dataset[:-7], variable, request, interp_vars=interp_vars, as_dims=as_dims)
     return handlers.dataset_infos(dataset)
   except exceptions.GenericInternalError as e:
     sys.stderr.write(f"[ERR {e.error_code}]: {e.message}\n")
@@ -251,6 +257,8 @@ def extract_data(
   format: str = Query("raw", description="The format of the extracted data (Currently supported: 'raw', 'geojson', 'mesh' with additional parameters)"),
   mesh_tile_size: int | None = Query(None, description="[format='mesh'] The size of the mesh tile to use when extracting data"),
   mesh_interpolate: bool = Query(False, description="[format='mesh'] Whether to interpolate data on the mesh"),
+  mesh_data_mapping: str | None = Query(None, description="[format='mesh'] Whether the data of the mesh is on cells or on vertices. This will override the dataset configuration. (Supported values: 'vertices', 'cells')"),
+  time_interpolate: bool = Query(False, description="Whether to interpolate values on time dimension"),
   as_dims: list[str] = Query([], description="If some variables have the same name as dimensions, will force them to be treated as dimensions")
 ):
   pass
@@ -283,6 +291,7 @@ def isoline_data(
   time: str | None = Query(None, description="The time value to use for isoline generation"),
   levels: list[float] = Query(..., description="List of levels for isoline generation"),
   format: str = Query("raw", description="The format of the extracted data (Currently supported: 'raw', 'geojson')"),
+  time_interpolate: bool = Query(False, description="Whether to interpolate values on time dimension"),
   as_dims: list[str] = Query([], description="If some variables have the same name as dimensions, will force them to be treated as dimensions")
 ):
   pass
@@ -296,6 +305,7 @@ def free_selection_data(
   request: Request,
   dataset: str = Path(..., description="The path to the dataset to perform selection on"),
   variable: str = Query(..., description="The variable to perform selection on"),
+  interp_vars: list[float] = Query([], description="Variables to interpolate during selection"),
   as_dims: list[str] = Query([], description="If some variables have the same name as dimensions, will force them to be treated as dimensions")
 ):
   pass

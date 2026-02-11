@@ -12,7 +12,8 @@ def new_dataset(
   description="",
   output_path=None,
   pipeline_name="preprocess",
-  templates_path="templates.json"
+  templates_path="templates.json",
+  data_mapping="vertices"
 ):
   pipeline_config = {}
   if template is not None:
@@ -29,6 +30,8 @@ def new_dataset(
   })
   if output_path is not None:
     pipeline_config["save_path"] = output_path
+  if data_mapping is not None:
+    pipeline_config["mesh_data_on_cells"] = data_mapping == "cells"
   _, config = pipelines.pipeline(pipeline_config, pipeline_name)
 
 def list_templates(templates_path="templates.json"):
@@ -68,7 +71,8 @@ def main():
       description=args.description,
       output_path=args.output,
       pipeline_name=args.pipeline,
-      templates_path=args.templates_path
+      templates_path=args.templates_path,
+      data_mapping=args.data_mapping
     )
   elif args.command == "list-templates":
     list_templates(args.templates_path)

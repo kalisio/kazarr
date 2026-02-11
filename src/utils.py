@@ -150,7 +150,7 @@ def is_monotonic_var(dataset, var_name):
   return is_monotonic
 
 # Get dimensions and coordinates that must be provided for a selection, and not already defined
-def get_required_dims_and_coords(dataset, config, variables, fixed_coords, fixed_dims, request, optional_coords=[], optional_dims=[], as_dims=[]):
+def get_required_dims_and_coords(dataset, variables, fixed_coords, fixed_dims, interp_vars, request, optional_coords=[], optional_dims=[], as_dims=[]):
   needed_dims = {}
 
   if optional_coords != "*" and optional_dims != "*":
@@ -172,7 +172,7 @@ def get_required_dims_and_coords(dataset, config, variables, fixed_coords, fixed
           for coord in dataset.coords:
             if dim in dataset[coord].dims and coord not in as_dims and coord not in assigned_coords:
               assigned_coords.append(coord)
-              if coord in fixed_coords or coord in optional_coords:
+              if coord in fixed_coords or coord in optional_coords or coord in interp_vars:
                 needed = False
           if needed:
             needed_dims[dim] = assigned_coords
@@ -198,8 +198,90 @@ def get_required_dims_and_coords(dataset, config, variables, fixed_coords, fixed
     raise exceptions.MissingDimensionsOrCoordinates(missing_dims)
   return fixed_coords, fixed_dims
 
+def get_bounded_time(dataset, time_var, time):
+  if time_var not in dataset or not is_monotonic_var(dataset, time_var):
+    raise exceptions.GenericInternalError(f"Time variable '{time_var}' not found or not monotonic in dataset.")
+  
+  try:
+    time_data = dataset[time_var].values
+    # Try to cast time to the same dtype as time_data
+    time = np.array(time, dtype=time_data.dtype)
+    return np.clip(time, time_data[0], time_data[-1])
+  except Exception:
+    raise exceptions.GenericInternalError(f"Unable to convert time value '{time}' to the correct type.")
+
+def extrapolate_edges_from_cell_data(lons, lats, heights=None, mesh_type="rectilinear", periodic_axes=None): # mesh_type="regular"|"rectilinear"|"radial"
+  if periodic_axes is None:
+    periodic_axes = []
+
+  if mesh_type == "radial" and len(periodic_axes) == 0:
+    periodic_axes = [1]
+
+  def expand_axis(arr, axis):
+    ndim = arr.ndim
+    dim_size = arr.shape[axis]
+    if dim_size == 1:
+      return arr
+
+    slice_left = [slice(None)] * ndim
+    slice_left[axis] = slice(0, -1)
+    slice_right = [slice(None)] * ndim
+    slice_right[axis] = slice(1, None)
+
+    midpoints = 0.5 * (arr[tuple(slice_left)] + arr[tuple(slice_right)])
+
+    slice_first = [slice(None)] * ndim
+    slice_first[axis] = slice(0, 1)
+
+    slice_last = [slice(None)] * ndim
+    slice_last[axis] = slice(-1, None)
+
+    slice_mid_first = list(slice_first)
+    slice_mid_last = list(slice_last)
+
+    first_edge = arr[tuple(slice_first)] - (
+      midpoints[tuple(slice_mid_first)] - arr[tuple(slice_first)]
+    )
+    last_edge = arr[tuple(slice_last)] + (
+      arr[tuple(slice_last)] - midpoints[tuple(slice_mid_last)]
+    )
+
+    if axis in periodic_axes:
+      return np.concatenate([first_edge, midpoints, first_edge], axis=axis)
+    else:
+      return np.concatenate([first_edge, midpoints, last_edge], axis=axis)
+
+  x_cells = lons
+  y_cells = lats
+  z_cells = heights
+
+  x_bounds = expand_axis(x_cells, 0)
+  y_bounds = expand_axis(y_cells, 0)
+  if heights is not None:
+    z_bounds = expand_axis(z_cells, 0)
+  else:
+    z_bounds = np.zeros_like(x_bounds)
+
+  if mesh_type != "regular":
+    if heights is not None:
+      x_bounds = expand_axis(x_bounds, 2)
+      y_bounds = expand_axis(y_bounds, 2)
+      z_bounds = expand_axis(z_bounds, 2)
+
+    x_bounds = expand_axis(x_bounds, 1)
+    y_bounds = expand_axis(y_bounds, 1)
+    z_bounds = expand_axis(z_bounds, 1)
+
+  return x_bounds, y_bounds, z_bounds
+
 # Smart selection on a dataset variable with coordinates and dimensions
-def sel(dataset, variable, fixed_coords, fixed_dims):
+def sel(dataset, variable, fixed_coords, fixed_dims, interp_vars=[]):
+  for var in interp_vars:
+    if var in dataset.coords and var not in dataset.dims:
+      if len(dataset[var].dims) == 1:
+        current_dim = dataset[var].dims[0]
+        dataset = dataset.swap_dims({current_dim: var})
+
   # Ensure xindexes are set for all fixed coords
   for coord in fixed_coords:
     dataset = set_xindex(dataset, coord)
@@ -209,11 +291,16 @@ def sel(dataset, variable, fixed_coords, fixed_dims):
     fixed_coords[var] = np.array(val, dtype=dataset[var].dtype)
 
   # Only monotonic variables can be used with sel(method='nearest')
-  monotonic_fixed_vars = {var: val for var, val in fixed_coords.items() if is_monotonic_var(dataset, var)}
-  non_monotonic_fixed_vars = {var: val for var, val in fixed_coords.items() if not is_monotonic_var(dataset, var)}
+  monotonic_fixed_vars = {var: val for var, val in fixed_coords.items() if is_monotonic_var(dataset, var) and var not in interp_vars}
+  non_monotonic_fixed_vars = {var: val for var, val in fixed_coords.items() if not is_monotonic_var(dataset, var) and var not in interp_vars}
 
   data = dataset.sel(monotonic_fixed_vars, method='nearest').sel(non_monotonic_fixed_vars).isel(fixed_dims)[variable]
-  return data  
+  # Interpolate if needed
+  if len(interp_vars) > 0:
+    interpolated_vars = {var: fixed_coords[var] for var in interp_vars if var in fixed_coords}
+    if len(interpolated_vars) > 0:
+      data = data.interp(interpolated_vars, method="linear", assume_sorted=True)
+  return data
 
 # Deep get from nested dict (mimic lodash get)
 def dget(d, key, default=None):

@@ -6,7 +6,7 @@ import xarray as xr
 import pyvista as pv
 from scipy.interpolate import griddata, RegularGridInterpolator, NearestNDInterpolator
 
-from src.utils import dget, dgets, sel, load_datasets, load_dataset, get_required_dims_and_coords, StepDurationLogger
+from src.utils import dget, dgets, sel, load_datasets, load_dataset, get_required_dims_and_coords, get_bounded_time, extrapolate_edges_from_cell_data, StepDurationLogger
 from src import exceptions
 
 def list_datasets(search_path = None):
@@ -77,7 +77,7 @@ def dataset_infos(dataset_id):
   }
 
 # format = "raw" | "geojson" | { "type": "mesh", shape: [row, col], interpolate: True, force_data_on_cells: True }
-def extract(dataset, variable, request, time = None, bounding_box = None, resolution_limit = None, format = "raw", as_dims = []):
+def extract(dataset, variable, request, time = None, bounding_box = None, resolution_limit = None, format = "raw", time_interpolate = False, as_dims = []):
   lon_min, lat_min, lon_max, lat_max = (None, None, None, None) if bounding_box is None else bounding_box
   has_bb_lon = lon_min is not None or lon_max is not None
   has_bb_lat = lat_min is not None or lat_max is not None
@@ -89,6 +89,7 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
   dataset, config = load_dataset(dataset)
 
   fixed_coords, fixed_dims = dgets(config, ['variables.fixed', 'dimensions.fixed'], {})
+  interp_vars = []
 
   if variable not in dataset:
     raise exceptions.VariableNotFound([variable])
@@ -105,15 +106,24 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
   if lat_var not in dataset:
     missing_vars.append(f"lat ({lat_var})")
 
+  time_var = dget(config, 'variables.time')
+  if time is not None and time_var is not None:
+    if time_var not in dataset:
+      missing_vars.append(f"time ({time_var})")
+    else:
+      fixed_coords[time_var] = get_bounded_time(dataset, time_var, time)
+      if time_interpolate:
+        interp_vars.append(time_var)
+
   if len(missing_vars) > 0:
     raise exceptions.BadConfigurationVariable(missing_vars)
 
   out_type = format.get("type") if isinstance(format, dict) else format
   mesh_tile_shape = format.get("shape") if isinstance(format, dict) else None
   mesh_interpolate = format.get("interpolate") if isinstance(format, dict) else False
+  force_data_mapping = format.get("force_data_mapping") if isinstance(format, dict) else None
 
-
-  fixed_coords, fixed_dims = get_required_dims_and_coords(dataset, config, variable, fixed_coords, fixed_dims, request, optional_coords=[lon_var, lat_var], as_dims=as_dims)
+  fixed_coords, fixed_dims = get_required_dims_and_coords(dataset, variable, fixed_coords, fixed_dims, interp_vars, request, optional_coords=[lon_var, lat_var], as_dims=as_dims)
 
   lons = sel(dataset, lon_var, fixed_coords, fixed_dims)
   lats = sel(dataset, lat_var, fixed_coords, fixed_dims)
@@ -250,7 +260,7 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
   # Apply bounding box and resolution limit
   # Now that values are sliced, with bounding box and resolution limit, we can load them in memory
   step_logger.step_start("Load variable values")
-  vals_da = sel(dataset, variable, fixed_coords, fixed_dims)
+  vals_da = sel(dataset, variable, fixed_coords, fixed_dims, interp_vars=interp_vars)
   if is_point_list:
     vals = vals_da.values[point_indices]
   else:
@@ -288,7 +298,27 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
   else:
     mask_cropped = None
 
-  # Interpolate to target shape if needed
+  # Cell to point data conversion must be done before resampling
+  cell_data = force_data_mapping != "vertices" and (force_data_mapping == "cells" or dget(config, 'mesh_data_on_cells', False))
+  if cell_data and not is_point_list:
+    step_logger.step_start("Cell to point data conversion")
+
+    # TODO: how to know when mesh is radial ?
+    lons_point, lats_points, height_points = extrapolate_edges_from_cell_data(lons, lats, None, "rectilinear")
+
+    temp_grid = pv.StructuredGrid(lons_point, lats_points, height_points)
+    temp_grid.cell_data[variable] = vals.ravel()
+    temp_point_grid = temp_grid.cell_data_to_point_data()
+
+    new_shape = lons_point.shape
+    vals = temp_point_grid.point_data[variable].reshape(new_shape)
+    lons, lats = lons_point, lats_points
+
+    if is_regular_grid:
+      lons_1d = lons[0, :]
+      lats_1d = lats[:, 0]
+
+  # Generate meshgrid with mesh_tile_shape if specified, and interpolate values if needed
   if mesh_tile_shape is not None:
     step_logger.step_start("Generate meshgrid")
     t_lon_min = lon_min if (bounding_box and lon_min is not None) else lons.min()
@@ -494,7 +524,7 @@ def probe(dataset, variables, lon, lat, request, height = None, as_dims = []):
   # Time is optional, so add to both optional coords and dims, as one or the other may be defined in config
   optional_coords = [time_var] if time_var is not None else []
   optional_dims = [time_dim] if time_dim is not None else []
-  fixed_coords, fixed_dims = get_required_dims_and_coords(dataset, config, variables, fixed_coords, fixed_dims, request, optional_coords=optional_coords, optional_dims=optional_dims, as_dims=as_dims)
+  fixed_coords, fixed_dims = get_required_dims_and_coords(dataset, variables, fixed_coords, fixed_dims, request, optional_coords=optional_coords, optional_dims=optional_dims, as_dims=as_dims)
 
   # Get values for each variable
   data = {}
@@ -515,10 +545,11 @@ def probe(dataset, variables, lon, lat, request, height = None, as_dims = []):
     out["times"] = times
   return out
 
-def isoline(dataset, variable, levels, request, time = None, format = "raw", as_dims = []):
+def isoline(dataset, variable, levels, request, time = None, format = "raw", time_interpolate = False, as_dims = []):
   dataset, config = load_dataset(dataset)
 
   fixed_coords, fixed_dims = dgets(config, ['variables.fixed', 'dimensions.fixed'], {})
+  interp_vars = []
 
   if variable not in dataset:
     raise exceptions.VariableNotFound([variable])
@@ -534,15 +565,17 @@ def isoline(dataset, variable, levels, request, time = None, format = "raw", as_
     if time_var is None or time_var not in dataset:
       missing_vars.append(f"time ({time_var})")
     else:
-      fixed_coords[time_var] = time
+      fixed_coords[time_var] = get_bounded_time(dataset, time_var, time)
+      if time_interpolate:
+        interp_vars.append(time_var)
   if len(missing_vars) > 0:
     raise exceptions.BadConfigurationVariable(missing_vars)
 
-  fixed_coords, fixed_dims = get_required_dims_and_coords(dataset, config, variable, fixed_coords, fixed_dims, request, optional_coords=[lon_var, lat_var], as_dims=as_dims)
+  fixed_coords, fixed_dims = get_required_dims_and_coords(dataset, variable, fixed_coords, fixed_dims, request, optional_coords=[lon_var, lat_var], as_dims=as_dims)
 
   lon = sel(dataset, lon_var, fixed_coords, fixed_dims)
   lat = sel(dataset, lat_var, fixed_coords, fixed_dims)
-  val = sel(dataset, variable, fixed_coords, fixed_dims)
+  val = sel(dataset, variable, fixed_coords, fixed_dims, interp_vars=interp_vars)
 
   contours = plt.contour(lon, lat, val, levels=levels)
   isolines = []
@@ -574,38 +607,18 @@ def isoline(dataset, variable, levels, request, time = None, format = "raw", as_
       "features": features
     }
 
-def free_selection(dataset, variable, request, as_dims = []):
+def free_selection(dataset, variable, request, interp_vars = [], as_dims = []):
   dataset, config = load_dataset(dataset)
 
   if variable not in dataset:
     raise exceptions.VariableNotFound([variable])
+  
+  for var in interp_vars:
+    if var not in dataset:
+      raise exceptions.VariableNotFound([var])
 
   fixed_coords, fixed_dims = dgets(config, ['variables.fixed', 'dimensions.fixed'], {})
-  fixed_coords, fixed_dims = get_required_dims_and_coords(dataset, config, variable, fixed_coords, fixed_dims, request, optional_dims="*", as_dims=as_dims)
+  fixed_coords, fixed_dims = get_required_dims_and_coords(dataset, variable, fixed_coords, fixed_dims, request, optional_dims="*", as_dims=as_dims)
 
-  data = sel(dataset, variable, fixed_coords, fixed_dims).values.tolist()
+  data = sel(dataset, variable, fixed_coords, fixed_dims, interp_vars).values.tolist()
   return { "data": data }
-
-def register_dataset(name, path, description="", config = {}):
-  datasets = load_datasets()
-  # Ensure unique name
-  while name in datasets:
-    match = re.search(r'-(\d+)$', name)
-    if match:
-      index = int(match.group(1))
-      base_name = name[:match.start()]
-      name = f"{base_name}-{index + 1}"
-    else:
-      name = f"{name}-1"
-    
-  # Merge with existing datasets configurations
-  datasets[name] = {
-    "path": path,
-    "description": description,
-    **config
-  }
-  save_datasets(datasets)
-
-  return {
-    "id": name
-  }
