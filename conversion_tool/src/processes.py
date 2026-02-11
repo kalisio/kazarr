@@ -1,4 +1,4 @@
-import os, json, requests, itertools
+import os, json, requests, itertools, re
 
 import xarray as xr
 import numpy as np
@@ -237,6 +237,14 @@ def rename_variables(dataset, config):
   dataset = dataset.rename(rename_map)
   return dataset, config
 
+def exclude_variables(dataset, config):
+  exclude_vars = get_ci(config, 'exclude_vars', message="Missing 'exclude_vars' config parameter for exclude_variables process.")
+  if not isinstance(exclude_vars, list):
+    raise TypeError("'exclude_vars' parameter must be a list of variable names to exclude.")
+  
+  dataset = dataset.drop_vars(exclude_vars, errors='ignore')
+  return dataset, config
+
 def delta_time_to_datetime(dataset, config):
   time_ref_var = get_ci(config, 'referenceTime.variable', message="Missing 'referenceTime.variable' config parameter for delta_time_to_datetime process.")
   time_ref_format = get_ci(config, 'referenceTime.format', message="Missing 'referenceTime.format' config parameter for delta_time_to_datetime process.")
@@ -292,7 +300,7 @@ def reproject_coordinates(dataset, config):
   lon_var = get_ci(config, 'variables.lon', message="Missing 'variables.lon' config parameter for reproject_coordinates process.")
   lat_var = get_ci(config, 'variables.lat', message="Missing 'variables.lat' config parameter for reproject_coordinates process.")
   if lon_var not in dataset or lat_var not in dataset:
-    raise ValueError(f"Longitude or latitude variable not found in dataset for reproject_coordinates process.")
+    raise ValueError("Longitude or latitude variable not found in dataset for reproject_coordinates process.")
   height_var = get_ci(config, 'variables.height')
   if height_var is not None and height_var in dataset:
     has_height = True
