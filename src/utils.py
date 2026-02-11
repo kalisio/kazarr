@@ -35,7 +35,7 @@ def enable_s3fs_debug_logging():
   logger.addHandler(handler)
 
 def get_datasets_path():
-  return os.getenv("DATASETS_PATH", "datasets.json")
+  return os.getenv("DATASETS_PATH", "/")
 
 # Open Zarr dataset as XArray dataset from S3
 @lru_cache(maxsize=5)
@@ -48,7 +48,7 @@ def load(path):
     cache_path = os.getenv("CACHE_DIR")
     use_cache = cache_path is not None and get_cache_size_bytes(cache_size) is not None
     if not use_cache:
-      store = s3fs.S3Map(root=os.path.join(bucket, path.replace('s3://', '')), s3=s3fs.S3FileSystem(anon=False))
+      store = s3fs.S3Map(root=os.path.join(bucket, get_datasets_path(), path.replace('s3://', '')), s3=s3fs.S3FileSystem(anon=False))
     else:
       fs = fsspec.filesystem(
         "simplecache", 
@@ -57,7 +57,7 @@ def load(path):
         target_options={'anon': False},
         expiry_time=60 * 60 * 24 * 7 * 4 # 4 weeks
       )
-      store = fs.get_mapper(os.path.join(bucket, path.replace('s3://', '')))
+      store = fs.get_mapper(os.path.join(bucket, get_datasets_path(), path.replace('s3://', '')))
 
     # Will try to open consolidated metadata first (https://docs.xarray.dev/en/latest/generated/xarray.open_zarr.html#xarray.open_zarr)
     # Will try to determine zarr_format (v2 or v3) automatically
@@ -84,9 +84,30 @@ def load_json(path):
     raise exceptions.GenericInternalError("Unable to access S3: " + str(e))
   return datasets
 
-@lru_cache(maxsize=1)
-def load_datasets():
-  return load_json(get_datasets_path())
+def find_datasets(path = "/"):
+  # Search all folders recursively that ends with .zarr
+  s3_store = s3fs.S3FileSystem(anon=False)
+  bucket = os.getenv("BUCKET_NAME")
+  if bucket is None:
+    raise exceptions.GenericInternalError("BUCKET_NAME environment variable not set.")
+  datasets = []
+  try:
+    for root, dirs, _ in s3_store.walk(os.path.join(bucket, get_datasets_path().lstrip('/'), path.lstrip('/'))):
+      for dirname in dirs[:]:
+        print("CHECKING", dirname)
+        if dirname.endswith('.zarr'):
+          found_path = f"{root}/{dirname}"
+          datasets.append(found_path.replace(os.path.join(bucket, get_datasets_path().lstrip('/')), '').replace('.zarr', ''))
+          dirs.remove(dirname)
+  except NoCredentialsError as e:
+    raise exceptions.GenericInternalError("S3 credentials not found.")
+  except Exception as e:
+    raise exceptions.GenericInternalError("Unable to access S3: " + str(e))
+  return datasets
+
+def load_datasets(search_path = None):
+  search_path = search_path if search_path is not None else ""
+  return find_datasets(search_path)
 
 def save_datasets(datasets):
   s3_store = s3fs.S3FileSystem(anon=False)
@@ -102,21 +123,15 @@ def save_datasets(datasets):
     raise exceptions.GenericInternalError("Unable to access S3: " + str(e))
 
 # Load a dataset and its configuration from its ID
-def load_dataset(dataset_id):
-  datasets = load_datasets()
-  if dataset_id not in datasets:
-    raise exceptions.DatasetNotFound(dataset_id)
-  config = copy.deepcopy(datasets[dataset_id])
-  dataset_path = config.get("path")
-  if dataset_path is None:
-    raise exceptions.MissingConfigurationElement("path")
-  dataset = load(dataset_path)
+def load_dataset(dataset_path):
+  dataset = load(dataset_path + ".zarr")
   cache_size = os.getenv("CACHE_SIZE", "512MB")
   cache_path = os.getenv("CACHE_DIR")
   use_cache = cache_path is not None and get_cache_size_bytes(cache_size) is not None
   if use_cache:
     # Enforce cache size limit after loading
     enforce_cache_limit(cache_path, max_size=cache_size)
+  config = copy.deepcopy(dataset.attrs.get('kazarr', {}))
   return dataset, config
 
 # Ensure xindex is set for a variable in the dataset

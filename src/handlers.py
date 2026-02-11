@@ -1,21 +1,17 @@
-import math, re
+import math
 
-from fastapi import Request, HTTPException
 import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
 import pyvista as pv
 from scipy.interpolate import griddata, RegularGridInterpolator, NearestNDInterpolator
 
-from src.utils import dget, dgets, sel, load_datasets, load_dataset, save_datasets, get_required_dims_and_coords, is_monotonic_var, StepDurationLogger
+from src.utils import dget, dgets, sel, load_datasets, load_dataset, get_required_dims_and_coords, StepDurationLogger
 from src import exceptions
 
-def list_datasets():
-  datasets = load_datasets()
-  out = []
-  for dataset in datasets.keys():
-    out.append({ "id": dataset, "description": datasets[dataset].get("description", "") })
-  return {"datasets": out}
+def list_datasets(search_path = None):
+  datasets = load_datasets(search_path)
+  return { "datasets": datasets }
 
 def dataset_infos(dataset_id):
   dataset, config = load_dataset(dataset_id)
@@ -80,13 +76,14 @@ def dataset_infos(dataset_id):
     "attrs": dataset.attrs
   }
 
-def extract(dataset, variable, request, time = None, bounding_box = None, resolution_limit = None, format = "raw", mesh_tile_shape = None, mesh_interpolate = False, as_dims = []):
+# format = "raw" | "geojson" | { "type": "mesh", shape: [row, col], interpolate: True, force_data_on_cells: True }
+def extract(dataset, variable, request, time = None, bounding_box = None, resolution_limit = None, format = "raw", as_dims = []):
   lon_min, lat_min, lon_max, lat_max = (None, None, None, None) if bounding_box is None else bounding_box
   has_bb_lon = lon_min is not None or lon_max is not None
   has_bb_lat = lat_min is not None or lat_max is not None
   has_bb = has_bb_lon or has_bb_lat
 
-  step_logger = StepDurationLogger("extract", parameters=(dataset, variable, bounding_box, time, resolution_limit, format, mesh_tile_shape, mesh_interpolate, as_dims))
+  step_logger = StepDurationLogger("extract", parameters=(dataset, variable, bounding_box, time, resolution_limit, format, as_dims))
 
   step_logger.step_start("Load dataset and config")
   dataset, config = load_dataset(dataset)
@@ -111,9 +108,10 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
   if len(missing_vars) > 0:
     raise exceptions.BadConfigurationVariable(missing_vars)
 
-  time_var = dget(config, 'variables.time')
-  if time is not None and time_var is not None:
-    fixed_coords[time_var] = time
+  out_type = format.get("type") if isinstance(format, dict) else format
+  mesh_tile_shape = format.get("shape") if isinstance(format, dict) else None
+  mesh_interpolate = format.get("interpolate") if isinstance(format, dict) else False
+
 
   fixed_coords, fixed_dims = get_required_dims_and_coords(dataset, config, variable, fixed_coords, fixed_dims, request, optional_coords=[lon_var, lat_var], as_dims=as_dims)
 
@@ -122,7 +120,7 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
 
   is_regular_grid = lons.ndim == 1 and lats.ndim == 1 and lons.dims != lats.dims
   is_point_list = lons.ndim == 1 and lats.ndim == 1 and lons.dims == lats.dims
-  pad = 2 if mesh_tile_shape is not None else 0
+  pad = 2 if out_type == "mesh" else 0
 
   if is_point_list:
     step_logger.step_start("Point list: apply bounding box")
@@ -284,7 +282,7 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
       bb_lat_max = lat_max if lat_max is not None else np.inf
       mask_cropped &= (lats >= bb_lat_min) & (lats <= bb_lat_max)
 
-    if mesh_tile_shape is None:
+    if out_type != "mesh":
       # Set values outside bounding box to NaN
       vals[~mask_cropped] = np.nan
   else:
@@ -326,7 +324,7 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
       values = vals_flat[valid_mask]
 
       if points.shape[0] < 4:
-        raise exceptions.TooFewPoints("Not enough valid points for interpolation")
+        raise exceptions.TooFewPoints()
       
       try:
         # method='linear' is fast and precise. 'nearest' does pixel art.
@@ -346,7 +344,7 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
     # Recreate mask_cropped based on NaNs from griddata
     mask_cropped = np.isfinite(vals)
 
-  if mesh_tile_shape is not None:
+  if out_type == "mesh":
     step_logger.step_start("Clean data for PyVista")
     # Transpose for pyvista (masked_cropped should also be transposed)
     vals = vals.T
@@ -404,7 +402,7 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
     if valid_vals.size == 0:
       raise exceptions.NoDataInSelection()
 
-    if format == "raw":
+    if out_type == "raw":
       step_logger.step_start("Prepare output (raw)")
       out = {
         "shape": vals.shape,
@@ -419,7 +417,7 @@ def extract(dataset, variable, request, time = None, bounding_box = None, resolu
           "values": [None if np.isnan(v) else v.item() for v in flat_vals]
         }
       }
-    elif format == "geojson":
+    elif out_type == "geojson":
       step_logger.step_start("Prepare output (GeoJSON)")
       features = []
       for i in range(flat_vals.shape[0]):

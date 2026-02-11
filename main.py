@@ -24,7 +24,7 @@ def main():
   parser.add_argument("-H", "--host", type=str, default=HOST, help="Host to run the API server on")
   parser.add_argument("-w", "--workers", type=int, default=WORKERS_COUNT, help="Number of worker processes for handling requests")
   parser.add_argument("-d", "--debug", action="store_true", help="Enable debug logging")
-  parser.add_argument("--datasets-path", type=str, default="datasets.json", help="Path to the datasets configuration file")
+  parser.add_argument("--datasets-path", type=str, default="/", help="Path to the datasets configuration file")
 
   args = parser.parse_args()
 

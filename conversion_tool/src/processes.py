@@ -90,6 +90,7 @@ def load_from_grib(dataset, config):
     return ds
 
   path = get_ci(config, 'load_path', get_ci(config, 'path'), message="Missing 'load_path' or 'path' config parameters for load_from_grib process.")
+  file_pattern = get_ci(config, 'file_regex', "*.grib2")
 
   dataset = None
   if path.startswith("s3://"):
@@ -109,7 +110,16 @@ def load_from_grib(dataset, config):
       dataset = xr.open_dataset(os.path.join(target_tmp_dir, os.path.basename(path)), engine="cfgrib", chunks="auto")
     elif fs.isdir(path):
       concat_dim = get_ci(config, 'concat_dim', message="Missing 'concat_dim' config parameter for loading multiple GRIB files from S3 folder.")
-      files = fs.glob(os.path.join(path, "*.grib2"))
+
+      all_files = fs.ls(os.path)
+      files = [
+        f for f in all_files 
+        if re.search(file_pattern, os.path.basename(f))
+      ]
+      
+      if not files:
+        raise ValueError(f"No files matching regex '{file_pattern}' found in S3 path: {path}")
+
       files = sorted(files)
       s3_files = [fs.open(f) for f in files]
       total_count = len(s3_files)
@@ -131,7 +141,16 @@ def load_from_grib(dataset, config):
       dataset = xr.open_dataset(path, chunks="auto", engine="cfgrib")
     elif os.path.isdir(path):
       concat_dim = get_ci(config, 'concat_dim', message="Missing 'concat_dim' for loading multiple GRIB files from folder.")
-      files = [os.path.join(path, f) for f in os.listdir(path) if f.endswith(".grib2")]
+
+      files = [
+        os.path.join(path, f)
+        for f in os.listdir(path)
+        if re.search(file_pattern, f)
+      ]
+      
+      if not files:
+        raise ValueError(f"No files matching regex '{file_pattern}' found in local path: {path}")
+
       files = sorted(files)
       total_count = len(files)
 
@@ -379,29 +398,4 @@ def save_config(dataset, config):
   path = get_ci(config, 'config_save_path', message="Missing 'config_save_path' config parameter for save_config process.")
   with open(path, 'w') as f:
     json.dump(config, f, indent=2)
-  return dataset, config
-
-def register_on_api(dataset, config):
-  url = os.getenv("API_ENDPOINT_URL")
-  if url is None:
-    url = get_ci(config, 'registration_endpoint_url', message="Missing 'registration_endpoint_url' config parameter for post_dataset process and API_ENDPOINT_URL environment variable not set.")
-
-  keep_keys = ['variables', 'dimensions']
-  post_config = {
-    "name": get_ci(config, 'name', message="Missing 'name' config parameter for post_dataset process."),
-    "description": get_ci(config, 'description', ""),
-    "path": get_ci(config, 'save_path', message="Missing 'save_path' config parameter for post_dataset process."),
-    "config": {
-      k: v for k, v in config.items() if k in keep_keys
-    }
-  }
-  result = requests.post(url, json = post_config)
-  try:
-    result_json = result.json()
-    if result.status_code != 200:
-      raise ValueError(f"Error registering dataset on API: {result_json.get('detail', 'Unknown error')}")
-    if "id" in result_json:
-      config['api_id'] = result_json.get('id')
-  except Exception as e:
-    raise ValueError(f"Error processing response from API: {str(e)}")
   return dataset, config
