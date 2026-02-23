@@ -16,6 +16,7 @@ def new_dataset(
     pipeline_name="preprocess",
     templates_path="templates.json",
     data_mapping="vertices",
+    mesh_type="auto",
 ):
     pipeline_config = {}
     if template is not None:
@@ -25,6 +26,8 @@ def new_dataset(
     if config_file is not None:
         config_file_content = load_json(config_file)
         pipeline_config = merge(pipeline_config, config_file_content)
+    if config is not None:
+        pipeline_config = merge(pipeline_config, config)
     pipeline_config = merge(
         pipeline_config,
         {
@@ -37,6 +40,8 @@ def new_dataset(
         pipeline_config["save_path"] = output_path
     if data_mapping is not None:
         pipeline_config["mesh_data_on_cells"] = data_mapping == "cells"
+    if mesh_type is not None:
+        pipeline_config["mesh_type"] = mesh_type
     _, config = pipelines.pipeline(pipeline_config, pipeline_name)
 
 
@@ -114,6 +119,20 @@ def main():
         default="templates.json",
         help="Path to templates configuration file (local or s3://) [default: templates.json]",
     )
+    parser_create_dataset.add_argument(
+        "--data-mapping",
+        type=str,
+        choices=["vertices", "cells"],
+        default="vertices",
+        help="Whether to map data on mesh vertices or cells (default: vertices)",
+    )
+    parser_create_dataset.add_argument(
+        "--mesh-type",
+        type=str,
+        choices=["auto", "regular", "rectilinear", "radial"],
+        default="auto",
+        help="Type of mesh to generate (default: auto, which infers from data between regular and rectilinear but not able to handle radial meshes)",
+    )
 
     args = parser.parse_args()
 
@@ -129,6 +148,7 @@ def main():
             pipeline_name=args.pipeline,
             templates_path=args.templates_path,
             data_mapping=args.data_mapping,
+            mesh_type=args.mesh_type,
         )
     elif args.command == "list-templates":
         list_templates(args.templates_path)

@@ -9,7 +9,7 @@ import s3fs
 from pyproj import Transformer
 from datetime import datetime
 
-from src.utils import get_ci
+from src.utils import get_ci, merge, rechunk_if_needed
 
 
 def load_from_netcdf(dataset, config):
@@ -122,6 +122,7 @@ def load_from_grib(dataset, config):
         message="Missing 'load_path' or 'path' config parameters for load_from_grib process.",
     )
     file_pattern = get_ci(config, "file_regex", "*.grib2")
+    backend_kwargs = get_ci(config, "backend_kwargs", default={})
 
     dataset = None
     if path.startswith("s3://"):
@@ -142,6 +143,7 @@ def load_from_grib(dataset, config):
                 os.path.join(target_tmp_dir, os.path.basename(path)),
                 engine="cfgrib",
                 chunks="auto",
+                backend_kwargs=backend_kwargs,
             )
         elif fs.isdir(path):
             concat_dim = get_ci(
@@ -175,10 +177,13 @@ def load_from_grib(dataset, config):
                 parallel=True,
                 chunks="auto",
                 preprocess=progress_callback,
+                **backend_kwargs,
             )
     else:
         if os.path.isfile(path):
-            dataset = xr.open_dataset(path, chunks="auto", engine="cfgrib")
+            dataset = xr.open_dataset(
+                path, chunks="auto", engine="cfgrib", backend_kwargs=backend_kwargs
+            )
         elif os.path.isdir(path):
             concat_dim = get_ci(
                 config,
@@ -211,6 +216,7 @@ def load_from_grib(dataset, config):
                 parallel=True,
                 chunks="auto",
                 preprocess=progress_callback,
+                **backend_kwargs,
             )
     if dataset is None:
         raise ValueError(f"Unable to load GRIB dataset from path: {path}")
@@ -236,6 +242,39 @@ def load_from_zarr(dataset, config):
         dataset = xr.open_zarr(s3_store, chunks="auto")
     else:
         dataset = xr.open_zarr(path, chunks="auto")
+    return dataset, config
+
+
+def load_and_merge_from_grib(dataset, config):
+    # List of strings that can be used to discriminate files to merge together
+    # TODO: improve this by allowing to extract discriminator values with regex capture groups, to support more complex cases
+    discriminator = get_ci(
+        config,
+        "discriminator",
+        message="Missing 'discriminator' config parameter for load_and_merge_from_grib process.",
+    )
+    rename_before_merge = get_ci(config, "rename_before_merge", default=[])
+
+    if isinstance(discriminator, str):
+        discriminators = [discriminator]
+    elif isinstance(discriminator, list):
+        discriminators = discriminator
+
+    datasets = []
+    for index, discriminator in enumerate(discriminators):
+        sub_dataset, _ = load_from_grib(
+            dataset, merge({"file_regex": f"^.*{discriminator}.*\.grib2$"}, config)
+        )
+
+        if index < len(rename_before_merge) and rename_before_merge[index]:
+            sub_dataset = sub_dataset.rename(rename_before_merge[index])
+        print("Loaded sub-dataset for discriminator:", discriminator)
+        print(sub_dataset.data_vars)
+
+        datasets.append(sub_dataset)
+
+    dataset = xr.merge(datasets)
+    dataset = rechunk_if_needed(dataset)  # Re-chunk usually needed after merge
     return dataset, config
 
 
@@ -343,6 +382,22 @@ def exclude_variables(dataset, config):
     return dataset, config
 
 
+def keep_variables(dataset, config):
+    keep_vars = get_ci(
+        config,
+        "keep_vars",
+        message="Missing 'keep_vars' config parameter for keep_variables process.",
+    )
+    if not isinstance(keep_vars, list):
+        raise TypeError(
+            "'keep_vars' parameter must be a list of variable names to keep."
+        )
+
+    vars_to_drop = [var for var in dataset.data_vars if var not in keep_vars]
+    dataset = dataset.drop_vars(vars_to_drop, errors="ignore")
+    return dataset, config
+
+
 def delta_time_to_datetime(dataset, config):
     time_ref_var = get_ci(
         config,
@@ -398,7 +453,10 @@ def delta_time_to_datetime(dataset, config):
         delta_unit = "h"  # Default to hours
 
     try:
-        time_ref = dataset[time_ref_var].values.item().decode("utf-8")
+        time_ref = dataset[time_ref_var].values.item()
+        time_ref = (
+            time_ref.decode("utf-8") if isinstance(time_ref, bytes) else str(time_ref)
+        )
         time_ref = datetime.strptime(time_ref, time_ref_format)
     except ValueError as e:
         raise ValueError(f"Error parsing reference time: {e}")
@@ -503,7 +561,7 @@ def save(dataset, config):
             if dataset[var].dtype == np.float64:
                 dataset[var] = dataset[var].astype(np.float32)
 
-    keep_keys = ["variables", "dimensions", "mesh_data_on_cells"]
+    keep_keys = ["variables", "dimensions", "mesh_data_on_cells", "mesh_type"]
     kazarr_metadata = {k: v for k, v in config.items() if k in keep_keys}
     dataset.attrs["kazarr"] = kazarr_metadata
 
@@ -535,6 +593,7 @@ def save(dataset, config):
     #   store = fs.get_mapper(final_path)
     #   dataset.to_zarr(store=store, mode="w", consolidated=(version == 2), zarr_format=version)
     # else:
+    dataset = rechunk_if_needed(dataset)  # Re-chunk usually needed after merge
     dataset.to_zarr(
         final_path, mode="w", consolidated=(version == 2), zarr_format=version
     )

@@ -4,6 +4,7 @@ import json
 
 import s3fs
 from botocore.exceptions import NoCredentialsError
+from dask import array as da
 
 
 # Load JSON file
@@ -102,3 +103,40 @@ def get_ci(d, key, default=None, message=None):
 def print_duration(start_time, message):
     duration = time.time() - start_time
     print("[KAZARR]{" + f"{duration:.2f}s" + "} " + message)
+
+
+def get_optimal_chunks_for_zarr(data_array, target_size="100MB"):
+    shape = data_array.shape
+    dtype = data_array.dtype
+    dims = data_array.dims
+
+    dask_chunks = da.core.normalize_chunks(
+        target_size, shape=shape, dtype=dtype, previous_chunks=None
+    )
+
+    uniform_chunks = {}
+    for i, dim_name in enumerate(dims):
+        uniform_chunks[dim_name] = dask_chunks[i][0]
+
+    return uniform_chunks
+
+
+def rechunk_if_needed(dataset):
+    for var_name, variable in dataset.variables.items():
+        if variable.chunks is None:
+            continue
+
+        for dim_chunks in variable.chunks:
+            if len(dim_chunks) <= 1:
+                continue
+
+            # Last chunk is often smaller, so we ignore it for the uniformity check
+            main_chunks = dim_chunks[:-1]
+
+            # Check if all main chunks are the same size (uniform)
+            if len(set(main_chunks)) > 1:
+                # Rechunk variable to uniform chunk sizes based on Dask's optimal chunking
+                optimal_chunks = get_optimal_chunks_for_zarr(variable)
+                dataset[var_name] = variable.chunk(optimal_chunks)
+
+    return dataset
