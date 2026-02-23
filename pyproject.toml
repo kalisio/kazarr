@@ -2,3 +2,12 @@
 name = "kazarr"
 version = "0.1.0"
 description = "A lightweight FastAPI service that exposes endpoints to interact with Zarr datasets stored in a Simple Storage Service (S3)"
+
+[tool.pytest.ini_options]
+markers = [
+  "General: General tests for the API",
+  "RegularGrid: Tests for regular grid datasets",
+  "RectilinearGrid: Tests for rectilinear grid datasets",
+  "RadialGrid: Tests for radial grid datasets",
+  "PointList: Tests for point list datasets"
+]
