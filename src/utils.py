@@ -46,9 +46,26 @@ def get_datasets_path():
     return os.getenv("DATASETS_PATH", "/")
 
 
+def s3_credentials_exists():
+    bucket = os.getenv("BUCKET_NAME")
+    if bucket is None:
+        return False
+    s3_store = s3fs.S3FileSystem(anon=False)
+    try:
+        s3_store.ls(os.path.join(bucket, get_datasets_path()))
+        return True
+    except NoCredentialsError:
+        return False
+    except Exception:
+        return False
+
+
 # Open Zarr dataset as XArray dataset from S3
 @lru_cache(maxsize=5)
 def load(path):
+    if not s3_credentials_exists():
+        return xr.open_zarr(os.path.join(get_datasets_path().lstrip("/"), path), chunks="auto")
+
     bucket = os.getenv("BUCKET_NAME")
     if bucket is None:
         raise exceptions.GenericInternalError(
@@ -109,6 +126,16 @@ def load_json(path):
 
 
 def find_datasets(path="/"):
+    if not s3_credentials_exists():
+        datasets = []
+        full_path = os.path.join(get_datasets_path().lstrip("/"), path.lstrip("/")) or "."
+        for root, dirs, _ in os.walk(full_path):
+            for dirname in dirs:
+                if dirname.endswith(".zarr"):
+                    found_path = os.path.join(root, dirname)
+                    datasets.append(found_path.replace(get_datasets_path(), "").replace(".zarr", ""))
+        return datasets
+
     # Search all folders recursively that ends with .zarr
     s3_store = s3fs.S3FileSystem(anon=False)
     bucket = os.getenv("BUCKET_NAME")
@@ -122,7 +149,6 @@ def find_datasets(path="/"):
             os.path.join(bucket, get_datasets_path().lstrip("/"), path.lstrip("/"))
         ):
             for dirname in dirs[:]:
-                print("CHECKING", dirname)
                 if dirname.endswith(".zarr"):
                     found_path = f"{root}/{dirname}"
                     datasets.append(
@@ -195,11 +221,12 @@ def get_required_dims_and_coords(
     variables,
     fixed_coords,
     fixed_dims,
-    interp_vars,
     request,
+    interp_vars=[],
     optional_coords=[],
     optional_dims=[],
     as_dims=[],
+    greedy=True # Will try to fix optional dimensions from query params if they are not provided as fixed_dims
 ):
     needed_dims = {}
 
@@ -217,6 +244,13 @@ def get_required_dims_and_coords(
             if variable not in dataset:
                 continue
             for dim in dataset[variable].dims:
+                if greedy:
+                    dim_value = request.query_params.get(dim)
+                    if dim_value is not None and dim not in fixed_dims:
+                        try:
+                            fixed_dims[dim] = int(dim_value)
+                        except ValueError:
+                            pass
                 if dim not in fixed_dims and dim not in optional_dims:
                     needed = True
                     assigned_coords = []

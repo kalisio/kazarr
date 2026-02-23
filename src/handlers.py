@@ -162,6 +162,8 @@ def extract(
             if time_interpolate:
                 interp_vars.append(time_var)
 
+    mesh_type = dget(config, "mesh_type", "auto")
+
     if len(missing_vars) > 0:
         raise exceptions.BadConfigurationVariable(missing_vars)
 
@@ -177,8 +179,8 @@ def extract(
         variable,
         fixed_coords,
         fixed_dims,
-        interp_vars,
         request,
+        interp_vars=interp_vars,
         optional_coords=[lon_var, lat_var],
         as_dims=as_dims,
     )
@@ -378,15 +380,16 @@ def extract(
 
         # TODO: how to know when mesh is radial ?
         lons_point, lats_points, height_points = extrapolate_edges_from_cell_data(
-            lons, lats, None, "rectilinear"
+            lons, lats, None, "radial" if mesh_type == "radial" else "rectilinear"
         )
 
         temp_grid = pv.StructuredGrid(lons_point, lats_points, height_points)
-        temp_grid.cell_data[variable] = vals.ravel()
+        # Use "F" order to match 2D arrays with PyVista points (column-major order)
+        temp_grid.cell_data[variable] = vals.ravel(order="F")
         temp_point_grid = temp_grid.cell_data_to_point_data()
 
         new_shape = lons_point.shape
-        vals = temp_point_grid.point_data[variable].reshape(new_shape)
+        vals = temp_point_grid.point_data[variable].reshape(new_shape, order="F")
         lons, lats = lons_point, lats_points
 
         if is_regular_grid:
@@ -459,30 +462,30 @@ def extract(
 
     if out_type == "mesh":
         step_logger.step_start("Clean data for PyVista")
-        # Transpose for pyvista (masked_cropped should also be transposed)
-        vals = vals.T
 
         # TODO Handle 3D
         z_zeros = np.zeros_like(lons)
         grid = pv.StructuredGrid(lons, lats, z_zeros)
-        grid.point_data[variable] = vals.ravel()
+        grid.point_data[variable] = vals.ravel(order="F")
+        valid_mask = np.ones_like(grid.point_data[variable])
         if mask_cropped is not None:
-            # Create a valid mask for thresholding (bool to float)
-            grid.point_data["valid_mask"] = mask_cropped.T.ravel().astype(float)
-            # Set NaN values to 0 in valid_mask
-            grid.point_data["valid_mask"][np.isnan(vals.ravel())] = 0
-            try:
-                thresholded = grid.threshold(0.5, scalars="valid_mask")
-            except Exception as e:
-                raise exceptions.GenericInternalError(str(e))
-        else:
-            thresholded = grid
+            valid_mask *= mask_cropped.ravel(order="F").astype(float)
 
-        if thresholded.n_points == 0:
+        valid_mask[np.isnan(grid.point_data[variable])] = 0.0
+        grid.point_data["valid_mask"] = valid_mask
+        try:
+            thresholded = grid.threshold(0.5, scalars="valid_mask")
+        except Exception as e:
+            raise exceptions.GenericInternalError(str(e))
+
+        if thresholded.n_points == 0 or thresholded.n_cells == 0:
             raise exceptions.NoDataInSelection()
 
         step_logger.step_start("Generate mesh data")
         tri_grid = thresholded.triangulate()
+        # Remove unreferenced points to avoid artifacts in the output mesh (NaN values, duplicated vertices, etc.)
+        tri_grid = tri_grid.clean()
+
         vertices = tri_grid.points.flatten()
         # As cells are stored as (N, 4) with first value being number of points per cell (3 for triangle)
         # we need to reshape and skip first values
@@ -491,7 +494,7 @@ def extract(
 
         step_logger.step_start("Prepare output (mesh)")
         # This line is slow but as NaN are not supported in JSON, we need to convert them to None (null in JSON)
-        clean_values = [v if np.isfinite(v) else None for v in values]
+        clean_values = [float(v) if np.isfinite(v) else None for v in values]
 
         valid_numbers = values[np.isfinite(values)]
         if valid_numbers.size == 0:
@@ -748,6 +751,7 @@ def free_selection(dataset, variable, request, interp_vars=[], as_dims=[]):
         fixed_coords,
         fixed_dims,
         request,
+        interp_vars=interp_vars,
         optional_dims="*",
         as_dims=as_dims,
     )
