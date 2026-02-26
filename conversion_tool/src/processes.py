@@ -366,6 +366,19 @@ def rename_variables(dataset, config):
         raise TypeError(
             "'rename_map' parameter must be a dictionary mapping old variable names to new variable names."
         )
+    
+    rename_map = {old: new for old, new in rename_map.items() if old in dataset}
+    for old_name, new_name in rename_map.items():
+        if old_name not in dataset:
+            print(
+                f"Warning: Variable '{old_name}' not found in dataset for rename_variables process. Skipping."
+            )
+        elif new_name in dataset:
+            print(
+                f"Warning: Variable '{new_name}' already exists in dataset. Cannot rename '{old_name}' to '{new_name}'. Skipping."
+            )
+        else:
+            print(f"Renaming variable '{old_name}' to '{new_name}'")
 
     dataset = dataset.rename(rename_map)
     return dataset, config
