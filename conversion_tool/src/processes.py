@@ -262,9 +262,13 @@ def load_and_merge_from_grib(dataset, config):
 
     datasets = []
     for index, discriminator in enumerate(discriminators):
-        sub_dataset, _ = load_from_grib(
-            dataset, merge({"file_regex": f"^.*{discriminator}.*\.grib2$"}, config)
-        )
+        try:
+            sub_dataset, _ = load_from_grib(
+                dataset, merge({"file_regex": f"^.*{discriminator}.*\.grib2$"}, config)
+            )
+        except Exception:
+            # Don't fail if a discriminator doesn't match any file, just skip it
+            pass
 
         if index < len(rename_before_merge) and rename_before_merge[index]:
             sub_dataset = sub_dataset.rename(rename_before_merge[index])
