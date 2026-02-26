@@ -268,7 +268,7 @@ def load_and_merge_from_grib(dataset, config):
             )
         except Exception:
             # Don't fail if a discriminator doesn't match any file, just skip it
-            pass
+            continue
 
         if index < len(rename_before_merge) and rename_before_merge[index]:
             sub_dataset = sub_dataset.rename(rename_before_merge[index])
@@ -276,6 +276,9 @@ def load_and_merge_from_grib(dataset, config):
         print(sub_dataset.data_vars)
 
         datasets.append(sub_dataset)
+
+    if not datasets:
+        raise ValueError("No sub-datasets were loaded.")
 
     dataset = xr.merge(datasets)
     dataset = rechunk_if_needed(dataset)  # Re-chunk usually needed after merge
