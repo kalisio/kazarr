@@ -174,7 +174,7 @@ def load_from_grib(dataset, config):
                 concat_dim=concat_dim,
                 data_vars="minimal",
                 coords="minimal",
-                parallel=True,
+                parallel=False,
                 chunks="auto",
                 preprocess=progress_callback,
                 **backend_kwargs,
@@ -213,7 +213,7 @@ def load_from_grib(dataset, config):
                 concat_dim=concat_dim,
                 data_vars="minimal",
                 coords="minimal",
-                parallel=True,
+                parallel=False,
                 chunks="auto",
                 preprocess=progress_callback,
                 **backend_kwargs,
@@ -254,15 +254,18 @@ def load_and_merge_from_grib(dataset, config):
         message="Missing 'discriminator' config parameter for load_and_merge_from_grib process.",
     )
     rename_before_merge = get_ci(config, "rename_before_merge", default=[])
+    backend_kwargs = get_ci(config, "dataset_backend_kwargs", default=[])
 
     if isinstance(discriminator, str):
         discriminators = [discriminator]
     elif isinstance(discriminator, list):
         discriminators = discriminator
 
-    datasets = []
+    merged_dataset = None
     for index, discriminator in enumerate(discriminators):
         try:
+            if index < len(backend_kwargs):
+                config["backend_kwargs"] = backend_kwargs[index]
             sub_dataset, _ = load_from_grib(
                 dataset, merge({"file_regex": f"^.*{discriminator}.*\.grib2$"}, config)
             )
@@ -272,16 +275,17 @@ def load_and_merge_from_grib(dataset, config):
 
         if index < len(rename_before_merge) and rename_before_merge[index]:
             sub_dataset = sub_dataset.rename(rename_before_merge[index])
-        print("Loaded sub-dataset for discriminator:", discriminator)
-        print(sub_dataset.data_vars)
 
-        datasets.append(sub_dataset)
+        if merged_dataset is None:
+            merged_dataset = sub_dataset
+        else:
+            merged_dataset = xr.merge([merged_dataset, sub_dataset])
 
-    if not datasets:
-        raise ValueError("No sub-datasets were loaded.")
-
-    dataset = xr.merge(datasets)
-    dataset = rechunk_if_needed(dataset)  # Re-chunk usually needed after merge
+    if merged_dataset is not None:
+        dataset = rechunk_if_needed(merged_dataset) # Re-chunk usually needed after merge
+    else:
+        dataset = None
+    
     return dataset, config
 
 
