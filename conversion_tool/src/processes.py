@@ -2,6 +2,7 @@ import os
 import json
 import itertools
 import re
+import shutil
 
 import xarray as xr
 import numpy as np
@@ -9,7 +10,7 @@ import s3fs
 from pyproj import Transformer
 from datetime import datetime
 
-from src.utils import get_ci, merge, rechunk_if_needed
+from src.utils import get_ci, merge, rechunk_if_needed, merge_grib
 
 
 def load_from_netcdf(dataset, config):
@@ -255,6 +256,13 @@ def load_and_merge_from_grib(dataset, config):
     )
     rename_before_merge = get_ci(config, "rename_before_merge", default=[])
     backend_kwargs = get_ci(config, "dataset_backend_kwargs", default=[])
+    in_place = get_ci(config, "merge_in_place", default=False)
+    path = get_ci(
+        config,
+        "load_path",
+        get_ci(config, "path"),
+        message="Missing 'load_path' or 'path' config parameters for load_and merge_from_grib process.",
+    )
 
     if isinstance(discriminator, str):
         discriminators = [discriminator]
@@ -266,9 +274,20 @@ def load_and_merge_from_grib(dataset, config):
         try:
             if index < len(backend_kwargs):
                 config["backend_kwargs"] = backend_kwargs[index]
-            sub_dataset, _ = load_from_grib(
-                dataset, merge({"file_regex": f"^.*{discriminator}.*\.grib2$"}, config)
-            )
+            if in_place:
+                sub_dataset, _ = load_from_grib(
+                    dataset,
+                    merge({"file_regex": f"^.*{discriminator}.*\.grib2$"}, config),
+                )
+            else:
+                concat_filename = f"concatenated_{discriminator}_{index}.grib2"
+                config = merge_grib(
+                    path, concat_filename, config, f"*{discriminator}*.grib2"
+                )
+                sub_dataset, _ = load_from_grib(
+                    dataset,
+                    merge({"load_path": os.path.join(path, concat_filename)}, config),
+                )
         except Exception:
             # Don't fail if a discriminator doesn't match any file, just skip it
             continue
@@ -282,10 +301,12 @@ def load_and_merge_from_grib(dataset, config):
             merged_dataset = xr.merge([merged_dataset, sub_dataset])
 
     if merged_dataset is not None:
-        dataset = rechunk_if_needed(merged_dataset) # Re-chunk usually needed after merge
+        dataset = rechunk_if_needed(
+            merged_dataset
+        )  # Re-chunk usually needed after merge
     else:
         dataset = None
-    
+
     return dataset, config
 
 
@@ -373,7 +394,7 @@ def rename_variables(dataset, config):
         raise TypeError(
             "'rename_map' parameter must be a dictionary mapping old variable names to new variable names."
         )
-    
+
     rename_map = {old: new for old, new in rename_map.items() if old in dataset}
     for old_name, new_name in rename_map.items():
         if old_name not in dataset:
@@ -617,7 +638,8 @@ def save(dataset, config):
     #   store = fs.get_mapper(final_path)
     #   dataset.to_zarr(store=store, mode="w", consolidated=(version == 2), zarr_format=version)
     # else:
-    dataset = rechunk_if_needed(dataset)  # Re-chunk usually needed after merge
+
+    dataset = rechunk_if_needed(dataset)
     dataset.to_zarr(
         final_path, mode="w", consolidated=(version == 2), zarr_format=version
     )
@@ -632,4 +654,24 @@ def save_config(dataset, config):
     )
     with open(path, "w") as f:
         json.dump(config, f, indent=2)
+    return dataset, config
+
+
+def clean(dataset, config):
+    clean = get_ci(config, "clean", default={"used": False, "generated": True})
+
+    def clean_proc(paths):
+        for file in paths:
+            if os.path.exists(file):
+                if os.path.isfile(file):
+                    os.remove(file)
+                elif os.path.isdir(file):
+                    shutil.rmtree(file)
+
+    if clean.get("used", False):
+        used_paths = clean.get("used_paths", [])
+        clean_proc(used_paths)
+    if clean.get("generated", True):
+        generated_paths = clean.get("generated_paths", [])
+        clean_proc(generated_paths)
     return dataset, config

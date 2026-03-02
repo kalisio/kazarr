@@ -1,6 +1,8 @@
 import os
 import time
 import json
+from pathlib import Path
+import shutil
 
 import s3fs
 from botocore.exceptions import NoCredentialsError
@@ -64,7 +66,7 @@ def merge(src, dest):
 def camel_to_snake(string):
     if not string:
         return string
-    return "".join(["_" + l.lower() if l.isupper() else l for l in string])
+    return "".join(["_" + char.lower() if char.isupper() else char for char in string])
 
 
 # Convert snake_case to camelCase
@@ -140,3 +142,40 @@ def rechunk_if_needed(dataset):
                 dataset[var_name] = variable.chunk(optimal_chunks)
 
     return dataset
+
+
+def merge_grib(folder_path, output_filename, config, glob_search_pattern="*.grib2"):
+    print(f'[KAZARR] < Merging GRIB files in "{folder_path}" into "{output_filename}"')
+    if os.path.exists(os.path.join(folder_path, output_filename)):
+        os.remove(os.path.join(folder_path, output_filename))
+
+    folder = Path(folder_path)
+    files = sorted(folder.glob(glob_search_pattern))
+
+    if not files:
+        return
+
+    if "clean" not in config:
+        config["clean"] = {"used_paths": files}
+    elif "used_paths" not in config["clean"]:
+        config["clean"]["used_paths"] = files
+    else:
+        config["clean"]["used_paths"].extend(files)
+
+    with open(folder / output_filename, "wb") as output_file:
+        for file in files:
+            with open(file, "rb") as input_file:
+                shutil.copyfileobj(input_file, output_file)
+
+    if "generated_paths" not in config["clean"]:
+        config["clean"]["generated_paths"] = [
+            os.path.join(folder_path, output_filename)
+        ]
+    else:
+        config["clean"]["generated_paths"].append(
+            os.path.join(folder_path, output_filename)
+        )
+
+    print(f'[KAZARR] > Completed merging GRIB files into "{output_filename}"')
+
+    return config
