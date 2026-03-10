@@ -21,8 +21,7 @@ RUN pip install \
   dask \
   s3fs \
   matplotlib \
-  pyvista=0.47.1 \
-  vtk-base=9.5.2 \
+  pyvista \
   pyinstaller
 
 RUN pyinstaller -F -n conversion_tool main.py

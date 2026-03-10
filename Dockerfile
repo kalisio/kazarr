@@ -17,7 +17,8 @@ RUN micromamba install -y -n base -c conda-forge \
   dask \
   s3fs \
   matplotlib \
-  pyvista \
+  pyvista=0.47.1 \
+  vtk-base=9.5.2 \
   scipy \
   uvloop \
   loguru \
