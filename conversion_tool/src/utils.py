@@ -157,7 +157,7 @@ def merge_grib(folder_path, output_filename, config, glob_search_pattern="*.grib
     files = sorted(folder.glob(glob_search_pattern))
 
     if not files:
-        return
+        return config
 
     if "clean" not in config:
         config["clean"] = {"used_paths": files}

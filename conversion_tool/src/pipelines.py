@@ -43,7 +43,7 @@ def pipeline(config, name, dataset=None):
                 print_duration(
                     process_start_time, f'Completed process "{process_name}"'
                 )
-            except Exception as e2:
+            except Exception:
                 raise e
     print_duration(start_time, f'Completed pipeline "{name}"')
     return dataset, config
