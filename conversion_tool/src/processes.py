@@ -274,7 +274,7 @@ def load_and_merge_from_grib(dataset, config):
         try:
             if index < len(backend_kwargs):
                 config["backend_kwargs"] = backend_kwargs[index]
-            if in_place:
+            if in_place:  # TODO use only glob or regex, not both
                 sub_dataset, _ = load_from_grib(
                     dataset,
                     merge({"file_regex": f"^.*{discriminator}.*\.grib2$"}, config),
@@ -658,7 +658,9 @@ def save_config(dataset, config):
 
 
 def clean(dataset, config):
-    clean = get_ci(config, "clean", default={"used": False, "generated": True})
+    clean = get_ci(
+        config, "clean", default={"used": False, "generated": True, "idx": True}
+    )
 
     def clean_proc(paths):
         for file in paths:
@@ -668,10 +670,20 @@ def clean(dataset, config):
                 elif os.path.isdir(file):
                     shutil.rmtree(file)
 
+    def clean_idx(folders):
+        for folder in folders:
+            if os.path.exists(folder) and os.path.isdir(folder):
+                for file in os.listdir(folder):
+                    if file.endswith(".idx"):
+                        os.remove(os.path.join(folder, file))
+
     if clean.get("used", False):
         used_paths = clean.get("used_paths", [])
         clean_proc(used_paths)
     if clean.get("generated", True):
         generated_paths = clean.get("generated_paths", [])
         clean_proc(generated_paths)
+    if clean.get("idx", True):
+        idx_paths = clean.get("idx_folders", [])
+        clean_idx(idx_paths)
     return dataset, config

@@ -149,6 +149,10 @@ def merge_grib(folder_path, output_filename, config, glob_search_pattern="*.grib
     if os.path.exists(os.path.join(folder_path, output_filename)):
         os.remove(os.path.join(folder_path, output_filename))
 
+    # Remove .idx files if they exist, as they are not needed for the merge and can cause issues
+    for idx_file in Path(folder_path).glob(f"{output_filename}*.idx"):
+        os.remove(idx_file)
+
     folder = Path(folder_path)
     files = sorted(folder.glob(glob_search_pattern))
 
@@ -175,6 +179,11 @@ def merge_grib(folder_path, output_filename, config, glob_search_pattern="*.grib
         config["clean"]["generated_paths"].append(
             os.path.join(folder_path, output_filename)
         )
+
+    if "idx_folders" not in config["clean"]:
+        config["clean"]["idx_folders"] = [folder_path]
+    elif folder_path not in config["clean"]["idx_folders"]:
+        config["clean"]["idx_folders"].append(folder_path)
 
     print(f'[KAZARR] > Completed merging GRIB files into "{output_filename}"')
 
