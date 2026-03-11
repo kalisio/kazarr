@@ -5,7 +5,7 @@ import os
 
 from fastapi import FastAPI, Path, Query, Request, HTTPException
 from fastapi.openapi.docs import get_swagger_ui_html
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Literal
@@ -169,6 +169,14 @@ def list_datasets(
         raise HTTPException(status_code=500, detail=e.get())
     except exceptions.UserInputBasedException as e:
         raise HTTPException(status_code=404, detail=e.get())
+    
+
+# As FastAPI redirect_slashes only works for static paths, we need to create a custom endpoint to handle redirection for the /datasets path with optional search_path query parameter
+@app.get("/datasets/", include_in_schema=False)
+async def redirect_datasets(request: Request):
+    url = request.url
+    new_url = url.replace(path="/datasets")
+    return RedirectResponse(url=new_url, status_code=301)
 
 
 # As FastAPI can't handle endpoints with a path parameter followed by a static segment,
@@ -201,12 +209,16 @@ def dataset_infos(
     mesh_interpolate: bool = Query(False, include_in_schema=False),
     mesh_data_mapping: str | None = Query(None, include_in_schema=False),
     time_interpolate: bool = Query(False, include_in_schema=False),
+    interp_vars: list[str] = Query([], include_in_schema=False),
     as_dims: list[str] = Query([], include_in_schema=False),
     # == Probe parameters == #
-    variables: list[str] = Query(None, include_in_schema=False),  #! Must be defined for probe
+    variables: list[str] = Query(
+        None, include_in_schema=False
+    ),  #! Must be defined for probe
     lon: float = Query(None, include_in_schema=False),  #! Must be defined for probe
     lat: float = Query(None, include_in_schema=False),  #! Must be defined for probe
     height: float | None = Query(None, include_in_schema=False),
+    interpolate: bool = Query(True, include_in_schema=False),
     # as_dims => already defined in extraction parameters
     # == Isoline parameters == #
     # variable => already defined in extraction parameters
@@ -219,7 +231,7 @@ def dataset_infos(
     # as_dims => already defined in extraction parameters
     # == Free selection parameters == #
     # variable => already defined in extraction parameters
-    interp_vars: list[float] = Query([], include_in_schema=False),
+    # interp_vars => already defined in extraction parameters
     # as_dims => already defined in extraction parameters
 ):
     try:
@@ -247,6 +259,7 @@ def dataset_infos(
                 bounding_box=(lon_min, lat_min, lon_max, lat_max),
                 resolution_limit=resolution_limit,
                 format=format,
+                interp_vars=interp_vars,
                 time_interpolate=time_interpolate,
                 as_dims=as_dims,
             )
@@ -266,6 +279,7 @@ def dataset_infos(
                 lat,
                 request,
                 height=height,
+                interpolate=interpolate,
                 as_dims=as_dims,
             )
         elif dataset.endswith("/isoline"):
@@ -351,8 +365,12 @@ def extract_data(
         None,
         description="[format='mesh'] Whether the data of the mesh is on cells or on vertices. This will override the dataset configuration. (Supported values: 'vertices', 'cells')",
     ),
+    interp_vars: list[str] = Query(
+        [], description="Variables to interpolate during extraction"
+    ),
     time_interpolate: bool = Query(
-        False, description="Whether to interpolate values on time dimension"
+        False,
+        description="Whether to interpolate values on time dimension or to get the closest time step",
     ),
     as_dims: list[str] = Query(
         [],
@@ -374,6 +392,10 @@ def probe_data(
     lon: float = Query(..., description="The longitude coordinate to probe"),
     lat: float = Query(..., description="The latitude coordinate to probe"),
     height: float | None = Query(None, description="The height coordinate to probe"),
+    interpolate: bool = Query(
+        True,
+        description="Whether to interpolate values on spatial dimensions or to get the closest grid point",
+    ),
     as_dims: list[str] = Query(
         [],
         description="If some variables have the same name as dimensions, will force them to be treated as dimensions",
@@ -425,7 +447,7 @@ def free_selection_data(
         ..., description="The path to the dataset to perform selection on"
     ),
     variable: str = Query(..., description="The variable to perform selection on"),
-    interp_vars: list[float] = Query(
+    interp_vars: list[str] = Query(
         [], description="Variables to interpolate during selection"
     ),
     as_dims: list[str] = Query(

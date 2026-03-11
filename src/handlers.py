@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
 import pyvista as pv
-from scipy.interpolate import griddata, RegularGridInterpolator, NearestNDInterpolator
+from scipy.interpolate import RegularGridInterpolator, RBFInterpolator
 
 from src.utils import (
     dget,
@@ -107,6 +107,7 @@ def extract(
     bounding_box=None,
     resolution_limit=None,
     format="raw",
+    interp_vars=[],
     time_interpolate=False,
     as_dims=[],
 ):
@@ -136,7 +137,7 @@ def extract(
     fixed_coords, fixed_dims = dgets(
         config, ["variables.fixed", "dimensions.fixed"], {}
     )
-    interp_vars = []
+    interp_vars = interp_vars or []
 
     if variable not in dataset:
         raise exceptions.VariableNotFound([variable])
@@ -159,7 +160,7 @@ def extract(
             missing_vars.append(f"time ({time_var})")
         else:
             fixed_coords[time_var] = get_bounded_time(dataset, time_var, time)
-            if time_interpolate:
+            if time_interpolate and time_var not in interp_vars:
                 interp_vars.append(time_var)
 
     mesh_type = dget(config, "mesh_type", "auto")
@@ -440,19 +441,16 @@ def extract(
             if points.shape[0] < 4:
                 raise exceptions.TooFewPoints()
 
-            try:
-                # method='linear' is fast and precise. 'nearest' does pixel art.
-                step_logger.step_start("Interpolate unstructured grid")
-                interpolated_vals = griddata(
-                    points, values, (xi_mesh, yi_mesh), method=interpolation_method
-                )
+            # Remove duplicate points which can cause issues for interpolation (especially for RBFInterpolator)
+            # Mainly for radial meshes for seam where first and last columns are the same
+            points_uniques, indices_uniques = np.unique(points, axis=0, return_index=True)
+            points = points_uniques
+            values = values[indices_uniques]
 
-                # If missing values after linear interpolation, fill with nearest neighbor
-                # if np.any(np.isnan(interpolated_vals)):
-                #   mask_nan = np.isnan(interpolated_vals)
-                #   nn_interp = NearestNDInterpolator(points, values)
-                #   points_missing = np.column_stack((xi_mesh[mask_nan], yi_mesh[mask_nan]))
-                #   interpolated_vals[mask_nan] = nn_interp(points_missing)
+            try:
+                pts_target = np.column_stack((xi_mesh.ravel(), yi_mesh.ravel()))
+                rbf = RBFInterpolator(points, values, kernel='linear')
+                interpolated_vals = rbf(pts_target).reshape(xi_mesh.shape)
             except Exception as e:
                 raise exceptions.GenericInternalError(f"Interpolation failed: {str(e)}")
 
@@ -565,7 +563,7 @@ def extract(
     return out
 
 
-def probe(dataset, variables, lon, lat, request, height=None, as_dims=[]):
+def probe(dataset, variables, lon, lat, request, height=None, interpolate=True, as_dims=[]):
     variables = variables if isinstance(variables, list) else [variables]
 
     dataset, config = load_dataset(dataset)
@@ -574,6 +572,7 @@ def probe(dataset, variables, lon, lat, request, height=None, as_dims=[]):
     fixed_coords, fixed_dims = dgets(
         config, ["variables.fixed", "dimensions.fixed"], {}
     )
+    interp_vars = []
 
     lon_var, lat_var, height_var, time_var = dgets(
         config, ["variables.lon", "variables.lat", "variables.height", "variables.time"]
@@ -599,10 +598,12 @@ def probe(dataset, variables, lon, lat, request, height=None, as_dims=[]):
 
     longitudes = dataset[lon_var]
     latitudes = dataset[lat_var]
-    if longitudes.ndim == 1 and latitudes.ndim == 1:
+    if longitudes.ndim == 1 and latitudes.ndim == 1: # Regular grid
         fixed_coords[lon_var] = lon
         fixed_coords[lat_var] = lat
-    else:
+        if interpolate:
+            interp_vars.extend([lon_var, lat_var])
+    else: # Irregular grid
         if with_height:
             heights = dataset[height_var].values
             dist = np.sqrt(
@@ -613,10 +614,36 @@ def probe(dataset, variables, lon, lat, request, height=None, as_dims=[]):
         else:
             dist = np.sqrt((longitudes - lon) ** 2 + (latitudes - lat) ** 2)
         dist_values = dist.values
-        min_idx_flat = np.argmin(dist_values)
-        indices = np.unravel_index(min_idx_flat, dist_values.shape)
-        for dim_name, indice in zip(dist.dims, indices):
-            fixed_dims[dim_name] = indice
+        if interpolate: # IDW interpolation
+            k_neighbors = 4  # Number of neighbors to consider for interpolation
+            flat_dist = dist_values.flatten()
+            k_neighbors = min(k_neighbors, len(flat_dist))
+
+            # Find indices of the k nearest neighbors
+            min_indices = np.argpartition(flat_dist, k_neighbors - 1)[:k_neighbors]
+            nearest_dists = flat_dist[min_indices]
+
+            # Exact point case
+            if np.any(nearest_dists == 0):
+                weights = np.zeros(k_neighbors)
+                weights[np.argmin(nearest_dists)] = 1.0
+            else:
+                weights = (1.0 / nearest_dists) / np.sum(1.0 / nearest_dists)
+
+            # Flat indices to multi-dimensional indices
+            neighbor_indices = [
+                np.unravel_index(idx, dist_values.shape) for idx in min_indices
+            ]
+
+            # Temporarily set `fixed_dims` with the heaviest point so that `get_required_dims_and_coords` works normally.
+            nearest_idx = neighbor_indices[np.argmax(weights)]
+            for dim_name, indice in zip(dist.dims, nearest_idx):
+                fixed_dims[dim_name] = indice
+        else:
+            min_idx_flat = np.argmin(dist_values)
+            indices = np.unravel_index(min_idx_flat, dist_values.shape)
+            for dim_name, indice in zip(dist.dims, indices):
+                fixed_dims[dim_name] = indice
 
     # Time is optional, so add to both optional coords and dims, as one or the other may be defined in config
     optional_coords = [time_var] if time_var is not None else []
@@ -635,12 +662,34 @@ def probe(dataset, variables, lon, lat, request, height=None, as_dims=[]):
     # Get values for each variable
     data = {}
     for var in variables:
-        data[var] = {
-            "values": sel(dataset, var, fixed_coords, fixed_dims).values.tolist(),
-            "attrs": dataset[var].attrs,
-        }
+        if (longitudes.ndim != 1 or latitudes.ndim != 1) and interpolate: # Irregular grid with interpolation
+            interpolated_values = None
+            for idx, weight in zip(neighbor_indices, weights):
+                neighbor_dims = fixed_dims.copy()
+                for dim_name, indice in zip(dist.dims, idx):
+                    neighbor_dims[dim_name] = indice
+
+                neighbor_val = sel(
+                    dataset, var, fixed_coords, neighbor_dims, interp_vars=interp_vars
+                ).values
+
+                if interpolated_values is None:
+                    interpolated_values = neighbor_val * weight
+                else:
+                    interpolated_values += neighbor_val * weight
+
+            data[var] = {
+                "values": interpolated_values.tolist(),
+                "attrs": dataset[var].attrs,
+            }
+        else:    
+            data[var] = {
+                "values": sel(dataset, var, fixed_coords, fixed_dims, interp_vars=interp_vars).values.tolist(),
+                "attrs": dataset[var].attrs,
+            }
 
     # Get times list
+    times = None
     if time_var is not None and time_var in dataset:
         times = sel(dataset, time_var, fixed_coords, fixed_dims).values
         if np.issubdtype(times.dtype, np.datetime64):

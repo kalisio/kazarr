@@ -64,7 +64,9 @@ def s3_credentials_exists():
 @lru_cache(maxsize=5)
 def load(path):
     if not s3_credentials_exists():
-        return xr.open_zarr(os.path.join(get_datasets_path().lstrip("/"), path), chunks="auto")
+        return xr.open_zarr(
+            os.path.join(get_datasets_path().lstrip("/"), path), chunks="auto"
+        )
 
     bucket = os.getenv("BUCKET_NAME")
     if bucket is None:
@@ -128,12 +130,16 @@ def load_json(path):
 def find_datasets(path="/"):
     if not s3_credentials_exists():
         datasets = []
-        full_path = os.path.join(get_datasets_path().lstrip("/"), path.lstrip("/")) or "."
+        full_path = (
+            os.path.join(get_datasets_path().lstrip("/"), path.lstrip("/")) or "."
+        )
         for root, dirs, _ in os.walk(full_path):
             for dirname in dirs:
                 if dirname.endswith(".zarr"):
                     found_path = os.path.join(root, dirname)
-                    datasets.append(found_path.replace(get_datasets_path(), "").replace(".zarr", ""))
+                    datasets.append(
+                        found_path.replace(get_datasets_path(), "").replace(".zarr", "")
+                    )
         return datasets
 
     # Search all folders recursively that ends with .zarr
@@ -245,10 +251,16 @@ def get_required_dims_and_coords(
                 continue
             for dim in dataset[variable].dims:
                 if greedy:
-                    dim_value = request.query_params.get(dim)
-                    if dim_value is not None and dim not in fixed_dims:
+                    value = request.query_params.get(dim)
+                    if (
+                        dim in dataset.coords
+                        and dim not in as_dims
+                        and value is not None
+                    ):
+                        fixed_coords[dim] = value
+                    elif value is not None and dim not in fixed_dims:
                         try:
-                            fixed_dims[dim] = int(dim_value)
+                            fixed_dims[dim] = int(value)
                         except ValueError:
                             pass
                 if dim not in fixed_dims and dim not in optional_dims:
