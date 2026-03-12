@@ -5,6 +5,7 @@ from pathlib import Path
 import shutil
 
 import s3fs
+import numpy as np
 from botocore.exceptions import NoCredentialsError
 from dask import array as da
 
@@ -123,7 +124,7 @@ def get_optimal_chunks_for_zarr(data_array, target_size="100MB"):
     return uniform_chunks
 
 
-def rechunk_if_needed(dataset):
+def rechunk_if_needed(dataset, target_size_mb=100, tolerance=0.3):
     for var_name, variable in dataset.variables.items():
         if variable.chunks is None:
             continue
@@ -132,11 +133,21 @@ def rechunk_if_needed(dataset):
             if len(dim_chunks) <= 1:
                 continue
 
-            # Last chunk is often smaller, so we ignore it for the uniformity check
-            main_chunks = dim_chunks[:-1]
+            # Check if chunks are too small compared to target size
+            chunk_shape = [c[0] for c in variable.chunks]
+            bytes_per_chunk = np.prod(chunk_shape) * variable.dtype.itemsize
+            current_chunk_mb = bytes_per_chunk / (1024**2)
+            chunks_too_small = current_chunk_mb < target_size_mb * (1 - tolerance)
 
             # Check if all main chunks are the same size (uniform)
-            if len(set(main_chunks)) > 1:
+            is_uniform = True
+            for dim_chunks in variable.chunks:
+                # Last chunk is often smaller, so we ignore it for the uniformity check
+                if len(dim_chunks) > 1 and len(set(dim_chunks[:-1])) > 1:
+                    is_uniform = False
+                    break
+
+            if not is_uniform or chunks_too_small:
                 # Rechunk variable to uniform chunk sizes based on Dask's optimal chunking
                 optimal_chunks = get_optimal_chunks_for_zarr(variable)
                 dataset[var_name] = variable.chunk(optimal_chunks)
