@@ -3,7 +3,11 @@ import math
 import matplotlib.pyplot as plt
 import numpy as np
 import pyvista as pv
-from scipy.interpolate import RegularGridInterpolator, RBFInterpolator
+from scipy.interpolate import (
+    RegularGridInterpolator,
+    RBFInterpolator,
+    NearestNDInterpolator,
+)
 
 from src.utils import (
     dget,
@@ -429,12 +433,12 @@ def extract(
                 interpolated_vals = rgi(pts).reshape(xi_mesh.shape)
             except Exception as e:
                 raise exceptions.GenericInternalError(f"Interpolation failed: {str(e)}")
-        else:
+        elif mesh_interpolate:
+            step_logger.step_start("Interpolate unstructured grid")
             lons_flat = lons.ravel()
             lats_flat = lats.ravel()
             vals_flat = vals.ravel()
 
-            # Use griddata for non regular grids (slower)
             valid_mask = np.isfinite(vals_flat)
             points = np.column_stack((lons_flat[valid_mask], lats_flat[valid_mask]))
             values = vals_flat[valid_mask]
@@ -456,6 +460,28 @@ def extract(
                 interpolated_vals = rbf(pts_target).reshape(xi_mesh.shape)
             except Exception as e:
                 raise exceptions.GenericInternalError(f"Interpolation failed: {str(e)}")
+        else:
+            step_logger.step_start("No interpolation (Nearest Neighbor mapping)")
+            lons_flat = lons.ravel()
+            lats_flat = lats.ravel()
+            vals_flat = vals.ravel()
+
+            valid_mask = np.isfinite(vals_flat)
+            points = np.column_stack((lons_flat[valid_mask], lats_flat[valid_mask]))
+            values = vals_flat[valid_mask]
+
+            if points.shape[0] < 1:
+                raise exceptions.TooFewPoints()
+
+            try:
+                pts_target = np.column_stack((xi_mesh.ravel(), yi_mesh.ravel()))
+                nn_interp = NearestNDInterpolator(points, values)
+                interpolated_vals = nn_interp(pts_target).reshape(xi_mesh.shape)
+
+            except Exception as e:
+                raise exceptions.GenericInternalError(
+                    f"Nearest neighbor mapping failed: {str(e)}"
+                )
 
         lons, lats, vals = xi_mesh, yi_mesh, interpolated_vals
         # Recreate mask_cropped based on NaNs from griddata
