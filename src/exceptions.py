@@ -103,3 +103,8 @@ class NoDataInSelection(UserInputBasedException):
         super().__init__(
             "NO_DATA_IN_SELECTION", "No data available in the selected area and time."
         )
+
+
+class BadSelection(UserInputBasedException):
+    def __init__(self, message):
+        super().__init__("BAD_SELECTION", message)

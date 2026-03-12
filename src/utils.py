@@ -232,7 +232,7 @@ def get_required_dims_and_coords(
     optional_coords=[],
     optional_dims=[],
     as_dims=[],
-    greedy=True # Will try to fix optional dimensions from query params if they are not provided as fixed_dims
+    greedy=True,  # Will try to fix optional dimensions from query params if they are not provided as fixed_dims
 ):
     needed_dims = {}
 
@@ -417,18 +417,30 @@ def sel(dataset, variable, fixed_coords, fixed_dims, interp_vars=[]):
         if not is_monotonic_var(dataset, var) and var not in interp_vars
     }
 
-    data = (
-        dataset.sel(monotonic_fixed_vars, method="nearest")
-        .sel(non_monotonic_fixed_vars)
-        .isel(fixed_dims)[variable]
-    )
+    try:
+        data = (
+            dataset.sel(monotonic_fixed_vars, method="nearest")
+            .sel(non_monotonic_fixed_vars)
+            .isel(fixed_dims)[variable]
+        )
+    except ValueError:
+        raise exceptions.BadSelection(
+            "Data selection failed. Please check your query parameters and dataset configuration. This can happen if you have specified a coordinate and its corresponding dimension at the same time."
+        )
     # Interpolate if needed
     if len(interp_vars) > 0:
         interpolated_vars = {
             var: fixed_coords[var] for var in interp_vars if var in fixed_coords
         }
         if len(interpolated_vars) > 0:
-            data = data.interp(interpolated_vars, method="linear", assume_sorted=True)
+            try:
+                data = data.interp(
+                    interpolated_vars, method="linear", assume_sorted=True
+                )
+            except ValueError:
+                raise exceptions.BadSelection(
+                    "Data interpolation failed. Please check your query parameters and dataset configuration."
+                )
     return data
 
 
