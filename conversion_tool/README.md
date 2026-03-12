@@ -64,8 +64,10 @@ conversion_tool new-dataset [OPTIONS] DATASET_NAME INPUT_PATH
 *   `-d, --description TEXT`: Description of the new dataset.
 *   `-o, --output PATH`: Output path for the processed dataset (local or `s3://`).
 *   `-p, --pipeline TEXT`: [Pipeline](#pipelines) to use for processing the new dataset [default: preprocess].
-*   `--rgstr-endpoint URL`: Endpoint URL for dataset registration service.
 *   `--templates-path PATH`: Path to [templates](#templates) configuration file [default: templates.json].
+*   `--data-mapping`: Whether to map data on mesh vertices or celles [default: vertices].
+*   `--mesh-type`: Type of mesh to generate (default: auto, which infers from data between regular and rectilinear but not able to handle radial meshes)
+*   `--dask-dashboard`: Start a Dask dashboard for monitoring the processing
 
 ### `list-templates`
 
@@ -127,6 +129,10 @@ You can define those parameters globally at the root of the config object, or di
 }
 ```
 
+### `init_dask_dashboard`
+
+Start a Dask client to access a dashboard from a browser, allowing to view Dask tasks during processing. This process will automatically be added to the list if `--dask-dashboard` is provided on the command line.
+
 ### `load_from_netcdf`
 
 Load a dataset from NetCDF(s) file(s) from local storage or S3.
@@ -158,6 +164,21 @@ Load a Zarr dataset from local storage or S3.
 | Name        | Type   | Description                                                                 |
 | ----------- | ------ | --------------------------------------------------------------------------- |
 | `load_path` | String | Path to Zarr store (Defaults to `INPUT_PATH` from command line)             |
+
+### `load_and_merge_from_grib`
+
+For a folder of GRIB files, allow to concatenate some files (filtered by a string discriminator) with a binary concatenation into a new temporary GRIB dataset, and then, merge all of thoses into a XArray dataset.
+For example, this process can be used with files splitted over time and packages. This process will concatenate each package over time and then merge all packages.
+
+**Parameters:**
+
+| Name                     | Type         | Description                                                                                                                                                                                            |
+| ------------------------ | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `discriminator`          | List<String\> | String to find in each file name you want to group to be concatenated                                                                                                                                  |
+| `rename_before_merge`    | List<Object\> | In some cases, two datasets can have variables with same name, and that will cause merge to fail. For each group, you should define an object with original variable name as key and new one as value  |
+| `dataset_backend_kwargs` | List<Object\> | For each group of file that will be concatenated, you can provide args to cfgrib engine (e.g. `{"filter_by_keys": {"shortName": ["MyVariable"]}` will only consider `MyVariable` when loading dataset) |
+| `merge_in_place`         | Boolean      | If true, will use Xarray to concatenate files, instead of creating a temporary GRIB file. This may increase needed memory                                                                              |
+| `path`                   | String       | Path to the folder where GRIB files are stored                                                                                                                                                         |
 
 ### `assign_coords`
 
@@ -204,6 +225,26 @@ Rename existing variables in the dataset.
 | ------------ | ------ | --------------------------------------------------------------------------- |
 | `rename_map` | Object | Dictionary where keys are current names and values are new names            |
 
+### `exclude_variables`
+
+Exclude some variables from the dataset
+
+**Parameters:**
+
+| Name           | Type         | Description                                   |
+| -------------- | ------------ | --------------------------------------------- |
+| `exclude_vars` | List<String\> | List of variables to exclude from the dataset |
+
+### `keep_variables`
+
+Opposite of the previous process: keep only provided variables
+
+**Parameters:**
+
+| Name        | Type         | Description               |
+| ----------- | ------------ | ------------------------- |
+| `keep_vars` | List<String\> | List of variables to keep |
+
 ### `delta_time_to_datetime`
 
 If your dataset uses a time dimension with an offset from a reference date (e.g., "hours since ..."), this process converts those offsets into actual datetime objects.
@@ -246,11 +287,12 @@ Save the resulting Zarr dataset to local storage or S3.
 | `version`            | Integer | Zarr format version (2 or 3). Default: 3                                                                          |
 | `float64_to_float32` | Boolean | Convert float64 data to float32 to save space. Default: false                                                     |
 
-### `register_on_api`
+### `clean`
 
-Send minimal metadata concerning the newly created dataset to a kazarr API
+Delete all files generated or used during any of thoses processes
 
-Parameters:
-| Name                      | Type   | Description                                                                                                                                  |
-| ------------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| registration_endpoint_url | String | URL to API endpoint on which dataset metadata will be posted. You can use `--rgstr-endpoint` parameter in command line to define this value. |
+**Parameters:**
+
+| Name    | Type   | Description                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `clean` | Object | Define which files should be deleted. Thoses keys can be defined in this object: "used", "generated", "idx", and must have a boolean value. "used" (default: False) correspond to files that have been used for any process. "generated" (default: True) correspond to files that have been generated by any process. "idx" (default: True) correspond to index files generated by Xarray for some formats like GRIB. |
