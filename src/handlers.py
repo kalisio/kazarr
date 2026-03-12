@@ -2,7 +2,6 @@ import math
 
 import matplotlib.pyplot as plt
 import numpy as np
-import xarray as xr
 import pyvista as pv
 from scipy.interpolate import RegularGridInterpolator, RBFInterpolator
 
@@ -127,6 +126,8 @@ def extract(
             time,
             resolution_limit,
             format,
+            interp_vars,
+            time_interpolate,
             as_dims,
         ),
     )
@@ -380,18 +381,18 @@ def extract(
         step_logger.step_start("Cell to point data conversion")
 
         # TODO: how to know when mesh is radial ?
-        lons_point, lats_points, height_points = extrapolate_edges_from_cell_data(
+        lons_points, lats_points, height_points = extrapolate_edges_from_cell_data(
             lons, lats, None, "radial" if mesh_type == "radial" else "rectilinear"
         )
 
-        temp_grid = pv.StructuredGrid(lons_point, lats_points, height_points)
+        temp_grid = pv.StructuredGrid(lons_points, lats_points, height_points)
         # Use "F" order to match 2D arrays with PyVista points (column-major order)
         temp_grid.cell_data[variable] = vals.ravel(order="F")
         temp_point_grid = temp_grid.cell_data_to_point_data()
 
-        new_shape = lons_point.shape
+        new_shape = lons_points.shape
         vals = temp_point_grid.point_data[variable].reshape(new_shape, order="F")
-        lons, lats = lons_point, lats_points
+        lons, lats = lons_points, lats_points
 
         if is_regular_grid:
             lons_1d = lons[0, :]
@@ -443,13 +444,15 @@ def extract(
 
             # Remove duplicate points which can cause issues for interpolation (especially for RBFInterpolator)
             # Mainly for radial meshes for seam where first and last columns are the same
-            points_uniques, indices_uniques = np.unique(points, axis=0, return_index=True)
+            points_uniques, indices_uniques = np.unique(
+                points, axis=0, return_index=True
+            )
             points = points_uniques
             values = values[indices_uniques]
 
             try:
                 pts_target = np.column_stack((xi_mesh.ravel(), yi_mesh.ravel()))
-                rbf = RBFInterpolator(points, values, kernel='linear')
+                rbf = RBFInterpolator(points, values, kernel="linear")
                 interpolated_vals = rbf(pts_target).reshape(xi_mesh.shape)
             except Exception as e:
                 raise exceptions.GenericInternalError(f"Interpolation failed: {str(e)}")
@@ -563,7 +566,9 @@ def extract(
     return out
 
 
-def probe(dataset, variables, lon, lat, request, height=None, interpolate=True, as_dims=[]):
+def probe(
+    dataset, variables, lon, lat, request, height=None, interpolate=True, as_dims=[]
+):
     variables = variables if isinstance(variables, list) else [variables]
 
     dataset, config = load_dataset(dataset)
@@ -598,12 +603,12 @@ def probe(dataset, variables, lon, lat, request, height=None, interpolate=True, 
 
     longitudes = dataset[lon_var]
     latitudes = dataset[lat_var]
-    if longitudes.ndim == 1 and latitudes.ndim == 1: # Regular grid
+    if longitudes.ndim == 1 and latitudes.ndim == 1:  # Regular grid
         fixed_coords[lon_var] = lon
         fixed_coords[lat_var] = lat
         if interpolate:
             interp_vars.extend([lon_var, lat_var])
-    else: # Irregular grid
+    else:  # Irregular grid
         if with_height:
             heights = dataset[height_var].values
             dist = np.sqrt(
@@ -614,7 +619,7 @@ def probe(dataset, variables, lon, lat, request, height=None, interpolate=True, 
         else:
             dist = np.sqrt((longitudes - lon) ** 2 + (latitudes - lat) ** 2)
         dist_values = dist.values
-        if interpolate: # IDW interpolation
+        if interpolate:  # IDW interpolation
             k_neighbors = 4  # Number of neighbors to consider for interpolation
             flat_dist = dist_values.flatten()
             k_neighbors = min(k_neighbors, len(flat_dist))
@@ -662,7 +667,9 @@ def probe(dataset, variables, lon, lat, request, height=None, interpolate=True, 
     # Get values for each variable
     data = {}
     for var in variables:
-        if (longitudes.ndim != 1 or latitudes.ndim != 1) and interpolate: # Irregular grid with interpolation
+        if (
+            longitudes.ndim != 1 or latitudes.ndim != 1
+        ) and interpolate:  # Irregular grid with interpolation
             interpolated_values = None
             for idx, weight in zip(neighbor_indices, weights):
                 neighbor_dims = fixed_dims.copy()
@@ -682,9 +689,11 @@ def probe(dataset, variables, lon, lat, request, height=None, interpolate=True, 
                 "values": interpolated_values.tolist(),
                 "attrs": dataset[var].attrs,
             }
-        else:    
+        else:
             data[var] = {
-                "values": sel(dataset, var, fixed_coords, fixed_dims, interp_vars=interp_vars).values.tolist(),
+                "values": sel(
+                    dataset, var, fixed_coords, fixed_dims, interp_vars=interp_vars
+                ).values.tolist(),
                 "attrs": dataset[var].attrs,
             }
 
@@ -807,3 +816,112 @@ def free_selection(dataset, variable, request, interp_vars=[], as_dims=[]):
 
     data = sel(dataset, variable, fixed_coords, fixed_dims, interp_vars).values.tolist()
     return {"data": data}
+
+
+def mesh(dataset, format="mesh", force_data_mapping=None):
+    step_logger = StepDurationLogger(
+        "mesh",
+        parameters=(dataset, format, force_data_mapping),
+    )
+
+    step_logger.step_start("Load dataset and config")
+    dataset, config = load_dataset(dataset)
+
+    lon_var, lat_var = dgets(config, ["variables.lon", "variables.lat"])
+    missing_vars = []
+    if lon_var not in dataset:
+        missing_vars.append(f"lon ({lon_var})")
+    if lat_var not in dataset:
+        missing_vars.append(f"lat ({lat_var})")
+    if len(missing_vars) > 0:
+        raise exceptions.BadConfigurationVariable(missing_vars)
+
+    lons = dataset[lon_var]
+    lats = dataset[lat_var]
+
+    is_regular_grid = lons.ndim == 1 and lats.ndim == 1 and lons.dims != lats.dims
+    is_point_list = lons.ndim == 1 and lats.ndim == 1 and lons.dims == lats.dims
+
+    if is_regular_grid:
+        lons, lats = np.meshgrid(lons.values, lats.values)
+        height_points = np.zeros_like(lons)
+
+    cell_data = force_data_mapping != "vertices" and (
+        force_data_mapping == "cells" or dget(config, "mesh_data_on_cells", False)
+    )
+    if cell_data and not is_point_list:
+        step_logger.step_start("Cell to point data conversion")
+        mesh_type = dget(config, "mesh_type", "auto")
+
+        # TODO: how to know when mesh is radial ?
+        lons_points, lats_points, height_points = extrapolate_edges_from_cell_data(
+            lons, lats, None, "radial" if mesh_type == "radial" else "rectilinear"
+        )
+    else:
+        lons_points, lats_points = lons.values, lats.values
+        # TODO: handle 3D
+        height_points = np.zeros_like(lons_points)
+
+    if format == "geojson":
+        step_logger.step_start("Prepare output (GeoJSON)")
+        flat_lons = lons_points.flatten()
+        flat_lats = lats_points.flatten()
+        flat_heights = height_points.flatten()
+
+        features = []
+        for index, _ in np.ndenumerate(lons_points):
+            feature_id = "_".join(map(str, index))
+            flat_idx = np.ravel_multi_index(index, lons_points.shape)
+            features.append(
+                {
+                    "type": "Feature",
+                    "geometry": {
+                        "type": "Point",
+                        "coordinates": [
+                            float(flat_lons[flat_idx]),
+                            float(flat_lats[flat_idx]),
+                            float(flat_heights[flat_idx]),
+                        ],
+                    },
+                    "properties": {"id": feature_id},
+                }
+            )
+
+        out = {"type": "FeatureCollection", "features": features}
+    else:
+        if is_point_list:
+            points = np.column_stack((lons_points, lats_points, height_points))
+
+            cloud = pv.PolyData(points)
+            tri_grid = cloud.delaunay_2d()
+            cells = tri_grid.faces
+        else:
+            lons_2d = (
+                lons_points.squeeze()
+                if lons_points.ndim == 3 and lons_points.shape[0] == 1
+                else lons_points
+            )
+            lats_2d = (
+                lats_points.squeeze()
+                if lats_points.ndim == 3 and lats_points.shape[0] == 1
+                else lats_points
+            )
+            height_2d = (
+                height_points.squeeze()
+                if height_points.ndim == 3 and height_points.shape[0] == 1
+                else height_points
+            )
+            step_logger.step_start("Prepare output (mesh)")
+            grid = pv.StructuredGrid(lons_2d, lats_2d, height_2d)
+            tri_grid = grid.triangulate()
+            cells = tri_grid.cells
+
+        vertices = tri_grid.points.flatten()
+        # As cells are stored as (N, 4) with first value being number of points per cell (3 for triangle)
+        # we need to reshape and skip first values
+        indices = cells.reshape((-1, 4))[:, 1:].flatten()
+
+        out = {"vertices": vertices.tolist(), "indices": indices.tolist()}
+
+    step_logger.end()
+    return out

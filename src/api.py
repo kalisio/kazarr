@@ -233,6 +233,9 @@ def dataset_infos(
     # variable => already defined in extraction parameters
     # interp_vars => already defined in extraction parameters
     # as_dims => already defined in extraction parameters
+    # == Mesh parameters == #
+    # format => already defined in extraction parameters
+    # mesh_data_mapping => already defined in extraction parameters
 ):
     try:
         if dataset.endswith("/extract"):
@@ -312,6 +315,12 @@ def dataset_infos(
                 request,
                 interp_vars=interp_vars,
                 as_dims=as_dims,
+            )
+        elif dataset.endswith("/mesh"):
+            return handlers.mesh(
+                dataset[:-5],
+                format=format,
+                force_data_mapping=mesh_data_mapping,
             )
         return handlers.dataset_infos(dataset)
     except exceptions.GenericInternalError as e:
@@ -453,6 +462,27 @@ def free_selection_data(
     as_dims: list[str] = Query(
         [],
         description="If some variables have the same name as dimensions, will force them to be treated as dimensions",
+    ),
+):
+    pass
+
+
+@app.get(
+    "/datasets/{dataset:path}/mesh",
+    summary="Get mesh representation of the dataset",
+    description="Retrieve a mesh representation of the dataset for visualization purposes.",
+)
+def mesh(
+    dataset: str = Path(
+        ..., description="The path to the dataset to get the mesh representation from"
+    ),
+    format: str = Query(
+        "mesh",
+        description="The format of the extracted data (Currently supported: 'mesh', 'geojson')",
+    ),
+    mesh_data_mapping: str | None = Query(
+        None,
+        description="Whether the data of the mesh is on cells or on vertices. This will override the dataset configuration. (Supported values: 'vertices', 'cells')",
     ),
 ):
     pass
