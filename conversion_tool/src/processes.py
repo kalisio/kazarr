@@ -3,6 +3,7 @@ import json
 import itertools
 import re
 import shutil
+from pathlib import Path
 
 import xarray as xr
 import numpy as np
@@ -10,7 +11,20 @@ import s3fs
 from pyproj import Transformer
 from datetime import datetime
 
+from dask.distributed import Client, performance_report
+
 from src.utils import get_ci, merge, rechunk_if_needed, merge_grib
+
+
+def init_dask_dashboard(dataset, config):
+    client = Client()
+    link = client.dashboard_link
+    print("======================================" + (len(link) * "="))
+    print(f"[KAZARR] Dask dashboard available at: {link}")
+    print("======================================" + (len(link) * "="))
+    config["dask_dashboard_initialised"] = True
+
+    return dataset, config
 
 
 def load_from_netcdf(dataset, config):
@@ -306,6 +320,11 @@ def load_and_merge_from_grib(dataset, config):
         )  # Re-chunk usually needed after merge
     else:
         dataset = None
+
+    if dataset is None:
+        raise ValueError(
+            f"Unable to find any files matching discriminators {discriminators} in path: {path} for load_and_merge_from_grib process."
+        )
 
     return dataset, config
 
@@ -640,9 +659,19 @@ def save(dataset, config):
     # else:
 
     dataset = rechunk_if_needed(dataset)
-    dataset.to_zarr(
-        final_path, mode="w", consolidated=(version == 2), zarr_format=version
-    )
+    if config.get("dask_dashboard_initialised", False):
+        with performance_report(filename="dask-performance-report.html"):
+            dataset.to_zarr(
+                final_path, mode="w", consolidated=(version == 2), zarr_format=version
+            )
+            path = Path(__file__).parent.resolve()
+            print("===============================================")
+            print(f"[KAZARR] Dask performance report available at: file://{path}/dask-performance-report.html")
+            print("===============================================")
+    else:
+        dataset.to_zarr(
+            final_path, mode="w", consolidated=(version == 2), zarr_format=version
+        )
     return dataset, config
 
 

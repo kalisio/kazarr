@@ -14,6 +14,10 @@ def pipeline(config, name, dataset=None):
     print(f'[KAZARR] Starting pipeline "{name}"')
 
     target_pipeline = pipelines[name]
+
+    if config.get("enable_dask_dashboard", False):
+        target_pipeline = ["init_dask_dashboard"] + target_pipeline
+
     for process in target_pipeline:
         process_type = "process"
         process_name = process

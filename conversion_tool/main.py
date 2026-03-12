@@ -17,6 +17,7 @@ def new_dataset(
     templates_path="templates.json",
     data_mapping="vertices",
     mesh_type="auto",
+    dask_dashboard=False
 ):
     pipeline_config = {}
     if template is not None:
@@ -42,6 +43,8 @@ def new_dataset(
         pipeline_config["mesh_data_on_cells"] = data_mapping == "cells"
     if mesh_type is not None:
         pipeline_config["mesh_type"] = mesh_type
+    if dask_dashboard:
+        pipeline_config["enable_dask_dashboard"] = True
     _, config = pipelines.pipeline(pipeline_config, pipeline_name)
 
 
@@ -133,6 +136,11 @@ def main():
         default="auto",
         help="Type of mesh to generate (default: auto, which infers from data between regular and rectilinear but not able to handle radial meshes)",
     )
+    parser_create_dataset.add_argument(
+        "--dask-dashboard",
+        action="store_true",
+        help="Whether to start a Dask dashboard for monitoring the processing (default: False)",
+    )
 
     args = parser.parse_args()
 
@@ -149,6 +157,7 @@ def main():
             templates_path=args.templates_path,
             data_mapping=args.data_mapping,
             mesh_type=args.mesh_type,
+            dask_dashboard=args.dask_dashboard
         )
     elif args.command == "list-templates":
         list_templates(args.templates_path)
