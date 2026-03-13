@@ -115,6 +115,33 @@ The `mesh` endpoint accepts the following query parameters:
 | `format`            | The format of the extracted data (Currently supported: 'mesh', 'geojson'. Default to `mesh`)                                                   |    ✓     |
 | `mesh_data_mapping` | Whether the data of the mesh is on cells or on vertices. This will override the dataset configuration. (Supported values: 'vertices', 'cells') |    ✓     |
 
+## Interpolation Overview
+
+Interpolation is applied in four different scenarios:
+
+1. **Xarray Variable/Time Interpolation**: Used when specifying `interp_vars` or `time_interpolate`.
+   - *Supported methods*: `linear`, `nearest`, `zero`, `slinear`, `quadratic`, `cubic`, `quintic`, `polynomial`, `pchip`, `barycentric`, `krogh`, `akima`, `makima`.
+   - *Parameters*: See the [Xarray documentation](https://docs.xarray.dev/en/latest/generated/xarray.DataArray.interp.html).
+2. **Regular Grid Mesh Extraction**: Triggered by the `extract` endpoint on regular grid datasets, utilizing SciPy's `RegularGridInterpolator`.
+   - *Supported methods*: `linear`, `nearest`, `slinear`, `cubic`, `quintic`, `pchip`.
+   - *Parameters*: See the [SciPy documentation](https://docs.scipy.org/doc/scipy/reference/generated/scipy.interpolate.RegularGridInterpolator.html#scipy.interpolate.RegularGridInterpolator).
+3. **Irregular Grid Mesh Extraction**: Triggered by the `extract` endpoint on irregular grid datasets using SciPy or custom methods.
+   - *Supported methods*: `linear`, `nearest`, `cubic`, `RBF`, `IDW`.
+   - *Parameters*: For RBF, see the [SciPy documentation](https://docs.scipy.org/doc/scipy/reference/generated/scipy.interpolate.RBFInterpolator.html).
+4. **Point Probing**: Used by the `probe` endpoint to retrieve values over time.
+   - *Supported methods*: Currently, only `IDW` (Inverse Distance Weighting) is supported.
+   - *Parameters*: `radius` (Maximum search radius for neighbors) and `power` (Distance weighting power).
+
+### Supplying Interpolation Parameters
+
+For the `extract` and `probe` endpoints, you can pass interpolation options using the `interpolation` query parameter. Here is an example:
+
+`interpolation=method:rbf,padding:0.5,neighbors:5,smoothing:0.0,kernel:thin_plate_spline`
+
+- `method`: Specifies the algorithm. If interpolation is requested (e.g., `mesh_interpolate=true`) but no method is provided, `linear` is used by default.
+- `padding`: A coefficient extending the requested bounding box to include contextual data for interpolation. This helps prevent boundary artifacts near tiles.
+- *Other parameters*: Specific to the chosen interpolation method.
+
 ## Configuring
 
 ### Environment variables

@@ -12,6 +12,11 @@ import numpy as np
 import fsspec
 from botocore.exceptions import NoCredentialsError
 from loguru import logger as log
+from scipy.interpolate import (
+    griddata,
+    RBFInterpolator,
+)
+from scipy.spatial import cKDTree
 
 import src.exceptions as exceptions
 
@@ -390,7 +395,7 @@ def extrapolate_edges_from_cell_data(
 
 
 # Smart selection on a dataset variable with coordinates and dimensions
-def sel(dataset, variable, fixed_coords, fixed_dims, interp_vars=[]):
+def sel(dataset, variable, fixed_coords, fixed_dims, interp_vars=[], interp_config={}):
     for var in interp_vars:
         if var in dataset.coords and var not in dataset.dims:
             if len(dataset[var].dims) == 1:
@@ -519,6 +524,114 @@ def enforce_cache_limit(cache_dir, max_size="512MB"):
                 break
         except OSError:
             pass  # File may be in use or already deleted
+
+
+def apply_spatial_interpolation_irregular_grid(
+    source_lons,
+    source_lats,
+    source_values,
+    target_lon_mesh,
+    target_lat_mesh,
+    method="linear",
+    **kwargs,
+):
+    points = np.column_stack((source_lons.ravel(), source_lats.ravel()))
+    values = source_values.ravel()
+
+    valid_mask = np.isfinite(values)
+    points = points[valid_mask]
+    values = values[valid_mask]
+
+    if points.shape[0] < 4:
+        raise exceptions.TooFewPoints()
+
+    pts_target = np.column_stack((target_lon_mesh.ravel(), target_lat_mesh.ravel()))
+
+    if method not in ["nearest", "linear", "cubic", "idw", "rbf"]:
+        print(
+            f"[Kazarr - Warning] Unsupported interpolation method: {method}. Falling back to linear."
+        )
+        method = "linear"
+
+    if method in ["nearest", "linear", "cubic"]:
+        interpolated_flat = griddata(
+            points, values, pts_target, method=method, fill_value=np.nan
+        )
+
+    elif method == "idw":
+        max_radius = kwargs.get("radius", 0.02)
+        power = kwargs.get("power", 2.0)
+
+        tree = cKDTree(points)
+        indices_list = tree.query_ball_point(pts_target, r=max_radius)
+
+        interpolated_flat = np.full(pts_target.shape[0], np.nan)
+
+        for i, indices in enumerate(indices_list):
+            if not indices:
+                continue
+
+            neighbors_coords = points[indices]
+            dists = np.linalg.norm(neighbors_coords - pts_target[i], axis=1)
+
+            zero_dist = dists < 1e-12
+            if np.any(
+                zero_dist
+            ):  # Case where target point is exactly on a source point
+                interpolated_flat[i] = values[np.array(indices)[zero_dist][0]]
+            else:
+                weights = 1.0 / (dists**power)
+                interpolated_flat[i] = np.sum(weights * values[indices]) / np.sum(
+                    weights
+                )
+    elif method == "rbf":
+        # Remove duplicate points which can cause issues for interpolation (especially for RBFInterpolator)
+        # Mainly for radial meshes for seam where first and last columns are the same
+        points_uniques, indices_uniques = np.unique(points, axis=0, return_index=True)
+        points = points_uniques
+        values = values[indices_uniques]
+
+        kernel = kwargs.get("kernel", "thin_plate_spline")
+        smoothing = kwargs.get("smoothing", 0.0)
+
+        rbf = RBFInterpolator(points, values, kernel=kernel, smoothing=smoothing)
+        interpolated_flat = rbf(pts_target)
+
+    else:
+        raise exceptions.GenericInternalError(
+            f"Unsupported interpolation method: {method}"
+        )
+
+    return interpolated_flat.reshape(target_lon_mesh.shape)
+
+
+def parse_query_dict(query_string):
+    # Check if string match key:value pairs separated by commas
+    if not all(":" in part for part in query_string.split(",")):
+        raise exceptions.GenericInternalError(
+            "Invalid interpolation query format. Expected format: 'key1:value1,key2:value2,...'"
+        )
+
+    def cast_value(value):
+        for cast in (int, float):
+            try:
+                return cast(value)
+            except ValueError:
+                continue
+        return value
+
+    params = {}
+    for part in query_string.split(","):
+        if ":" in part:
+            key, value = part.split(":", 1)
+            key = key.strip()
+            value = value.strip()
+            if not key or not value:
+                raise exceptions.GenericInternalError(
+                    "Invalid interpolation query format. Expected format: 'key1:value1,key2:value2,...'"
+                )
+            params[key] = cast_value(value)
+    return params
 
 
 class StepDurationLogger:

@@ -4,10 +4,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pyvista as pv
 from scipy.interpolate import (
+    griddata,
     RegularGridInterpolator,
     RBFInterpolator,
     NearestNDInterpolator,
 )
+from scipy.spatial import cKDTree
 
 from src.utils import (
     dget,
@@ -18,6 +20,7 @@ from src.utils import (
     get_required_dims_and_coords,
     get_bounded_time,
     extrapolate_edges_from_cell_data,
+    apply_spatial_interpolation_irregular_grid,
     StepDurationLogger,
 )
 from src import exceptions
@@ -113,6 +116,7 @@ def extract(
     interp_vars=[],
     time_interpolate=False,
     as_dims=[],
+    interp_config=None,
 ):
     lon_min, lat_min, lon_max, lat_max = (
         (None, None, None, None) if bounding_box is None else bounding_box
@@ -173,12 +177,33 @@ def extract(
     if len(missing_vars) > 0:
         raise exceptions.BadConfigurationVariable(missing_vars)
 
-    out_type = format.get("type") if isinstance(format, dict) else format
+    out_type = format.get("type", format) if isinstance(format, dict) else format
     mesh_tile_shape = format.get("shape") if isinstance(format, dict) else None
-    mesh_interpolate = format.get("interpolate") if isinstance(format, dict) else False
+    mesh_interpolate = (
+        format.get("interpolate", False) if isinstance(format, dict) else False
+    )
     force_data_mapping = (
         format.get("force_data_mapping") if isinstance(format, dict) else None
     )
+
+    # TODO : use only spatial padding for easier use
+    interp_config = interp_config if interp_config is not None else {}
+    interp_config = (
+        {"method": interp_config} if isinstance(interp_config, str) else interp_config
+    )
+    interp_method = interp_config.get("method", "linear")
+    index_padding = (
+        interp_config.get("index_padding", 2) if isinstance(format, dict) else 2
+    )
+    spatial_padding = (
+        interp_config.get("padding", 1.0) if isinstance(format, dict) else 1.0
+    )
+    if not has_bb:
+        spatial_padding = 0.0
+        index_padding = 0
+    interp_config.pop("method", None)
+    interp_config.pop("padding", None)
+    interp_config.pop("index_padding", None)
 
     fixed_coords, fixed_dims = get_required_dims_and_coords(
         dataset,
@@ -196,7 +221,7 @@ def extract(
 
     is_regular_grid = lons.ndim == 1 and lats.ndim == 1 and lons.dims != lats.dims
     is_point_list = lons.ndim == 1 and lats.ndim == 1 and lons.dims == lats.dims
-    pad = 2 if out_type == "mesh" else 0
+    pad = index_padding if out_type == "mesh" else 0
 
     if is_point_list:
         step_logger.step_start("Point list: apply bounding box")
@@ -268,13 +293,15 @@ def extract(
 
         if has_bb:
             mask = np.ones(lons_vals.shape, dtype=bool)
+            lon_padding = (spatial_padding * (lon_max - lon_min)) if has_bb_lon else 0
+            lat_padding = (spatial_padding * (lat_max - lat_min)) if has_bb_lat else 0
             if has_bb_lon:
-                bb_lon_min = lon_min if lon_min is not None else -np.inf
-                bb_lon_max = lon_max if lon_max is not None else np.inf
+                bb_lon_min = (lon_min - lon_padding) if lon_min is not None else -np.inf
+                bb_lon_max = (lon_max + lon_padding) if lon_max is not None else np.inf
                 mask &= (lons_vals >= bb_lon_min) & (lons_vals <= bb_lon_max)
             if has_bb_lat:
-                bb_lat_min = lat_min if lat_min is not None else -np.inf
-                bb_lat_max = lat_max if lat_max is not None else np.inf
+                bb_lat_min = (lat_min - lat_padding) if lat_min is not None else -np.inf
+                bb_lat_max = (lat_max + lat_padding) if lat_max is not None else np.inf
                 mask &= (lats_vals >= bb_lat_min) & (lats_vals <= bb_lat_max)
 
             if not np.any(mask):
@@ -299,14 +326,8 @@ def extract(
                 col_max = min(lons_vals.shape[1] - 1, nearest_col + fallback_pad)
             else:
                 rows, cols = np.where(mask)
-                row_min, row_max = (
-                    max(0, rows.min() - pad),
-                    min(lons_vals.shape[0] - 1, rows.max() + pad),
-                )
-                col_min, col_max = (
-                    max(0, cols.min() - pad),
-                    min(lons_vals.shape[1] - 1, cols.max() + pad),
-                )
+                row_min, row_max = rows.min(), rows.max()
+                col_min, col_max = cols.min(), cols.max()
         else:
             row_min, row_max = 0, lons_vals.shape[0] - 1
             col_min, col_max = 0, lons_vals.shape[1] - 1
@@ -411,7 +432,7 @@ def extract(
         t_lat_max = lat_max if (bounding_box and lat_max is not None) else lats.max()
 
         target_h, target_w = mesh_tile_shape
-        interpolation_method = "linear" if mesh_interpolate else "nearest"
+        interpolation_method = interp_method if mesh_interpolate else "nearest"
 
         xi = np.linspace(t_lon_min, t_lon_max, target_w)
         yi = np.linspace(t_lat_min, t_lat_max, target_h)
@@ -421,6 +442,18 @@ def extract(
         if is_regular_grid and lons_1d is not None and not is_point_list:
             # Use RegularGridInterpolator for better performance on regular grids
             try:
+                if interpolation_method not in [
+                    "linear",
+                    "nearest",
+                    "slinear",
+                    "cubic",
+                    "quintic",
+                    "pchip",
+                ]:
+                    print(
+                        f"[KAZARR] Unsupported interpolation method '{interpolation_method}' for regular grids. Falling back to linear."
+                    )
+                    interpolation_method = "linear"
                 step_logger.step_start("Interpolate regular grid")
                 rgi = RegularGridInterpolator(
                     (lats_1d, lons_1d),
@@ -433,55 +466,21 @@ def extract(
                 interpolated_vals = rgi(pts).reshape(xi_mesh.shape)
             except Exception as e:
                 raise exceptions.GenericInternalError(f"Interpolation failed: {str(e)}")
-        elif mesh_interpolate:
+        else:
             step_logger.step_start("Interpolate unstructured grid")
-            lons_flat = lons.ravel()
-            lats_flat = lats.ravel()
-            vals_flat = vals.ravel()
-
-            valid_mask = np.isfinite(vals_flat)
-            points = np.column_stack((lons_flat[valid_mask], lats_flat[valid_mask]))
-            values = vals_flat[valid_mask]
-
-            if points.shape[0] < 4:
-                raise exceptions.TooFewPoints()
-
-            # Remove duplicate points which can cause issues for interpolation (especially for RBFInterpolator)
-            # Mainly for radial meshes for seam where first and last columns are the same
-            points_uniques, indices_uniques = np.unique(
-                points, axis=0, return_index=True
-            )
-            points = points_uniques
-            values = values[indices_uniques]
-
             try:
-                pts_target = np.column_stack((xi_mesh.ravel(), yi_mesh.ravel()))
-                rbf = RBFInterpolator(points, values, kernel="linear")
-                interpolated_vals = rbf(pts_target).reshape(xi_mesh.shape)
+                interpolated_vals = apply_spatial_interpolation_irregular_grid(
+                    source_lons=lons,
+                    source_lats=lats,
+                    source_values=vals,
+                    target_lon_mesh=xi_mesh,
+                    target_lat_mesh=yi_mesh,
+                    method=interpolation_method,
+                    **interp_config,
+                )
+
             except Exception as e:
                 raise exceptions.GenericInternalError(f"Interpolation failed: {str(e)}")
-        else:
-            step_logger.step_start("No interpolation (Nearest Neighbor mapping)")
-            lons_flat = lons.ravel()
-            lats_flat = lats.ravel()
-            vals_flat = vals.ravel()
-
-            valid_mask = np.isfinite(vals_flat)
-            points = np.column_stack((lons_flat[valid_mask], lats_flat[valid_mask]))
-            values = vals_flat[valid_mask]
-
-            if points.shape[0] < 1:
-                raise exceptions.TooFewPoints()
-
-            try:
-                pts_target = np.column_stack((xi_mesh.ravel(), yi_mesh.ravel()))
-                nn_interp = NearestNDInterpolator(points, values)
-                interpolated_vals = nn_interp(pts_target).reshape(xi_mesh.shape)
-
-            except Exception as e:
-                raise exceptions.GenericInternalError(
-                    f"Nearest neighbor mapping failed: {str(e)}"
-                )
 
         lons, lats, vals = xi_mesh, yi_mesh, interpolated_vals
         # Recreate mask_cropped based on NaNs from griddata
@@ -593,7 +592,15 @@ def extract(
 
 
 def probe(
-    dataset, variables, lon, lat, request, height=None, interpolate=True, as_dims=[]
+    dataset,
+    variables,
+    lon,
+    lat,
+    request,
+    height=None,
+    interpolate=True,
+    as_dims=[],
+    interp_config=None,
 ):
     variables = variables if isinstance(variables, list) else [variables]
 
@@ -627,6 +634,12 @@ def probe(
     if len(missing_vars) > 0:
         raise exceptions.BadConfigurationVariable(missing_vars)
 
+    interp_config = interp_config if interp_config is not None else {}
+    interp_config = (
+        {"method": interp_config} if isinstance(interp_config, str) else interp_config
+    )
+    interp_config.pop("method", None)
+
     longitudes = dataset[lon_var]
     latitudes = dataset[lat_var]
     if longitudes.ndim == 1 and latitudes.ndim == 1:  # Regular grid
@@ -637,43 +650,52 @@ def probe(
     else:  # Irregular grid
         if with_height:
             heights = dataset[height_var].values
-            dist = np.sqrt(
-                (longitudes - lon) ** 2
-                + (latitudes - lat) ** 2
-                + (heights - height) ** 2
+            points = np.column_stack(
+                (longitudes.values.ravel(), latitudes.values.ravel(), heights.ravel())
             )
+            target_pt = np.array([lon, lat, height])
         else:
-            dist = np.sqrt((longitudes - lon) ** 2 + (latitudes - lat) ** 2)
-        dist_values = dist.values
-        if interpolate:  # IDW interpolation
-            k_neighbors = 4  # Number of neighbors to consider for interpolation
-            flat_dist = dist_values.flatten()
-            k_neighbors = min(k_neighbors, len(flat_dist))
+            points = np.column_stack(
+                (longitudes.values.ravel(), latitudes.values.ravel())
+            )
+            target_pt = np.array([lon, lat])
 
-            # Find indices of the k nearest neighbors
-            min_indices = np.argpartition(flat_dist, k_neighbors - 1)[:k_neighbors]
-            nearest_dists = flat_dist[min_indices]
+        tree = cKDTree(points)
 
-            # Exact point case
-            if np.any(nearest_dists == 0):
-                weights = np.zeros(k_neighbors)
-                weights[np.argmin(nearest_dists)] = 1.0
+        if interpolate:  # IDW interpolation with Radius
+            max_radius = interp_config.get("radius", 0.05)
+            power = interp_config.get("power", 2.0)
+
+            indices = tree.query_ball_point(target_pt, r=max_radius)
+
+            if not indices:
+                raise exceptions.NoDataInSelection()
+
+            neighbors_coords = points[indices]
+            dists = np.linalg.norm(neighbors_coords - target_pt, axis=1)
+
+            zero_dist = dists < 1e-12
+            if np.any(
+                zero_dist
+            ):  # Case of exact match with a point in the dataset, to avoid NaN weights
+                weights = np.zeros(len(indices))
+                weights[np.argmax(zero_dist)] = 1.0
             else:
-                weights = (1.0 / nearest_dists) / np.sum(1.0 / nearest_dists)
+                weights = (1.0 / (dists**power)) / np.sum(1.0 / (dists**power))
 
-            # Flat indices to multi-dimensional indices
             neighbor_indices = [
-                np.unravel_index(idx, dist_values.shape) for idx in min_indices
+                np.unravel_index(idx, longitudes.shape) for idx in indices
             ]
 
-            # Temporarily set `fixed_dims` with the heaviest point so that `get_required_dims_and_coords` works normally.
             nearest_idx = neighbor_indices[np.argmax(weights)]
-            for dim_name, indice in zip(dist.dims, nearest_idx):
+            for dim_name, indice in zip(longitudes.dims, nearest_idx):
                 fixed_dims[dim_name] = indice
         else:
-            min_idx_flat = np.argmin(dist_values)
-            indices = np.unravel_index(min_idx_flat, dist_values.shape)
-            for dim_name, indice in zip(dist.dims, indices):
+            _, flat_index = tree.query(np.array([target_pt]), k=1)
+
+            flat_index = np.atleast_1d(flat_index)[0]
+            indices = np.unravel_index(flat_index, longitudes.shape)
+            for dim_name, indice in zip(longitudes.dims, indices):
                 fixed_dims[dim_name] = indice
 
     # Time is optional, so add to both optional coords and dims, as one or the other may be defined in config
@@ -699,9 +721,8 @@ def probe(
             interpolated_values = None
             for idx, weight in zip(neighbor_indices, weights):
                 neighbor_dims = fixed_dims.copy()
-                for dim_name, indice in zip(dist.dims, idx):
+                for dim_name, indice in zip(longitudes.dims, idx):
                     neighbor_dims[dim_name] = indice
-
                 neighbor_val = sel(
                     dataset, var, fixed_coords, neighbor_dims, interp_vars=interp_vars
                 ).values

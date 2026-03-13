@@ -12,6 +12,7 @@ from typing import Literal
 
 import src.handlers as handlers
 import src.exceptions as exceptions
+from src.utils import parse_query_dict
 
 # logging.basicConfig(
 #     level=logging.INFO,
@@ -169,7 +170,7 @@ def list_datasets(
         raise HTTPException(status_code=500, detail=e.get())
     except exceptions.UserInputBasedException as e:
         raise HTTPException(status_code=404, detail=e.get())
-    
+
 
 # As FastAPI redirect_slashes only works for static paths, we need to create a custom endpoint to handle redirection for the /datasets path with optional search_path query parameter
 @app.get("/datasets/", include_in_schema=False)
@@ -211,6 +212,7 @@ def dataset_infos(
     time_interpolate: bool = Query(False, include_in_schema=False),
     interp_vars: list[str] = Query([], include_in_schema=False),
     as_dims: list[str] = Query([], include_in_schema=False),
+    interpolation: str | None = Query(None, include_in_schema=False),
     # == Probe parameters == #
     variables: list[str] = Query(
         None, include_in_schema=False
@@ -238,6 +240,9 @@ def dataset_infos(
     # mesh_data_mapping => already defined in extraction parameters
 ):
     try:
+        if interpolation is not None and "," in interpolation:
+            interpolation = parse_query_dict(interpolation)
+
         if dataset.endswith("/extract"):
             if variable is None:
                 raise exceptions.UserInputBasedException(
@@ -265,6 +270,7 @@ def dataset_infos(
                 interp_vars=interp_vars,
                 time_interpolate=time_interpolate,
                 as_dims=as_dims,
+                interp_config=interpolation,
             )
         elif dataset.endswith("/probe"):
             if variables is None:
@@ -284,6 +290,7 @@ def dataset_infos(
                 height=height,
                 interpolate=interpolate,
                 as_dims=as_dims,
+                interp_config=interpolation,
             )
         elif dataset.endswith("/isoline"):
             if variable is None:
@@ -385,6 +392,10 @@ def extract_data(
         [],
         description="If some variables have the same name as dimensions, will force them to be treated as dimensions",
     ),
+    interpolation: str = Query(
+        "method:linear,padding:1.0",
+        description="Interpolation configuration. Must be defined with : \"interpolation=method:METHOD_NAME,padding:FLOAT_COEFF,optparam1:VALUE1,optparam2:VALUE2,...\" where METHOD_NAME is one of 'nearest', 'linear', 'cubic', 'idw' or 'rbf', FLOAT_COEFF is a coefficient of the bounding box size that will be use to add extra context to interpolation and optparam are optional parameters depending on the method (for example, for idw method, you can specify the radius and power parameters with interpolation=method:idw,radius:0.5,power:2). If not specified, it will default to linear interpolation. For more informations, see https://github.com/kalisio/kazarr",
+    ),
 ):
     pass
 
@@ -408,6 +419,10 @@ def probe_data(
     as_dims: list[str] = Query(
         [],
         description="If some variables have the same name as dimensions, will force them to be treated as dimensions",
+    ),
+    interpolation: str = Query(
+        "method:idw,radius:0.05,power:2",
+        description='Interpolation configuration. Must be defined with : "interpolation=method:idw,radius:FLOAT,power:FLOAT". Only IDW method is avaible for now. . If not specified, it will default to radius=0.05 and power=2.0. For more informations, see https://github.com/kalisio/kazarr',
     ),
 ):
     pass
