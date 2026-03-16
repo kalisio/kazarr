@@ -18,7 +18,7 @@ RUN pip install \
   h5netcdf \
   numpy \
   pyproj \
-  dask \
+  dask distributed \
   s3fs \
   matplotlib \
   pyvista \

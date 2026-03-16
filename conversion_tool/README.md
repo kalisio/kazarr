@@ -25,7 +25,7 @@ In this image, you can find the conversion tool in `/app/dist/conversion_tool`
 The tool requires Python 3.11+. You can install the dependencies using pip:
 
 ```bash
-pip install python-dotenv xarray zarr cfgrib h5netcdf numpy pyproj dask s3fs matplotlib pyvista pyinstaller
+pip install python-dotenv xarray zarr cfgrib h5netcdf numpy pyproj dask distributed s3fs matplotlib pyvista pyinstaller
 ```
 
 And you can build the executable using PyInstaller as done in the Dockerfile:
