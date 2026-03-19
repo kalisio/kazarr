@@ -15,6 +15,7 @@ RUN pip install \
   xarray \
   zarr \
   cfgrib \
+  h5py \
   h5netcdf \
   numpy \
   pyproj \
