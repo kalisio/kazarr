@@ -34,6 +34,23 @@ class MissingConfigurationElement(ConfigurationBasedException):
         )
 
 
+class MissingQueryParameter(UserInputBasedException):
+    def __init__(self, parameter_names):
+        if not isinstance(parameter_names, list):
+            parameter_names = [parameter_names]
+        if len(parameter_names) == 1:
+            message = f"Missing required query parameter: '{parameter_names[0]}'."
+        else:
+            message = (
+                "Missing required query parameters: '"
+                + "', '".join(parameter_names[:-1])
+                + "' and '"
+                + parameter_names[-1]
+                + "'."
+            )
+        super().__init__("MISSING_QUERY_PARAMETER", message, parameter_names)
+
+
 class BadConfigurationVariable(ConfigurationBasedException):
     def __init__(self, variable_name):
         if not isinstance(variable_name, list):

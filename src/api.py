@@ -221,6 +221,7 @@ def dataset_infos(
     lat: float = Query(None, include_in_schema=False),  #! Must be defined for probe
     height: float | None = Query(None, include_in_schema=False),
     interpolate: bool = Query(True, include_in_schema=False),
+    # format => already defined in extraction parameters
     # as_dims => already defined in extraction parameters
     # == Isoline parameters == #
     # variable => already defined in extraction parameters
@@ -240,14 +241,12 @@ def dataset_infos(
     # mesh_data_mapping => already defined in extraction parameters
 ):
     try:
-        if interpolation is not None and "," in interpolation:
+        if interpolation is not None and ":" in interpolation:
             interpolation = parse_query_dict(interpolation)
 
         if dataset.endswith("/extract"):
             if variable is None:
-                raise exceptions.UserInputBasedException(
-                    "The 'variable' parameter is required for data extraction"
-                )
+                raise exceptions.MissingQueryParameter("variable")
 
             format = {"type": format}
             format["force_data_mapping"] = mesh_data_mapping
@@ -274,13 +273,9 @@ def dataset_infos(
             )
         elif dataset.endswith("/probe"):
             if variables is None:
-                raise exceptions.UserInputBasedException(
-                    "The 'variables' parameter is required for probing data"
-                )
+                raise exceptions.MissingQueryParameter("variables")
             if lon is None or lat is None:
-                raise exceptions.UserInputBasedException(
-                    "The 'lon' and 'lat' parameters are required for probing data"
-                )
+                raise exceptions.MissingQueryParameter(["lon", "lat"])
             return handlers.probe(
                 dataset[:-6],
                 variables,
@@ -289,18 +284,15 @@ def dataset_infos(
                 request,
                 height=height,
                 interpolate=interpolate,
-                as_dims=as_dims,
                 interp_config=interpolation,
+                format=format,
+                as_dims=as_dims,
             )
         elif dataset.endswith("/isoline"):
             if variable is None:
-                raise exceptions.UserInputBasedException(
-                    "The 'variable' parameter is required for isoline generation"
-                )
+                raise exceptions.MissingQueryParameter("variable")
             if levels is None:
-                raise exceptions.UserInputBasedException(
-                    "The 'levels' parameter is required for isoline generation"
-                )
+                raise exceptions.MissingQueryParameter("levels")
             return handlers.isoline(
                 dataset[:-8],
                 variable,
@@ -313,9 +305,7 @@ def dataset_infos(
             )
         elif dataset.endswith("/select"):
             if variable is None:
-                raise exceptions.UserInputBasedException(
-                    "The 'variable' parameter is required for free selection"
-                )
+                raise exceptions.MissingQueryParameter("variable")
             return handlers.free_selection(
                 dataset[:-7],
                 variable,
@@ -416,13 +406,17 @@ def probe_data(
         True,
         description="Whether to interpolate values on spatial dimensions or to get the closest grid point",
     ),
+    interpolation: str = Query(
+        "method:idw,radius:0.05,power:2",
+        description='Interpolation configuration. Must be defined with : "interpolation=method:idw,radius:FLOAT,power:FLOAT". Only IDW method is avaible for now. If not specified, it will default to radius=0.05 and power=2.0. For more informations, see https://github.com/kalisio/kazarr',
+    ),
+    format: str = Query(
+        "raw",
+        description="The format of the probed data (Currently supported: 'raw', 'geojson')",
+    ),
     as_dims: list[str] = Query(
         [],
         description="If some variables have the same name as dimensions, will force them to be treated as dimensions",
-    ),
-    interpolation: str = Query(
-        "method:idw,radius:0.05,power:2",
-        description='Interpolation configuration. Must be defined with : "interpolation=method:idw,radius:FLOAT,power:FLOAT". Only IDW method is avaible for now. . If not specified, it will default to radius=0.05 and power=2.0. For more informations, see https://github.com/kalisio/kazarr',
     ),
 ):
     pass

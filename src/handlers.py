@@ -3,6 +3,7 @@ import math
 import matplotlib.pyplot as plt
 import numpy as np
 import pyvista as pv
+import xarray as xr
 from scipy.interpolate import (
     griddata,
     RegularGridInterpolator,
@@ -187,23 +188,21 @@ def extract(
     )
 
     # TODO : use only spatial padding for easier use
-    interp_config = interp_config if interp_config is not None else {}
-    interp_config = (
-        {"method": interp_config} if isinstance(interp_config, str) else interp_config
-    )
-    interp_method = interp_config.get("method", "linear")
-    index_padding = (
-        interp_config.get("index_padding", 2) if isinstance(format, dict) else 2
-    )
-    spatial_padding = (
-        interp_config.get("padding", 1.0) if isinstance(format, dict) else 1.0
-    )
+    if isinstance(interp_config, str):
+        interp_config = {"method": interp_config}
+    else:
+        interp_config = interp_config or {}
+
+    interp_method = interp_config.pop("method", "linear")
+    config_idx_pad = interp_config.pop("index_padding", 2)
+    config_sp_pad = interp_config.pop("padding", 1.0)
+
     if not has_bb:
-        spatial_padding = 0.0
-        index_padding = 0
-    interp_config.pop("method", None)
-    interp_config.pop("padding", None)
-    interp_config.pop("index_padding", None)
+        index_padding, spatial_padding = 0, 0.0
+    else:
+        is_format_dict = isinstance(format, dict)
+        index_padding = config_idx_pad if is_format_dict else 2
+        spatial_padding = config_sp_pad if is_format_dict else 1.0
 
     fixed_coords, fixed_dims = get_required_dims_and_coords(
         dataset,
@@ -329,8 +328,8 @@ def extract(
                 row_min, row_max = rows.min(), rows.max()
                 col_min, col_max = cols.min(), cols.max()
         else:
-            row_min, row_max = 0, lons_vals.shape[0] - 1
-            col_min, col_max = 0, lons_vals.shape[1] - 1
+            row_min, row_max = 0, lons_vals.shape[-2] - 1
+            col_min, col_max = 0, lons_vals.shape[-1] - 1
         height_raw = row_max - row_min + 1
         width_raw = col_max - col_min + 1
 
@@ -359,7 +358,7 @@ def extract(
         vals = vals_da.values[point_indices]
     else:
         vals = vals_da[
-            row_min : row_max + 1 : step_row, col_min : col_max + 1 : step_col
+            ..., row_min : row_max + 1 : step_row, col_min : col_max + 1 : step_col
         ].values
     # Convert to float so we can assign NaN
     vals = vals.astype(float)
@@ -375,10 +374,10 @@ def extract(
         lons, lats = np.meshgrid(lons_1d, lats_1d)
     else:
         lons = lons_vals[
-            row_min : row_max + 1 : step_row, col_min : col_max + 1 : step_col
+            ..., row_min : row_max + 1 : step_row, col_min : col_max + 1 : step_col
         ]
         lats = lats_vals[
-            row_min : row_max + 1 : step_row, col_min : col_max + 1 : step_col
+            ..., row_min : row_max + 1 : step_row, col_min : col_max + 1 : step_col
         ]
 
     if has_bb:
@@ -599,9 +598,26 @@ def probe(
     request,
     height=None,
     interpolate=True,
-    as_dims=[],
     interp_config=None,
+    format="raw",
+    as_dims=[],
 ):
+    step_logger = StepDurationLogger(
+        "probe",
+        parameters=(
+            dataset,
+            variables,
+            lon,
+            lat,
+            height,
+            interpolate,
+            as_dims,
+            interp_config,
+        ),
+    )
+
+    step_logger.step_start("Load dataset and config")
+
     variables = variables if isinstance(variables, list) else [variables]
 
     dataset, config = load_dataset(dataset)
@@ -634,11 +650,12 @@ def probe(
     if len(missing_vars) > 0:
         raise exceptions.BadConfigurationVariable(missing_vars)
 
-    interp_config = interp_config if interp_config is not None else {}
-    interp_config = (
-        {"method": interp_config} if isinstance(interp_config, str) else interp_config
-    )
-    interp_config.pop("method", None)
+    if isinstance(interp_config, str):
+        interp_config = {"method": interp_config}
+    else:
+        interp_config = interp_config or {}
+
+    interp_method = interp_config.pop("method", "idw").lower()
 
     longitudes = dataset[lon_var]
     latitudes = dataset[lat_var]
@@ -660,9 +677,13 @@ def probe(
             )
             target_pt = np.array([lon, lat])
 
+        step_logger.step_start("Build spatial index for probe")
+
+        # TODO: cache tree ?
         tree = cKDTree(points)
 
-        if interpolate:  # IDW interpolation with Radius
+        if interpolate and interp_method != "nearest":  # IDW interpolation with Radius
+            step_logger.step_start("Probe interpolation (IDW)")
             max_radius = interp_config.get("radius", 0.05)
             power = interp_config.get("power", 2.0)
 
@@ -690,7 +711,8 @@ def probe(
             nearest_idx = neighbor_indices[np.argmax(weights)]
             for dim_name, indice in zip(longitudes.dims, nearest_idx):
                 fixed_dims[dim_name] = indice
-        else:
+        elif not interpolate or interp_method == "nearest":
+            step_logger.step_start("Probe interpolation (nearest neighbor)")
             _, flat_index = tree.query(np.array([target_pt]), k=1)
 
             flat_index = np.atleast_1d(flat_index)[0]
@@ -712,25 +734,51 @@ def probe(
         as_dims=as_dims,
     )
 
-    # Get values for each variable
+    step_logger.step_start("Extract variable values at probe location")
+
+    # Prepare indexers and weights for interpolation if needed
+    if (
+        (longitudes.ndim != 1 or latitudes.ndim != 1)
+        and interpolate
+        and interp_method != "nearest"
+    ):
+        # Group neighbor indices by spatial dimension for efficient Xarray indexing
+        dim_indices = {dim: [] for dim in longitudes.dims}
+        for idx in neighbor_indices:
+            for dim_name, indice in zip(longitudes.dims, idx):
+                dim_indices[dim_name].append(indice)
+
+        # Create DataArrays for advanced Xarray indexing
+        spatial_indexers = {
+            dim: xr.DataArray(vals, dims=["neighbor"])
+            for dim, vals in dim_indices.items()
+        }
+        weights_da = xr.DataArray(weights, dims=["neighbor"])
+
+        # Isolate the "fixed" dimensions (time, level) from the spatial dimensions, as we will apply interpolation only on spatial dimensions
+        base_fixed_dims = {
+            k: v for k, v in fixed_dims.items() if k not in longitudes.dims
+        }
+
+    # Values extraction
     data = {}
     for var in variables:
         if (
-            longitudes.ndim != 1 or latitudes.ndim != 1
-        ) and interpolate:  # Irregular grid with interpolation
-            interpolated_values = None
-            for idx, weight in zip(neighbor_indices, weights):
-                neighbor_dims = fixed_dims.copy()
-                for dim_name, indice in zip(longitudes.dims, idx):
-                    neighbor_dims[dim_name] = indice
-                neighbor_val = sel(
-                    dataset, var, fixed_coords, neighbor_dims, interp_vars=interp_vars
-                ).values
+            (longitudes.ndim != 1 or latitudes.ndim != 1)
+            and interpolate
+            and interp_method != "nearest"
+        ):
+            filtered_da = sel(
+                dataset, var, fixed_coords, base_fixed_dims, interp_vars=interp_vars
+            )
 
-                if interpolated_values is None:
-                    interpolated_values = neighbor_val * weight
-                else:
-                    interpolated_values += neighbor_val * weight
+            # Extract all neighbors at once using Xarray
+            neighbor_data = filtered_da.isel(**spatial_indexers)
+
+            # Apply weights and sum over neighbors dimension
+            interpolated_values = (
+                (neighbor_data * weights_da).sum(dim="neighbor").values
+            )
 
             data[var] = {
                 "values": interpolated_values.tolist(),
@@ -744,6 +792,10 @@ def probe(
                 "attrs": dataset[var].attrs,
             }
 
+    step_logger.step_start(
+        "Get time values for probe location if time variable is defined"
+    )
+
     # Get times list
     times = None
     if time_var is not None and time_var in dataset:
@@ -754,6 +806,23 @@ def probe(
     out = {"variables": data}
     if times is not None:
         out["times"] = times
+
+    if format == "geojson" and times is not None:
+        out = {"type": "FeatureCollection", "features": []}
+        variables = {}
+        for var in data:
+            variables[var] = {"values": data[var]["values"], **data[var]["attrs"]}
+        feature = {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [float(lon), float(lat)],
+            },
+            "properties": {"times": times, **variables},
+        }
+        out["features"].append(feature)
+
+    step_logger.end()
     return out
 
 
