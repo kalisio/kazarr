@@ -7,7 +7,6 @@ from fastapi import FastAPI, Path, Query, Request, HTTPException
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
 from typing import Literal
 
 import src.handlers as handlers
@@ -22,14 +21,6 @@ from src.utils import parse_query_dict
 # )
 
 # logger = logging.getLogger(__name__)
-
-
-class RegisterDatasetRequest(BaseModel):
-    name: str
-    path: str
-    description: str = ""
-    config: dict = {}
-
 
 app = FastAPI(
     title="kazarr API",
@@ -58,7 +49,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 
 @app.get(
     "/",
@@ -283,6 +273,7 @@ def dataset_infos(
                 lat,
                 request,
                 height=height,
+                time=time,
                 interpolate=interpolate,
                 interp_config=interpolation,
                 format=format,
@@ -335,7 +326,6 @@ def dataset_infos(
     description="Retrieve data for a specified variable at a specific time and within an optional bounding box.",
 )
 def extract_data(
-    request: Request,
     dataset: str = Path(
         ..., description="The path to the dataset to extract data from"
     ),
@@ -396,12 +386,12 @@ def extract_data(
     description="Retrieve data for specified variables at specific coordinates over time.",
 )
 def probe_data(
-    request: Request,
     dataset: str = Path(..., description="The path to the dataset to probe"),
     variables: list[str] = Query(..., description="The variables to probe"),
     lon: float = Query(..., description="The longitude coordinate to probe"),
     lat: float = Query(..., description="The latitude coordinate to probe"),
     height: float | None = Query(None, description="The height coordinate to probe"),
+    time: str | None = Query(None, description="The time value to probe"),
     interpolate: bool = Query(
         True,
         description="Whether to interpolate values on spatial dimensions or to get the closest grid point",
@@ -428,7 +418,6 @@ def probe_data(
     description="Generate isolines for a specified variable at a specific time and for given levels.",
 )
 def isoline_data(
-    request: Request,
     dataset: str = Path(
         ..., description="The path to the dataset to generate isolines from"
     ),
@@ -460,7 +449,6 @@ def isoline_data(
     description="Retrieve data for a specified variable based on free selection of dimensions and coordinates.",
 )
 def free_selection_data(
-    request: Request,
     dataset: str = Path(
         ..., description="The path to the dataset to perform selection on"
     ),

@@ -353,7 +353,7 @@ def extract(
     # Apply bounding box and resolution limit
     # Now that values are sliced, with bounding box and resolution limit, we can load them in memory
     step_logger.step_start("Load variable values")
-    vals_da = sel(dataset, variable, fixed_coords, fixed_dims, interp_vars=interp_vars)
+    vals_da = sel(dataset, variable, fixed_coords, fixed_dims, interp_vars=interp_vars, interp_method=interp_method, interp_config=interp_config)
     if is_point_list:
         vals = vals_da.values[point_indices]
     else:
@@ -597,6 +597,7 @@ def probe(
     lat,
     request,
     height=None,
+    time=None,
     interpolate=True,
     interp_config=None,
     format="raw",
@@ -645,8 +646,10 @@ def probe(
         missing_vars.append(f"lon ({lon_var})")
     if lat_var is None or lat_var not in dataset:
         missing_vars.append(f"lat ({lat_var})")
-    if with_height and height_var is None or height_var not in dataset:
+    if (with_height and height_var is None) or height_var not in dataset:
         missing_vars.append(f"height ({height_var})")
+    if (time is not None and time_var is None) or time_var not in dataset:
+        missing_vars.append(f"time ({time_var})")
     if len(missing_vars) > 0:
         raise exceptions.BadConfigurationVariable(missing_vars)
 
@@ -654,8 +657,12 @@ def probe(
         interp_config = {"method": interp_config}
     else:
         interp_config = interp_config or {}
-
     interp_method = interp_config.pop("method", "idw").lower()
+
+    if time is not None and time_var is not None:
+        fixed_coords[time_var] = get_bounded_time(dataset, time_var, time)
+        if interpolate and interp_method != "nearest":
+            interp_vars.append(time_var)
 
     longitudes = dataset[lon_var]
     latitudes = dataset[lat_var]
@@ -769,7 +776,7 @@ def probe(
             and interp_method != "nearest"
         ):
             filtered_da = sel(
-                dataset, var, fixed_coords, base_fixed_dims, interp_vars=interp_vars
+                dataset, var, fixed_coords, base_fixed_dims, interp_vars=interp_vars, interp_method=interp_method, interp_config=interp_config
             )
 
             # Extract all neighbors at once using Xarray
@@ -787,7 +794,7 @@ def probe(
         else:
             data[var] = {
                 "values": sel(
-                    dataset, var, fixed_coords, fixed_dims, interp_vars=interp_vars
+                    dataset, var, fixed_coords, fixed_dims, interp_vars=interp_vars, interp_method=interp_method, interp_config=interp_config
                 ).values.tolist(),
                 "attrs": dataset[var].attrs,
             }
@@ -798,10 +805,16 @@ def probe(
 
     # Get times list
     times = None
-    if time_var is not None and time_var in dataset:
-        times = sel(dataset, time_var, fixed_coords, fixed_dims).values
-        if np.issubdtype(times.dtype, np.datetime64):
-            times = [str(np.datetime_as_string(t)) for t in times]
+    if time_var is not None:
+        if time is not None and interpolate:
+            times = [time]
+        elif time_var in dataset:
+            times = sel(dataset, time_var, fixed_coords, fixed_dims, interp_method=interp_method, interp_config=interp_config).values
+            times = np.atleast_1d(times)
+            if np.issubdtype(times.dtype, np.datetime64):
+                times = [str(np.datetime_as_string(t)) for t in times]
+            else:
+                times = times.tolist()
 
     out = {"variables": data}
     if times is not None:

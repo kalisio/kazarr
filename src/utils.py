@@ -395,7 +395,7 @@ def extrapolate_edges_from_cell_data(
 
 
 # Smart selection on a dataset variable with coordinates and dimensions
-def sel(dataset, variable, fixed_coords, fixed_dims, interp_vars=[], interp_config={}):
+def sel(dataset, variable, fixed_coords, fixed_dims, interp_vars=[], interp_method="linear", interp_config={}):
     for var in interp_vars:
         if var in dataset.coords and var not in dataset.dims:
             if len(dataset[var].dims) == 1:
@@ -439,8 +439,13 @@ def sel(dataset, variable, fixed_coords, fixed_dims, interp_vars=[], interp_conf
         }
         if len(interpolated_vars) > 0:
             try:
+                if interp_method not in ["linear", "nearest", "zero", "slinear", "quadratic", "cubic", "quintic", "polynomial", "pchip", "barycentric", "krogh", "akima", "makima"]:
+                    print(
+                        f"[Kazarr - Warning] Unsupported interpolation method: {interp_method}. Falling back to linear."
+                    )
+                    interp_method = "linear"
                 data = data.interp(
-                    interpolated_vars, method="linear", assume_sorted=True
+                    interpolated_vars, method=interp_method, assume_sorted=True, **interp_config
                 )
             except ValueError:
                 raise exceptions.BadSelection(
