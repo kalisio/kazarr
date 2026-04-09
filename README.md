@@ -193,14 +193,16 @@ conda install -y -n kazarr_env -c conda-forge \
   uvicorn \
   xarray \
   zarr \
-  cfgrib \
   numpy \
   pyproj \
   dask \
   s3fs \
   matplotlib \
-  pyvista \
-  scipy
+  pyvista=0.47.1 \
+  vtk-base=9.5.2 \
+  scipy \
+  uvloop \
+  loguru
 ```
 
 ```bash
