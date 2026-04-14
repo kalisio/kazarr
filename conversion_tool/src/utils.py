@@ -196,6 +196,8 @@ def merge_grib(folder_path, output_filename, config, glob_search_pattern="*.grib
     elif folder_path not in config["clean"]["idx_folders"]:
         config["clean"]["idx_folders"].append(folder_path)
 
-    print(f'[KAZARR] > Completed merging GRIB files into "{output_filename}"')
+    print(
+        f'[KAZARR] > Completed merging GRIB files ({len(files)}) into "{output_filename}"'
+    )
 
     return config

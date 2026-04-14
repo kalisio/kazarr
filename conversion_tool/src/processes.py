@@ -4,12 +4,13 @@ import itertools
 import re
 import shutil
 from pathlib import Path
+from datetime import datetime
 
 import xarray as xr
 import numpy as np
 import s3fs
 from pyproj import Transformer
-from datetime import datetime
+import cfgrib
 
 from dask.distributed import Client, performance_report
 
@@ -196,9 +197,27 @@ def load_from_grib(dataset, config):
             )
     else:
         if os.path.isfile(path):
-            dataset = xr.open_dataset(
-                path, chunks="auto", engine="cfgrib", backend_kwargs=backend_kwargs
-            )
+            datasets = cfgrib.open_datasets(path, backend_kwargs=backend_kwargs)
+            full_variables = set()
+            final_variables = set()
+            for ds in datasets:
+                full_variables.update(ds.data_vars)
+            if len(datasets) == 1:
+                dataset = datasets[0]
+            else:
+                try:
+                    print(
+                        "[KAZARR] Multiple datasets found in GRIB file, attempting to merge them..."
+                    )
+                    dataset = xr.merge(datasets, compat="minimal", join="outer")
+                    final_variables.update(dataset.data_vars)
+                    removed_variables = full_variables - final_variables
+                    if removed_variables:
+                        print(
+                            f"         ! The following variables were removed during merge due to conflicts: {removed_variables}"
+                        )
+                except Exception as e:
+                    print(f"Error occurred while merging datasets: {e}")
         elif os.path.isdir(path):
             concat_dim = get_ci(
                 config,
@@ -391,7 +410,19 @@ def assign_coords(dataset, config):
                 f"Warning: Dimension '{dim}' not found in dataset for assign_coords process. Skipping."
             )
         elif var not in dataset.coords:
-            assign_dict[var] = (dim, dataset[var].values)
+            values = dataset[var].values
+            # Decode binary strings if needed
+            if values.dtype.kind == "S":  # Fixed-length bytes
+                values = values.astype(str)
+            elif values.dtype == object:  # Variable-length bytes or other objects
+                if values.size > 0 and isinstance(values.flat[0], bytes):
+                    values = np.array(
+                        [
+                            v.decode("utf-8") if isinstance(v, bytes) else v
+                            for v in values.ravel()
+                        ]
+                    ).reshape(values.shape)
+            assign_dict[var] = (dim, values)
 
     dataset = dataset.assign_coords(assign_dict)
 
