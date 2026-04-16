@@ -1,7 +1,7 @@
 import os
 import argparse
 
-from src.utils import enable_s3fs_debug_logging
+from src.utils.logging import enable_s3fs_debug_logging
 
 import uvicorn
 
@@ -17,7 +17,7 @@ def start_api(host, port, workers, datasets_path, enable_debug=False):
     if os.getenv("DATASETS_PATH") is None:
         os.environ["DATASETS_PATH"] = datasets_path
 
-    uvicorn.run("src.api:app", host=host, port=port, workers=workers)
+    uvicorn.run("src.api.api:app", host=host, port=port, workers=workers)
 
 
 def main():

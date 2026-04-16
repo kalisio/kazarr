@@ -38,6 +38,9 @@ class MissingQueryParameter(UserInputBasedException):
     def __init__(self, parameter_names):
         if not isinstance(parameter_names, list):
             parameter_names = [parameter_names]
+        if len(parameter_names) == 0:
+            parameter_names = ["UNKNOWN"]
+        
         if len(parameter_names) == 1:
             message = f"Missing required query parameter: '{parameter_names[0]}'."
         else:
@@ -55,6 +58,9 @@ class BadConfigurationVariable(ConfigurationBasedException):
     def __init__(self, variable_name):
         if not isinstance(variable_name, list):
             variable_name = [variable_name]
+        if len(variable_name) == 0:
+            variable_name = ["UNKNOWN"]
+        
         if len(variable_name) == 1:
             message = f"Variable '{variable_name[0]}' not found in configuration or in dataset."
         if isinstance(variable_name, list) and len(variable_name) > 1:
@@ -79,6 +85,9 @@ class VariableNotFound(UserInputBasedException):
     def __init__(self, variable_name):
         if not isinstance(variable_name, list):
             variable_name = [variable_name]
+        if len(variable_name) == 0:
+            variable_name = ["UNKNOWN"]
+        
         if len(variable_name) == 1:
             message = f"Variable '{variable_name[0]}' not found in dataset."
         if isinstance(variable_name, list) and len(variable_name) > 1:
@@ -116,9 +125,12 @@ class TooFewPoints(UserInputBasedException):
 
 
 class NoDataInSelection(UserInputBasedException):
-    def __init__(self):
+    def __init__(self, detail=""):
+        if not detail or not isinstance(detail, str):
+            detail = ""
         super().__init__(
-            "NO_DATA_IN_SELECTION", "No data available in the selected area and time."
+            "NO_DATA_IN_SELECTION",
+            f"No data available in the selected area and time. {detail}",
         )
 
 
