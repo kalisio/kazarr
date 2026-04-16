@@ -1,4 +1,5 @@
 import os
+import shutil
 import xarray as xr
 import numpy as np
 import pandas as pd
@@ -232,11 +233,14 @@ def cleanup_test_files():
         for dirname in dirs:
             if dirname.endswith(".zarr"):
                 found_path = os.path.join(root, dirname)
-                os.system(f"rm -rf {found_path}")
+                shutil.rmtree(found_path, ignore_errors=True)
         for filename in files:
             if filename.endswith(".nc"):
                 found_path = os.path.join(root, filename)
-                os.remove(found_path)
+                try:
+                    os.remove(found_path)
+                except OSError:
+                    pass
 
 
 def get_value(shape, method="linear", bounds={"min": 0, "max": 100}, periods=1):
