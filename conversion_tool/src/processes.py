@@ -197,27 +197,36 @@ def load_from_grib(dataset, config):
             )
     else:
         if os.path.isfile(path):
-            datasets = cfgrib.open_datasets(path, backend_kwargs=backend_kwargs)
-            full_variables = set()
-            final_variables = set()
-            for ds in datasets:
-                full_variables.update(ds.data_vars)
-            if len(datasets) == 1:
-                dataset = datasets[0]
-            else:
-                try:
-                    print(
-                        "[KAZARR] Multiple datasets found in GRIB file, attempting to merge them..."
-                    )
-                    dataset = xr.merge(datasets, compat="minimal", join="outer")
-                    final_variables.update(dataset.data_vars)
-                    removed_variables = full_variables - final_variables
-                    if removed_variables:
+            try:
+                dataset = xr.open_dataset(
+                    path, engine="cfgrib", chunks="auto", backend_kwargs=backend_kwargs
+                )
+            except cfgrib.dataset.DatasetBuildError:
+                print("[KAZARR] Failed to load GRIB file with Xarray, trying to open as multiple datasets... This may cause higher memory usage and slower performance.")
+                datasets = cfgrib.open_datasets(path, backend_kwargs=backend_kwargs)
+                full_variables = set()
+                final_variables = set()
+                for ds in datasets:
+                    full_variables.update(ds.data_vars)
+                if len(datasets) == 1:
+                    dataset = datasets[0].chunk("auto")
+                else:
+                    try:
                         print(
-                            f"         ! The following variables were removed during merge due to conflicts: {removed_variables}"
+                            "[KAZARR] Multiple datasets found in GRIB file, attempting to merge them..."
                         )
-                except Exception as e:
-                    print(f"Error occurred while merging datasets: {e}")
+                        # Use chunk("auto") on each dataset to enable Dask parallelism during merge, which can help reduce memory usage and speed up the process
+                        for i, ds in enumerate(datasets):
+                            datasets[i] = ds.chunk("auto")
+                        dataset = xr.merge(datasets, compat="minimal", join="outer")
+                        final_variables.update(dataset.data_vars)
+                        removed_variables = full_variables - final_variables
+                        if removed_variables:
+                            print(
+                                f"         ! The following variables were removed during merge due to conflicts: {removed_variables}"
+                            )
+                    except Exception as e:
+                        print(f"Error occurred while merging datasets: {e}")
         elif os.path.isdir(path):
             concat_dim = get_ci(
                 config,
@@ -302,7 +311,7 @@ def load_and_merge_from_grib(dataset, config):
     elif isinstance(discriminator, list):
         discriminators = discriminator
 
-    merged_dataset = None
+    sub_datasets = []
     for index, discriminator in enumerate(discriminators):
         try:
             if index < len(backend_kwargs):
@@ -328,12 +337,10 @@ def load_and_merge_from_grib(dataset, config):
         if index < len(rename_before_merge) and rename_before_merge[index]:
             sub_dataset = sub_dataset.rename(rename_before_merge[index])
 
-        if merged_dataset is None:
-            merged_dataset = sub_dataset
-        else:
-            merged_dataset = xr.merge([merged_dataset, sub_dataset])
+        sub_datasets.append(sub_dataset)
 
-    if merged_dataset is not None:
+    if sub_datasets:
+        merged_dataset = xr.merge(sub_datasets)
         dataset = rechunk_if_needed(
             merged_dataset
         )  # Re-chunk usually needed after merge
@@ -688,6 +695,8 @@ def save(dataset, config):
     #   store = fs.get_mapper(final_path)
     #   dataset.to_zarr(store=store, mode="w", consolidated=(version == 2), zarr_format=version)
     # else:
+
+    print("[KAZARR] Saving dataset to Zarr format...")
 
     dataset = rechunk_if_needed(dataset)
     if config.get("dask_dashboard_initialised", False):
