@@ -21,7 +21,7 @@ Check for service's health, return a json object with a single member `status`.
 
 Return a list of all available Zarr datasets with their id and description.
 
-### /datasets/{dataset} (GET)
+#### /datasets/{dataset}/infos (GET)
 
 Return metadata (dimensions, variables, attributes) for a specific Zarr dataset.
 The `dataset` parameter is expected to be the dataset id, that can be found with the previous endpoint.
@@ -35,22 +35,25 @@ Extracts a subset of the data based on a bounding box and a specific variable.
 
 The `extract` endpoint accepts the following query parameters:
 
-| Name                | Description                                                                                                                                    | Optional |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | :------: |
-| `variable`          | The variable to extract.                                                                                                                       |    ✗     |
-| `lon_min`           | Minimum longitude of the bounding box.                                                                                                         |    ✓     |
-| `lat_min`           | Minimum latitude of the bounding box.                                                                                                          |    ✓     |
-| `lon_max`           | Maximum longitude of the bounding box.                                                                                                         |    ✓     |
-| `lat_max`           | Maximum latitude of the bounding box.                                                                                                          |    ✓     |
-| `time`              | The time value/slice to extract.                                                                                                               |    ✓     |
-| `resolution_limit`  | Limit the amount of data for lat/lon axis (decimate)                                                                                           |    ✓     |
-| `format`            | Format of the extracted data (Supported: `raw`, `geojson`, `mesh`).                                                                            |    ✓     |
-| `mesh_tile_size`    | When `format=mesh`, resample data with a grid of `mesh_tile_size`x`mesh_tile_size`                                                             |    ✓     |
-| `mesh_interpolate`  | When `format=mesh`, apply interpolation to resampled values                                                                                    |    ✓     |
-| `mesh_data_mapping` | Whether the data of the mesh is on cells or on vertices. This will override the dataset configuration. (Supported values: 'vertices', 'cells') |    ✓     |
-| `interp_vars`       | Variables to interpolate during extraction                                                                                                     |    ✓     |
-| `time_interpolate`  | Whether to interpolate values on time dimension or to get the closest time step. Shortcut to `interp_vars=YOUR_TIME_DIMENSION`                 |    ✓     |
-| `as_dims`           | If a variable has the same name as a dim, force query parameters in this list to be treated as dimensions                                      |    ✓     |
+| Name                    | Description                                                                                                                                    | Optional | Default        |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | :------: | -------------- |
+| `variable`              | The variable to extract.                                                                                                                       |    ✗     |                |
+| `lon_min`               | Minimum longitude of the bounding box.                                                                                                         |    ✓     | `None`         |
+| `lat_min`               | Minimum latitude of the bounding box.                                                                                                          |    ✓     | `None`         |
+| `lon_max`               | Maximum longitude of the bounding box.                                                                                                         |    ✓     | `None`         |
+| `lat_max`               | Maximum latitude of the bounding box.                                                                                                          |    ✓     | `None`         |
+| `time`                  | The time value/slice to extract.                                                                                                               |    ✓     | `None`         |
+| `resolution_limit`      | Limit the amount of data for lat/lon axis (decimate)                                                                                           |    ✓     | `None`         |
+| `format`                | Format of the extracted data (Supported: `raw`, `geojson`, `mesh`).                                                                            |    ✓     | `raw`          |
+| `mesh_tile_size`        | When `format=mesh`, resample data with a grid of `mesh_tile_size`x`mesh_tile_size`                                                             |    ✓     | `None`         |
+| `mesh_data_mapping`     | Whether the data of the mesh is on cells or on vertices. This will override the dataset configuration. (Supported values: 'vertices', 'cells') |    ✓     | `vertices`     |
+| `interp_vars`           | Variables to interpolate during extraction                                                                                                     |    ✓     | `[]`           |
+| `interp_vars_method`    | Method for variable/time interpolation (e.g. `linear`, `cubic`, ...)                                                                           |    ✓     | `nearest`      |
+| `interp_vars_params`    | Parameters for variable interpolation (e.g. `method:linear`)                                                                                   |    ✓     | `None`         |
+| `interp_time`           | Whether to interpolate values on time dimension or to get the closest time step. Shortcut to `interp_vars=YOUR_TIME_DIMENSION`                 |    ✓     | `False`        |
+| `interp_spatial_method` | The method to use for spatial interpolation. (Supported: `nearest`, `linear`, `cubic`, `idw`, `rbf`)                                           |    ✓     | `nearest`      |
+| `interp_spatial_params` | Parameters for spatial interpolation (e.g. `padding:1.0`)                                                                                      |    ✓     | `padding:1.0`  |
+| `as_dims`               | If a variable has the same name as a dim, force query parameters in this list to be treated as dimensions                                      |    ✓     | `[]`           |
 
 > [!IMPORTANT]
 > You may need to specify additional non-generic variables or dimensions according to your dataset. To do so, you can add query parameters with `&my_additional_variable={VALUE}`
@@ -61,14 +64,19 @@ Retrieves the values of specified variables at a specific geographical location 
 
 The `probe` endpoint accepts the following query parameters:
 
-| Name          | Description                                                                                               | Optional |
-| ------------- | --------------------------------------------------------------------------------------------------------- | :------: |
-| `variables`   | The list of variables to probe.                                                                           |    ✗     |
-| `lon`         | The longitude coordinate to probe.                                                                        |    ✗     |
-| `lat`         | The latitude coordinate to probe.                                                                         |    ✗     |
-| `height`      | The height coordinate to probe (if 3D data).                                                              |    ✓     |
-| `interpolate` | Whether to interpolate values on spatial dimensions or to get the closest grid point                      |    ✓     |
-| `as_dims`     | If a variable has the same name as a dim, force query parameters in this list to be treated as dimensions |    ✓     |
+| Name                    | Description                                                                                               | Optional | Default       |
+| ----------------------- | --------------------------------------------------------------------------------------------------------- | :------: | ------------- |
+| `variables`             | The list of variables to probe.                                                                           |    ✗     |               |
+| `lon`                   | The longitude coordinate to probe.                                                                        |    ✗     |               |
+| `lat`                   | The latitude coordinate to probe.                                                                         |    ✗     |               |
+| `height`                | The height coordinate to probe (if 3D data).                                                              |    ✓     | `None`        |
+| `time`                  | The time value/slice to probe.                                                                            |    ✓     | `None`        |
+| `interp_time`           | Whether to interpolate values on time dimension                                                           |    ✓     | `False`       |
+| `interp_spatial_method` | The method to use for spatial interpolation. (Supported: `nearest`, `linear`, `cubic`, `idw`, `rbf`)      |    ✓     | `nearest`     |
+| `interp_spatial_params` | Parameters for spatial interpolation (e.g. `padding:1.0`)                                                 |    ✓     | `padding:1.0` |
+| `interp_vars`           | Variables to interpolate during probe                                                                     |    ✓     | `[]`          |
+| `interp_vars_method`    | Method for variable/time interpolation                                                                    |    ✓     | `nearest`     |
+| `as_dims`               | If a variable has the same name as a dim, force query parameters in this list to be treated as dimensions |    ✓     | `[]`          |
 
 > [!IMPORTANT]
 > You may need to specify additional non-generic variables or dimensions according to your dataset. To do so, you can add query parameters with `&my_additional_variable={VALUE}`
@@ -82,14 +90,15 @@ Computes isolines (contour lines) for a given variable and specific levels.
 
 The `isoline` endpoint accepts the following query parameters:
 
-| Name               | Description                                                                                               | Optional |
-| ------------------ | --------------------------------------------------------------------------------------------------------- | :------: |
-| `variable`         | The variable to generate isolines for.                                                                    |    ✗     |
-| `levels`           | Comma-separated list of levels for isoline generation.                                                    |    ✗     |
-| `time`             | The time value to use for isoline generation.                                                             |    ✓     |
-| `format`           | Format of the extracted data (Supported: `raw`, `geojson`). Ignored when `mesh_tile_size` is defined      |    ✓     |
-| `time_interpolate` | Whether to interpolate values on time dimension                                                           |    ✓     |
-| `as_dims`          | If a variable has the same name as a dim, force query parameters in this list to be treated as dimensions |    ✓     |
+| Name                 | Description                                                                                               | Optional | Default    |
+| -------------------- | --------------------------------------------------------------------------------------------------------- | :------: | ---------- |
+| `variable`           | The variable to generate isolines for.                                                                    |    ✗     |            |
+| `levels`             | Comma-separated list of levels for isoline generation.                                                    |    ✗     |            |
+| `time`               | The time value to use for isoline generation.                                                             |    ✓     | `None`     |
+| `format`             | Format of the extracted data (Supported: `raw`, `geojson`). Ignored when `mesh_tile_size` is defined      |    ✓     | `raw`      |
+| `interp_time`        | Whether to interpolate values on time dimension                                                           |    ✓     | `False`    |
+| `interp_vars_method` | Method for variable/time interpolation                                                                    |    ✓     | `nearest`  |
+| `as_dims`            | If a variable has the same name as a dim, force query parameters in this list to be treated as dimensions |    ✓     | `[]`       |
 
 > [!IMPORTANT]
 > You may need to specify additional non-generic variables or dimensions according to your dataset. To do so, you can add query parameters with `&my_additional_variable={VALUE}`
@@ -99,27 +108,28 @@ The `isoline` endpoint accepts the following query parameters:
 You can select data in a generic way with this endpoint, as raw multi-dimensional arrays. If you just specify the `variable` parameter, you will get all the data, but you are free to add additional parameters to fix some variables/dimensions
 
 The `select` endpoint accepts the following query parameters:
-| Name          | Description                                                                                               | Optional |
-| ------------- | --------------------------------------------------------------------------------------------------------- | :------: |
-| `variable`    | The variable from which you want to select the data.                                                      |    ✗     |
-| `interp_vars` | Variables to interpolate during selection                                                                 |    ✓     |
-| `as_dims`     | If a variable has the same name as a dim, force query parameters in this list to be treated as dimensions |    ✓     |
+| Name                 | Description                                                                                               | Optional | Default   |
+| -------------------- | --------------------------------------------------------------------------------------------------------- | :------: | --------- |
+| `variable`           | The variable from which you want to select the data.                                                      |    ✗     |           |
+| `interp_vars`        | Variables to interpolate during selection                                                                 |    ✓     | `[]`      |
+| `interp_vars_method` | Method for variable/time interpolation                                                                    |    ✓     | `nearest` |
+| `as_dims`            | If a variable has the same name as a dim, force query parameters in this list to be treated as dimensions |    ✓     | `[]`      |
 
 ### /datasets/{dataset}/mesh
 
 Get only the support mesh of the dataset
 
 The `mesh` endpoint accepts the following query parameters:
-| Name                | Description                                                                                                                                    | Optional |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | :------: |
-| `format`            | The format of the extracted data (Currently supported: 'mesh', 'geojson'. Default to `mesh`)                                                   |    ✓     |
-| `mesh_data_mapping` | Whether the data of the mesh is on cells or on vertices. This will override the dataset configuration. (Supported values: 'vertices', 'cells') |    ✓     |
+| Name                | Description                                                                                                                                    | Optional | Default    |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | :------: | ---------- |
+| `format`            | The format of the extracted data (Currently supported: 'mesh', 'geojson'. Default to `mesh`)                                                   |    ✓     | `mesh`     |
+| `mesh_data_mapping` | Whether the data of the mesh is on cells or on vertices. This will override the dataset configuration. (Supported values: 'vertices', 'cells') |    ✓     | `vertices` |
 
 ## Interpolation Overview
 
 Interpolation is applied in four different scenarios:
 
-1. **Xarray Variable/Time Interpolation**: Used when specifying `interp_vars` or `time_interpolate`.
+1. **Xarray Variable/Time Interpolation**: Used when specifying `interp_vars` or `interp_time`.
    - *Supported methods*: `linear`, `nearest`, `zero`, `slinear`, `quadratic`, `cubic`, `quintic`, `polynomial`, `pchip`, `barycentric`, `krogh`, `akima`, `makima`.
    - *Parameters*: See the [Xarray documentation](https://docs.xarray.dev/en/latest/generated/xarray.DataArray.interp.html).
 2. **Regular Grid Mesh Extraction**: Triggered by the `extract` endpoint on regular grid datasets, utilizing SciPy's `RegularGridInterpolator`.
@@ -134,11 +144,10 @@ Interpolation is applied in four different scenarios:
 
 ### Supplying Interpolation Parameters
 
-For the `extract` and `probe` endpoints, you can pass interpolation options using the `interpolation` query parameter. Here is an example:
+For the `extract` and `probe` endpoints, you can pass interpolation options using the `interp_spatial_params` or `interp_vars_params` query parameters. Here is an example:
 
-`interpolation=method:rbf,padding:0.5,neighbors:5,smoothing:0.0,kernel:thin_plate_spline`
+`interp_spatial_params=padding:0.5,neighbors:5,smoothing:0.0,kernel:thin_plate_spline`
 
-- `method`: Specifies the algorithm. If interpolation is requested (e.g., `mesh_interpolate=true`) but no method is provided, `linear` is used by default.
 - `padding`: A coefficient extending the requested bounding box to include contextual data for interpolation. This helps prevent boundary artifacts near tiles.
 - *Other parameters*: Specific to the chosen interpolation method.
 
