@@ -10,7 +10,7 @@ def list_datasets(search_path: Optional[str] = None) -> Dict[str, Any]:
     return {"datasets": datasets}
 
 
-def dataset_infos(dataset_id: str) -> Dict[str, Any]:
+def dataset_metadata(dataset_id: str) -> Dict[str, Any]:
     dataset, config = load_dataset(dataset_id)
     variables = {}
     coords = {}

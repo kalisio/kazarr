@@ -294,12 +294,12 @@ class TestRegularGrid:
         assert response.status_code == 400
 
     # ------------------------------------------------------------------
-    # Dataset infos
+    # Dataset metadata
     # ------------------------------------------------------------------
 
-    def test_dataset_infos(self, client: TestClient):
-        """Dataset infos endpoint returns expected structure."""
-        response = client.get(f"/datasets/{DATASET_NAME}/infos")
+    def test_dataset_metadata(self, client: TestClient):
+        """Dataset metadata endpoint returns expected structure."""
+        response = client.get(f"/datasets/{DATASET_NAME}/metadata")
 
         assert response.status_code == 200
         data = response.json()

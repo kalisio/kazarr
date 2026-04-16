@@ -312,12 +312,12 @@ class TestPointList:
         assert v_interp == pytest.approx((v1 + v2) / 2, rel=0.01)
 
     # ------------------------------------------------------------------
-    # Dataset infos
+    # Dataset metadata
     # ------------------------------------------------------------------
 
-    def test_dataset_infos(self, client: TestClient):
-        """Dataset infos exposes Humidity variable and bounding box."""
-        response = client.get(f"/datasets/{DATASET_NAME}/infos")
+    def test_dataset_metadata(self, client: TestClient):
+        """Dataset metadata exposes Humidity variable and bounding box."""
+        response = client.get(f"/datasets/{DATASET_NAME}/metadata")
 
         assert response.status_code == 200
         data = response.json()

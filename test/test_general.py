@@ -1,5 +1,5 @@
 """
-test_general.py — General API tests (health, dataset listing, dataset infos).
+test_general.py — General API tests (health, dataset listing, dataset metadata).
 """
 
 import pytest
@@ -28,12 +28,12 @@ class TestGeneral:
         assert response.status_code == 200
 
     def test_dataset_not_found(self, client: TestClient):
-        response = client.get("/datasets/nonexistent_dataset_xyz/infos")
+        response = client.get("/datasets/nonexistent_dataset_xyz/metadata")
 
         assert response.status_code in (400, 404, 500)
 
-    def test_dataset_infos_not_found(self, client: TestClient):
-        response = client.get("/datasets/nonexistent_dataset_xyz/infos")
+    def test_dataset_metadata_not_found(self, client: TestClient):
+        response = client.get("/datasets/nonexistent_dataset_xyz/metadata")
 
         assert response.status_code != 200
 

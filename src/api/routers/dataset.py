@@ -21,6 +21,6 @@ async def redirect_datasets(request: Request):
     return RedirectResponse(url=new_url, status_code=301)
 
 
-@router.get("/datasets/{dataset:path}/infos", summary="Get dataset information")
-async def dataset_infos(dataset: str):
-    return await run_in_threadpool(dataset_service.dataset_infos, dataset)
+@router.get("/datasets/{dataset:path}/metadata", summary="Get dataset information")
+async def dataset_metadata(dataset: str):
+    return await run_in_threadpool(dataset_service.dataset_metadata, dataset)

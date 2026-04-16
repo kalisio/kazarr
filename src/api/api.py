@@ -99,7 +99,7 @@ def read_root():
         "endpoints": [
             "/health",
             "/datasets",
-            "/datasets/{dataset}/infos",
+            "/datasets/{dataset}/metadata",
             "/datasets/{dataset}/extract",
             "/datasets/{dataset}/probe",
             "/datasets/{dataset}/isoline",
