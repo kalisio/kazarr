@@ -14,7 +14,14 @@ import cfgrib
 
 from dask.distributed import Client, performance_report
 
-from src.utils import get_ci, merge, rechunk_if_needed, merge_grib
+from src.utils import (
+    get_ci,
+    merge,
+    rechunk_if_needed,
+    merge_grib,
+    get_s3_storage_options,
+    get_s3_filesystem,
+)
 
 
 def init_dask_dashboard(dataset, config):
@@ -54,7 +61,7 @@ def load_from_netcdf(dataset, config):
         path = os.path.join(bucket, path)
 
         # Check if path is folder or file
-        fs = s3fs.S3FileSystem(anon=False)
+        fs = get_s3_filesystem(config, path)
         if fs.isfile(path):
             dataset = xr.open_dataset(
                 fs.open(path, mode="rb", cache_type="bytes"),
@@ -149,7 +156,7 @@ def load_from_grib(dataset, config):
         path = os.path.join(bucket, path)
 
         # Check if path is folder or file
-        fs = s3fs.S3FileSystem(anon=False)
+        fs = get_s3_filesystem(config, path)
         target_tmp_dir = "/tmp/kazarr_grib/"
         if fs.isfile(path):
             os.makedirs(target_tmp_dir, exist_ok=True)
@@ -202,7 +209,9 @@ def load_from_grib(dataset, config):
                     path, engine="cfgrib", chunks="auto", backend_kwargs=backend_kwargs
                 )
             except cfgrib.dataset.DatasetBuildError:
-                print("[KAZARR] Failed to load GRIB file with Xarray, trying to open as multiple datasets... This may cause higher memory usage and slower performance.")
+                print(
+                    "[KAZARR] Failed to load GRIB file with Xarray, trying to open as multiple datasets... This may cause higher memory usage and slower performance."
+                )
                 datasets = cfgrib.open_datasets(path, backend_kwargs=backend_kwargs)
                 full_variables = set()
                 final_variables = set()
@@ -281,7 +290,9 @@ def load_from_zarr(dataset, config):
         path = os.path.join(bucket, path)
 
         # check=false to avoid checking (1 more request) for existence of root in the store
-        s3_store = s3fs.S3Map(root=path, s3=s3fs.S3FileSystem(anon=False), check=False)
+        s3_store = s3fs.S3Map(
+            root=path, s3=get_s3_filesystem(config, path), check=False
+        )
         dataset = xr.open_zarr(s3_store, chunks="auto")
     else:
         dataset = xr.open_zarr(path, chunks="auto")
@@ -429,7 +440,7 @@ def assign_coords(dataset, config):
                             for v in values.ravel()
                         ]
                     ).reshape(values.shape)
-            assign_dict[var] = (dim, values)
+            assign_dict[var] = (dim, values, dataset[var].attrs)
 
     dataset = dataset.assign_coords(assign_dict)
 
@@ -637,10 +648,14 @@ def reproject_coordinates(dataset, config):
         dask="parallelized",
     )
 
-    dataset[lon_var] = (dataset[lon_var].dims, output[0])
-    dataset[lat_var] = (dataset[lat_var].dims, output[1])
+    dataset[lon_var] = (dataset[lon_var].dims, output[0], dataset[lon_var].attrs)
+    dataset[lat_var] = (dataset[lat_var].dims, output[1], dataset[lat_var].attrs)
     if has_height:
-        dataset[height_var] = (dataset[height_var].dims, output[2])
+        dataset[height_var] = (
+            dataset[height_var].dims,
+            output[2],
+            dataset[height_var].attrs,
+        )
 
     return dataset, config
 
@@ -699,19 +714,26 @@ def save(dataset, config):
     print("[KAZARR] Saving dataset to Zarr format...")
 
     dataset = rechunk_if_needed(dataset)
+
+    zarr_kwargs = {
+        "mode": "w",
+        "consolidated": version == 2,
+        "zarr_format": version,
+    }
+    storage_options = get_s3_storage_options(config, final_path)
+    if storage_options:
+        zarr_kwargs["storage_options"] = storage_options
     if config.get("dask_dashboard_initialised", False):
         with performance_report(filename="dask-performance-report.html"):
-            dataset.to_zarr(
-                final_path, mode="w", consolidated=(version == 2), zarr_format=version
-            )
+            dataset.to_zarr(final_path, **zarr_kwargs)
             path = Path(__file__).parent.resolve()
             print("===============================================")
-            print(f"[KAZARR] Dask performance report available at: file://{path}/dask-performance-report.html")
+            print(
+                f"[KAZARR] Dask performance report available at: file://{path}/dask-performance-report.html"
+            )
             print("===============================================")
     else:
-        dataset.to_zarr(
-            final_path, mode="w", consolidated=(version == 2), zarr_format=version
-        )
+        dataset.to_zarr(final_path, **zarr_kwargs)
     return dataset, config
 
 

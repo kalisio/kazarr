@@ -10,16 +10,56 @@ from botocore.exceptions import NoCredentialsError
 from dask import array as da
 
 
+def get_s3_storage_options(config, path=None):
+    if path and not path.startswith("s3://"):
+        return {}
+
+    storage_options = get_ci(config, "storage_options", default={})
+
+    # Default timeouts
+    connect_timeout = get_ci(config, "s3.connect_timeout", 300)
+    read_timeout = get_ci(config, "s3.read_timeout", 300)
+
+    # Ensure client_kwargs exists
+    config_kwargs = storage_options.get("config_kwargs", {})
+    config_kwargs.setdefault("connect_timeout", connect_timeout)
+    config_kwargs.setdefault("read_timeout", read_timeout)
+    storage_options["config_kwargs"] = config_kwargs
+
+    # Handle OVH specific configuration
+    # endpoint_url = os.getenv("AWS_ENDPOINT_URL", "")
+    # if "cloud.ovh.net" in endpoint_url or "cloud.ovh.net" in (path or ""):
+    #     config_kwargs = storage_options.get("config_kwargs", {})
+    #     config_kwargs.setdefault("signature_version", "s3v4")
+
+    #     s3_config = config_kwargs.get("s3", {})
+    #     s3_config.setdefault("addressing_style", "path")
+    #     s3_config.setdefault("payload_signing_enabled", False)
+    #     config_kwargs["s3"] = s3_config
+
+    #     storage_options["config_kwargs"] = config_kwargs
+
+    # Ensure authentication
+    if "anon" not in storage_options:
+        storage_options["anon"] = False
+
+    return storage_options
+
+
+def get_s3_filesystem(config, path=None):
+    return s3fs.S3FileSystem(**get_s3_storage_options(config, path))
+
+
 # Load JSON file
-def load_json(path="datasets.json"):
+def load_json(path="datasets.json", config={}):
     if path.startswith("s3://"):
         path = path[5:]
-        s3_store = s3fs.S3FileSystem(anon=False)
+        fs = get_s3_filesystem(config, path)
         bucket = os.getenv("BUCKET_NAME")
         if bucket is None:
             raise ValueError("BUCKET_NAME environment variable not set.")
         try:
-            with s3_store.open(os.path.join(bucket, path), "r") as f:
+            with fs.open(os.path.join(bucket, path), "r") as f:
                 datasets = json.load(f)
         except NoCredentialsError:
             raise ValueError("S3 credentials not found.")

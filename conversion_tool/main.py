@@ -21,11 +21,11 @@ def new_dataset(
 ):
     pipeline_config = {}
     if template is not None:
-        templates = load_json(templates_path)
+        templates = load_json(templates_path, config)
         if template in templates:
             pipeline_config = merge(templates[template], config)
     if config_file is not None:
-        config_file_content = load_json(config_file)
+        config_file_content = load_json(config_file, config)
         pipeline_config = merge(pipeline_config, config_file_content)
     if config is not None:
         pipeline_config = merge(pipeline_config, config)
