@@ -21,7 +21,7 @@ Check for service's health, return a json object with a single member `status`.
 
 Return a list of all available Zarr datasets with their id and description.
 
-#### /datasets/{dataset}/infos (GET)
+#### /datasets/{dataset}/metadata (GET)
 
 Return metadata (dimensions, variables, attributes) for a specific Zarr dataset.
 The `dataset` parameter is expected to be the dataset id, that can be found with the previous endpoint.
