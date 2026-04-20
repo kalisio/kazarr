@@ -5,7 +5,7 @@ import src.exceptions as exceptions
 
 # Ensure xindex is set for a variable in the dataset
 def set_xindex(dataset, var_name):
-    if var_name not in dataset.xindexes:
+    if var_name not in dataset.xindexes and dataset[var_name].ndim > 0:
         dataset = dataset.set_xindex(var_name)
     return dataset
 

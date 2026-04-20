@@ -68,6 +68,8 @@ def extract(
             fixed_coords[time_var] = get_bounded_time(dataset, time_var, time)
             if config.interpolation.vars.time and time_var not in interp_vars:
                 interp_vars.append(time_var)
+            # Remove "time" from request parameters to avoid confusion in later steps (case where time is a variable in the dataset)
+            request.query_params._dict.pop("time", None)
 
     mesh_type = dget(dataset_config, "mesh_type", "auto")
     if len(missing_vars) > 0:
