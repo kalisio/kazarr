@@ -21,6 +21,7 @@ from src.utils import (
     merge_grib,
     get_s3_storage_options,
     get_s3_filesystem,
+    timestamp_to_datetime,
 )
 
 
@@ -217,6 +218,7 @@ def load_from_grib(dataset, config):
                 final_variables = set()
                 for ds in datasets:
                     full_variables.update(ds.data_vars)
+                    full_variables.update(ds.coords)
                 if len(datasets) == 1:
                     dataset = datasets[0].chunk("auto")
                 else:
@@ -229,6 +231,7 @@ def load_from_grib(dataset, config):
                             datasets[i] = ds.chunk("auto")
                         dataset = xr.merge(datasets, compat="minimal", join="outer")
                         final_variables.update(dataset.data_vars)
+                        final_variables.update(dataset.coords)
                         removed_variables = full_variables - final_variables
                         if removed_variables:
                             print(
@@ -531,6 +534,7 @@ def delta_time_to_datetime(dataset, config):
 
     time_dim = get_ci(config, "dimensions.time")
 
+    # Whether or not to update the original time variable in the config to point to the new datetime variable created by this process (default: True). If False, the new datetime variable will be created but the config will still point to the original time variable, which may cause issues for downstream processes that rely on it being a datetime variable.
     update_time_var = get_ci(config, "updateTimeVar", default=True)
 
     units = {
@@ -567,10 +571,13 @@ def delta_time_to_datetime(dataset, config):
 
     try:
         time_ref = dataset[time_ref_var].values.item()
-        time_ref = (
-            time_ref.decode("utf-8") if isinstance(time_ref, bytes) else str(time_ref)
-        )
-        time_ref = datetime.strptime(time_ref, time_ref_format)
+        if time_ref_format == "timestamp" and isinstance(time_ref, (int, float)):
+            time_ref = timestamp_to_datetime(time_ref)
+        else:
+            time_ref = (
+                time_ref.decode("utf-8") if isinstance(time_ref, bytes) else str(time_ref)
+            )
+            time_ref = datetime.strptime(time_ref, time_ref_format)
     except ValueError as e:
         raise ValueError(f"Error parsing reference time: {e}")
 
@@ -580,9 +587,12 @@ def delta_time_to_datetime(dataset, config):
     if time_dim is None and time_var is not None and time_var in dataset:
         time_dim = dataset[time_var].dims[0]
     time_deltas = dataset[time_var].values
+    # Convert to timedelta64 if not already
+    if not np.issubdtype(time_deltas.dtype, np.timedelta64):
+        time_deltas = np.array(time_deltas, dtype="timedelta64[{}]".format(delta_unit))
     time_values = np.array(
         [
-            np.datetime64(time_ref) + np.timedelta64(int(td), delta_unit)
+            np.datetime64(time_ref) + td
             for td in time_deltas
         ]
     )

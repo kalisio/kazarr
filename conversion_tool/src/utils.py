@@ -3,6 +3,7 @@ import time
 import json
 from pathlib import Path
 import shutil
+from datetime import datetime
 
 import s3fs
 import numpy as np
@@ -241,3 +242,20 @@ def merge_grib(folder_path, output_filename, config, glob_search_pattern="*.grib
     )
 
     return config
+
+def timestamp_to_datetime(timestamp):
+    try:
+        ts = float(timestamp)
+    except (ValueError, TypeError):
+        raise ValueError(f"Invalid timestamp format: {timestamp}")
+    
+    if ts < 1e11:
+        divisor = 1.0  # Seconds
+    elif ts < 1e14:
+        divisor = 1e3  # Milliseconds
+    elif ts < 1e17:
+        divisor = 1e6  # Microseconds
+    else:
+        divisor = 1e9  # Nanoseconds
+
+    return datetime.fromtimestamp(ts / divisor)
