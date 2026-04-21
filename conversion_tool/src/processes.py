@@ -520,11 +520,7 @@ def delta_time_to_datetime(dataset, config):
         "referenceTime.variable",
         message="Missing 'referenceTime.variable' config parameter for delta_time_to_datetime process.",
     )
-    time_ref_format = get_ci(
-        config,
-        "referenceTime.format",
-        message="Missing 'referenceTime.format' config parameter for delta_time_to_datetime process.",
-    )
+    time_ref_format = get_ci(config, "referenceTime.format")
     delta_unit = get_ci(config, "referenceTime.delta_unit")
     time_var = get_ci(
         config,
@@ -570,32 +566,62 @@ def delta_time_to_datetime(dataset, config):
         delta_unit = "h"  # Default to hours
 
     try:
-        time_ref = dataset[time_ref_var].values.item()
-        if time_ref_format == "timestamp" and isinstance(time_ref, (int, float)):
-            time_ref = timestamp_to_datetime(time_ref)
+        var_data = dataset[time_ref_var].values
+        if var_data.shape == ():
+            time_ref = var_data[()]
+        elif var_data.size == 1:
+            time_ref = var_data[0]
         else:
+            raise ValueError(
+                f"Reference time variable '{time_ref_var}' must be a scalar, a string, or a datetime64 variable."
+            )
+
+        is_dt64 = isinstance(time_ref, np.datetime64)
+
+        if (
+            not isinstance(time_ref, (int, float))
+            and not is_dt64
+            and time_ref_format is None
+        ):
+            raise ValueError(
+                "Missing 'referenceTime.format' config parameter for delta_time_to_datetime process."
+            )
+
+        if (time_ref_format is None or time_ref_format == "timestamp") and isinstance(
+            time_ref, (int, float)
+        ):
+            time_ref = timestamp_to_datetime(time_ref)
+        elif not is_dt64 and not isinstance(
+            time_ref, datetime
+        ):
             time_ref = (
-                time_ref.decode("utf-8") if isinstance(time_ref, bytes) else str(time_ref)
+                time_ref.decode("utf-8")
+                if isinstance(time_ref, bytes)
+                else str(time_ref)
             )
             time_ref = datetime.strptime(time_ref, time_ref_format)
-    except ValueError as e:
-        raise ValueError(f"Error parsing reference time: {e}")
 
-    # Try to deduce time dimension from time variable if time dimension is not provided
-    # If time dimension is found, we create a coordinate "datetimes" along that dimension
-    # If not, we create a new variable "datetimes"
-    if time_dim is None and time_var is not None and time_var in dataset:
-        time_dim = dataset[time_var].dims[0]
-    time_deltas = dataset[time_var].values
-    # Convert to timedelta64 if not already
-    if not np.issubdtype(time_deltas.dtype, np.timedelta64):
-        time_deltas = np.array(time_deltas, dtype="timedelta64[{}]".format(delta_unit))
-    time_values = np.array(
-        [
-            np.datetime64(time_ref) + td
-            for td in time_deltas
-        ]
-    )
+        if not is_dt64:
+            time_ref = np.datetime64(time_ref)
+    except ValueError as e:
+        raise ValueError(f"Error parsing reference time: {e}") from e
+
+    try:
+        # Try to deduce time dimension from time variable if time dimension is not provided
+        # If time dimension is found, we create a coordinate "datetimes" along that dimension
+        # If not, we create a new variable "datetimes"
+        if time_dim is None and time_var is not None and time_var in dataset:
+            time_dim = dataset[time_var].dims[0]
+
+        time_deltas = dataset[time_var].values
+        # Convert to timedelta64 if not already
+        if not np.issubdtype(time_deltas.dtype, np.timedelta64):
+            time_deltas = np.array(time_deltas, dtype=f"timedelta64[{delta_unit}]")
+
+        time_values = time_ref + time_deltas
+    except Exception as e:
+        raise ValueError(f"Error calculating datetime values: {e}") from e
+
     if time_dim is not None:
         dataset = dataset.assign_coords(datetimes=(time_dim, time_values))
     else:
