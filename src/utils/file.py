@@ -50,7 +50,9 @@ def load(path):
         cache_size = os.getenv("CACHE_SIZE", "512MB")
         cache_path = os.getenv("CACHE_DIR")
         use_cache = (
-            cache_path is not None and get_cache_size_bytes(cache_size) is not None
+            cache_path is not None
+            and cache_path != ""
+            and get_cache_size_bytes(cache_size) is not None
         )
         if not use_cache:
             store = s3fs.S3Map(

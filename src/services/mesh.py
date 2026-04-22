@@ -54,7 +54,8 @@ def get_mesh(
             lons, lats, None, "radial" if mesh_type == "radial" else "rectilinear"
         )
     else:
-        lons_points, lats_points = lons.values, lats.values
+        lons_points = getattr(lons, "values", lons)
+        lats_points = getattr(lats, "values", lats)
         height_points = np.zeros_like(lons_points)
 
     if format == "geojson":

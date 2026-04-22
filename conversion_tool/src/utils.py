@@ -243,12 +243,13 @@ def merge_grib(folder_path, output_filename, config, glob_search_pattern="*.grib
 
     return config
 
+
 def timestamp_to_datetime(timestamp):
     try:
         ts = float(timestamp)
     except (ValueError, TypeError):
         raise ValueError(f"Invalid timestamp format: {timestamp}")
-    
+
     if ts < 1e11:
         divisor = 1.0  # Seconds
     elif ts < 1e14:
