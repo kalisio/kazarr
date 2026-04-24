@@ -116,7 +116,7 @@ class TestRectilinearGrid:
 
         assert response.status_code == 200
         data = response.json()
-        assert data["bounds"] == {"min": 0, "max": HEIGHTS * LATS * LONS - 1}
+        assert data["variables"]["Precipitation"]["bounds"] == {"min": 0, "max": HEIGHTS * LATS * LONS - 1}
 
     def test_extract_time_interpolation(self, client: TestClient):
         """Time interpolation at midpoint between two steps (t=1h and t=2h)."""
@@ -127,7 +127,7 @@ class TestRectilinearGrid:
 
         assert response.status_code == 200
         data = response.json()
-        assert data["bounds"] == {
+        assert data["variables"]["Precipitation"]["bounds"] == {
             "min": HEIGHTS * LATS * LONS * 1.5,
             "max": HEIGHTS * LATS * LONS * 2.5 - 1,
         }
@@ -144,7 +144,7 @@ class TestRectilinearGrid:
         assert len(data["features"]) > 0
         feature = data["features"][0]
         assert feature["geometry"]["type"] == "Point"
-        assert "value" in feature["properties"]
+        assert "Precipitation" in feature["properties"]
 
     def test_extract_tile(self, client: TestClient):
         """Bounding box extraction returns only points within the box."""
@@ -156,10 +156,10 @@ class TestRectilinearGrid:
         assert response.status_code == 200
         data = response.json()
         # All non-null points must fall inside the bounding box
-        for idx, value in enumerate(data["data"]["values"]):
+        for idx, value in enumerate(data["values"]["Precipitation"]):
             if value is not None:
-                lon = data["data"]["longitudes"][idx]
-                lat = data["data"]["latitudes"][idx]
+                lon = data["longitudes"][idx]
+                lat = data["latitudes"][idx]
                 assert 2.0 <= lon <= 4.0
                 assert 43.0 <= lat <= 44.0
 
@@ -230,9 +230,9 @@ class TestRectilinearGrid:
         assert r2.status_code == 200
         assert r_interp.status_code == 200
 
-        values1 = r1.json()["variables"]["Precipitation"]["values"]
-        values2 = r2.json()["variables"]["Precipitation"]["values"]
-        values_interp = r_interp.json()["variables"]["Precipitation"]["values"]
+        values1 = r1.json()["values"]["Precipitation"]
+        values2 = r2.json()["values"]["Precipitation"]
+        values_interp = r_interp.json()["values"]["Precipitation"]
 
         assert len(values1) == len(values2) == len(values_interp)
 
@@ -272,10 +272,10 @@ class TestRectilinearGrid:
         def extract_scalar(values):
             return values[0] if isinstance(values, list) else values
 
-        v1 = extract_scalar(r1.json()["variables"]["Precipitation"]["values"])
-        v2 = extract_scalar(r2.json()["variables"]["Precipitation"]["values"])
+        v1 = extract_scalar(r1.json()["values"]["Precipitation"])
+        v2 = extract_scalar(r2.json()["values"]["Precipitation"])
         v_interp = extract_scalar(
-            r_interp.json()["variables"]["Precipitation"]["values"]
+            r_interp.json()["values"]["Precipitation"]
         )
 
         assert v_interp == pytest.approx((v1 + v2) / 2)
@@ -289,7 +289,7 @@ class TestRectilinearGrid:
         assert response.status_code == 200
         data = response.json()
         assert "variables" in data
-        assert "Precipitation" in data["variables"]
+        assert "Precipitation" in data["values"]
 
     # ------------------------------------------------------------------
     # Mesh endpoint

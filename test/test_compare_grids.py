@@ -203,8 +203,8 @@ class TestRegularGridVsRectilinearGrid:
         )
 
         # Both grids have the same data distribution — min should be ~0
-        assert reg_data["bounds"]["min"] == pytest.approx(
-            rec_data["bounds"]["min"], abs=1.0
+        assert reg_data["variables"]["Precipitation"]["bounds"]["min"] == pytest.approx(
+            rec_data["variables"]["Precipitation"]["bounds"]["min"], abs=1.0
         )
 
     def test_compare_global_extract_mesh(self, client: TestClient):
@@ -317,11 +317,11 @@ class TestRegularGridVsRectilinearGrid:
         assert rec_duration < THRESHOLDS["extract_tile"]
 
         # Both should return data in the same geographic area
-        assert reg_data["bounds"]["min"] == pytest.approx(
-            rec_data["bounds"]["min"], rel=0.1
+        assert reg_data["variables"]["Precipitation"]["bounds"]["min"] == pytest.approx(
+            rec_data["variables"]["Precipitation"]["bounds"]["min"], rel=0.1
         )
-        assert reg_data["bounds"]["max"] == pytest.approx(
-            rec_data["bounds"]["max"], rel=0.1
+        assert reg_data["variables"]["Precipitation"]["bounds"]["max"] == pytest.approx(
+            rec_data["variables"]["Precipitation"]["bounds"]["max"], rel=0.1
         )
 
     def test_compare_tile_extract_mesh(self, client: TestClient):

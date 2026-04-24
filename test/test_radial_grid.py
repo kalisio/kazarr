@@ -106,11 +106,12 @@ class TestRadialGrid:
 
         assert response.status_code == 200
         data = response.json()
-        assert "bounds" in data
-        assert data["bounds"]["min"] >= 0
-        assert data["bounds"]["max"] <= 150
-        assert "data" in data
-        assert len(data["data"]["values"]) > 0
+        assert "WindSpeed" in data["variables"]
+        assert "bounds" in data["variables"]["WindSpeed"]
+        assert data["variables"]["WindSpeed"]["bounds"]["min"] >= 0
+        assert data["variables"]["WindSpeed"]["bounds"]["max"] <= 150
+        assert "values" in data
+        assert len(data["values"]["WindSpeed"]) > 0
 
     def test_extract_tile(self, client: TestClient):
         """Bounding box extraction on radial grid returns points inside the box."""
@@ -154,9 +155,9 @@ class TestRadialGrid:
         assert r2.status_code == 200
         assert r_interp.status_code == 200
 
-        b1 = r1.json()["bounds"]
-        b2 = r2.json()["bounds"]
-        b_interp = r_interp.json()["bounds"]
+        b1 = r1.json()["variables"]["WindSpeed"]["bounds"]
+        b2 = r2.json()["variables"]["WindSpeed"]["bounds"]
+        b_interp = r_interp.json()["variables"]["WindSpeed"]["bounds"]
 
         # Interpolated min/max should fall between the two time steps
         assert min(b1["min"], b2["min"]) <= b_interp["min"] + 0.01  # approx tolerance
@@ -195,7 +196,7 @@ class TestRadialGrid:
         data = response.json()
         assert "variables" in data
         assert "WindSpeed" in data["variables"]
-        values = data["variables"]["WindSpeed"]["values"]
+        values = data["values"]["WindSpeed"]
         assert isinstance(values, list)
         assert len(values) > 0
 

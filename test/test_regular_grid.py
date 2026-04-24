@@ -108,12 +108,12 @@ class TestRegularGrid:
 
         assert response.status_code == 200
         data = response.json()
-        assert data["bounds"] == {"min": 300, "max": 449}
-        assert "data" in data
-        assert "longitudes" in data["data"]
-        assert "latitudes" in data["data"]
-        assert "values" in data["data"]
-        assert len(data["data"]["values"]) == LATS * LONS
+        assert data["variables"]["Value"]["bounds"] == {"min": 300, "max": 449}
+        assert "variables" in data
+        assert "longitudes" in data
+        assert "latitudes" in data
+        assert "values" in data
+        assert len(data["values"]["Value"]) == LATS * LONS
 
     def test_extract_time_interpolation(self, client: TestClient):
         """Time interpolation between two steps returns midpoint values."""
@@ -124,7 +124,7 @@ class TestRegularGrid:
 
         assert response.status_code == 200
         data = response.json()
-        assert data["bounds"] == {"min": 375, "max": 524}
+        assert data["variables"]["Value"]["bounds"] == {"min": 375, "max": 524}
 
     def test_extract_geojson(self, client: TestClient):
         """GeoJSON format returns a valid FeatureCollection."""
@@ -140,7 +140,7 @@ class TestRegularGrid:
         # Each feature should have a point geometry and a value property
         feature = data["features"][0]
         assert feature["geometry"]["type"] == "Point"
-        assert "value" in feature["properties"]
+        assert "Value" in feature["properties"]
 
     def test_extract_tile(self, client: TestClient):
         """Bounding box extraction returns only points inside the box."""
@@ -159,10 +159,10 @@ class TestRegularGrid:
 
         min_lat = min_lon = float("inf")
         max_lat = max_lon = float("-inf")
-        for idx, value in enumerate(data["data"]["values"]):
+        for idx, value in enumerate(data["values"]["Value"]):
             if value is not None:
-                current_lat = data["data"]["latitudes"][idx]
-                current_lon = data["data"]["longitudes"][idx]
+                current_lat = data["latitudes"][idx]
+                current_lon = data["longitudes"][idx]
                 min_lat = min(min_lat, current_lat)
                 max_lat = max(max_lat, current_lat)
                 min_lon = min(min_lon, current_lon)
@@ -236,7 +236,7 @@ class TestRegularGrid:
         data = response.json()
         assert "variables" in data
         assert "Value" in data["variables"]
-        values = data["variables"]["Value"]["values"]
+        values = data["values"]["Value"]
         assert isinstance(values, list)
         assert len(values) > 0
 
@@ -260,9 +260,9 @@ class TestRegularGrid:
         assert r2.status_code == 200
         assert r_interp.status_code == 200
 
-        v1 = r1.json()["variables"]["Value"]["values"]
-        v2 = r2.json()["variables"]["Value"]["values"]
-        v_interp = r_interp.json()["variables"]["Value"]["values"]
+        v1 = r1.json()["values"]["Value"]
+        v2 = r2.json()["values"]["Value"]
+        v_interp = r_interp.json()["values"]["Value"]
 
         v1 = v1[0] if isinstance(v1, list) else v1
         v2 = v2[0] if isinstance(v2, list) else v2
@@ -476,9 +476,9 @@ class TestRegularGridComplex:
         assert "Value2" in data["variables"]
         assert "Value3" in data["variables"]
 
-        value1 = data["variables"]["Value1"]["values"]
-        value2 = data["variables"]["Value2"]["values"]
-        value3 = data["variables"]["Value3"]["values"]
-        assert isinstance(value1, list) and len(data["variables"]["Value1"]["values"]) == 1 or isinstance(value1, (int, float))
-        assert isinstance(value2, list) and len(data["variables"]["Value2"]["values"]) == 1 or isinstance(value2, (int, float))
-        assert isinstance(value3, list) and len(data["variables"]["Value3"]["values"]) == 1 or isinstance(value3, (int, float))
+        value1 = data["values"]["Value1"]
+        value2 = data["values"]["Value2"]
+        value3 = data["values"]["Value3"]
+        assert isinstance(value1, list) and len(data["values"]["Value1"]) == 1 or isinstance(value1, (int, float))
+        assert isinstance(value2, list) and len(data["values"]["Value2"]) == 1 or isinstance(value2, (int, float))
+        assert isinstance(value3, list) and len(data["values"]["Value3"]) == 1 or isinstance(value3, (int, float))

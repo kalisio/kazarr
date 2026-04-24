@@ -148,11 +148,11 @@ class TestPointList:
 
         assert response.status_code == 200
         data = response.json()
-        assert "data" in data
-        non_null = [v for v in data["data"]["values"] if v is not None]
+        assert "values" in data
+        non_null = [v for v in data["values"]["Humidity"] if v is not None]
         assert len(non_null) == N_STATIONS
-        assert data["bounds"]["min"] >= 0
-        assert data["bounds"]["max"] <= 100
+        assert data["variables"]["Humidity"]["bounds"]["min"] >= 0
+        assert data["variables"]["Humidity"]["bounds"]["max"] <= 100
 
     def test_extract_geojson(self, client: TestClient):
         """GeoJSON extraction returns one Feature per station."""
@@ -182,7 +182,7 @@ class TestPointList:
 
         assert response.status_code == 200
         data = response.json()
-        non_null_count = sum(1 for v in data["data"]["values"] if v is not None)
+        non_null_count = sum(1 for v in data["values"]["Humidity"] if v is not None)
         assert non_null_count > 0
         assert non_null_count < N_STATIONS  # Not all stations are in the box
 
@@ -213,9 +213,9 @@ class TestPointList:
         assert r2.status_code == 200
         assert r_interp.status_code == 200
 
-        b1 = r1.json()["data"]["values"]
-        b2 = r2.json()["data"]["values"]
-        b_interp = r_interp.json()["data"]["values"]
+        b1 = r1.json()["values"]["Humidity"]
+        b2 = r2.json()["values"]["Humidity"]
+        b_interp = r_interp.json()["values"]["Humidity"]
 
         assert b_interp[0] == pytest.approx((b1[0] + b2[0]) / 2, rel=0.01)
         assert b_interp[-1] == pytest.approx((b1[-1] + b2[-1]) / 2, rel=0.01)
@@ -230,11 +230,11 @@ class TestPointList:
 
         assert response.status_code == 200
         data = response.json()
-        assert len(data["data"]["values"]) == 1
+        assert len(data["values"]["Humidity"]) == 1
         flat_data = np.linspace(0, 2 * np.pi, len(STATION_NAMES) * N_TIMES)
         phi = flat_data[time_index * len(STATION_NAMES) + city_index]
         lille_value = ((np.cos(phi) + 1) / 2) * 100
-        assert data["data"]["values"][0] == pytest.approx(lille_value, abs=0.1)
+        assert data["values"]["Humidity"][0] == pytest.approx(lille_value, abs=0.1)
 
 
     # ------------------------------------------------------------------
@@ -251,8 +251,8 @@ class TestPointList:
         assert response.status_code == 200
         data = response.json()
         assert "variables" in data
-        assert "Humidity" in data["variables"]
-        values = data["variables"]["Humidity"]["values"]
+        assert "Humidity" in data["values"]
+        values = data["values"]["Humidity"]
         assert isinstance(values, list)
         assert len(values) > 0
         # All time steps should have valid humidity values
@@ -269,7 +269,7 @@ class TestPointList:
 
         assert response.status_code == 200
         data = response.json()
-        values = data["variables"]["Humidity"]["values"]
+        values = data["values"]["Humidity"]
         assert (isinstance(values, list) and len(values) == 1) or isinstance(values, (int, float))
 
     def test_probe_with_height(self, client: TestClient):
@@ -281,7 +281,7 @@ class TestPointList:
         assert response.status_code == 200
         data = response.json()
         assert "variables" in data
-        assert "Humidity" in data["variables"]
+        assert "Humidity" in data["values"]
 
     def test_probe_time_interpolation(self, client: TestClient):
         """Probe with time interpolation returns midpoint value."""
@@ -305,9 +305,9 @@ class TestPointList:
         def scalar(values):
             return values[0] if isinstance(values, list) else values
 
-        v1 = scalar(r1.json()["variables"]["Humidity"]["values"])
-        v2 = scalar(r2.json()["variables"]["Humidity"]["values"])
-        v_interp = scalar(r_interp.json()["variables"]["Humidity"]["values"])
+        v1 = scalar(r1.json()["values"]["Humidity"])
+        v2 = scalar(r2.json()["values"]["Humidity"])
+        v_interp = scalar(r_interp.json()["values"]["Humidity"])
 
         assert v_interp == pytest.approx((v1 + v2) / 2, rel=0.01)
 
