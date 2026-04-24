@@ -1,4 +1,5 @@
 import os
+import time
 import json
 import copy
 from functools import lru_cache
@@ -6,8 +7,9 @@ from pathlib import Path
 
 import s3fs
 import xarray as xr
-import fsspec
 from botocore.exceptions import NoCredentialsError
+from zarr.abc.store import Store
+from zarr.core.buffer import Buffer, BufferPrototype
 
 import src.exceptions as exceptions
 
@@ -62,15 +64,12 @@ def load(path):
                 s3=s3fs.S3FileSystem(anon=False),
             )
         else:
-            fs = fsspec.filesystem(
-                "simplecache",
-                target_protocol="s3",
-                cache_storage=cache_path,
-                target_options={"anon": False},
-                expiry_time=60 * 60 * 24 * 7 * 4,  # 4 weeks
-            )
-            store = fs.get_mapper(
-                os.path.join(bucket, get_datasets_path(), path.replace("s3://", ""))
+            store = S3CachedStore(
+                s3_root=os.path.join(
+                    bucket, get_datasets_path(), path.replace("s3://", "")
+                ),
+                cache_dir=os.path.join(cache_path, path.replace("s3://", "")),
+                expiry_seconds=60 * 60 * 24 * 7 * 4,
             )
 
         # Will try to open consolidated metadata first (https://docs.xarray.dev/en/latest/generated/xarray.open_zarr.html#xarray.open_zarr)
@@ -220,3 +219,102 @@ def enforce_cache_limit(cache_dir, max_size="512MB"):
                 break
         except OSError:
             pass  # File may be in use or already deleted
+
+
+class S3CachedStore(Store):
+    def __init__(
+        self, s3_root: str, cache_dir: str, expiry_seconds: int = 60 * 60 * 24 * 7 * 4
+    ):
+        super().__init__(read_only=True)
+        self.s3_root = s3_root.rstrip("/")
+        self.cache_dir = cache_dir
+        self.expiry_seconds = expiry_seconds
+        self.s3 = s3fs.S3FileSystem(anon=False)
+        Path(cache_dir).mkdir(parents=True, exist_ok=True)
+
+    @property
+    def supports_writes(self) -> bool:
+        return False
+
+    @property
+    def supports_deletes(self) -> bool:
+        return False
+
+    @property
+    def supports_listing(self) -> bool:
+        return True
+
+    def _local_path(self, key: str) -> str:
+        return os.path.join(self.cache_dir, key)
+
+    def _is_expired(self, local_path: str) -> bool:
+        try:
+            return (time.time() - os.path.getmtime(local_path)) > self.expiry_seconds
+        except FileNotFoundError:
+            return True
+
+    def _fetch(self, key: str) -> bytes:
+        local_path = self._local_path(key)
+        if not os.path.exists(local_path) or self._is_expired(local_path):
+            s3_path = f"{self.s3_root}/{key}"
+            try:
+                data = self.s3.cat(s3_path)
+            except FileNotFoundError:
+                raise KeyError(key)
+            os.makedirs(os.path.dirname(local_path), exist_ok=True)
+            with open(local_path, "wb") as f:
+                f.write(data)
+        with open(local_path, "rb") as f:
+            return f.read()
+
+    def __eq__(self, other: object) -> bool:
+        return (
+            isinstance(other, S3CachedStore)
+            and self.s3_root == other.s3_root
+            and self.cache_dir == other.cache_dir
+        )
+
+    async def get(
+        self, key: str, prototype: BufferPrototype, byte_range=None
+    ) -> Buffer | None:
+        try:
+            data = self._fetch(key)
+            if byte_range is not None:
+                start = byte_range.start or 0
+                end = byte_range.stop or len(data)
+                data = data[start:end]
+            return prototype.buffer.from_bytes(data)
+        except KeyError:
+            return None
+
+    async def get_partial_values(self, prototype: BufferPrototype, key_ranges):
+        results = []
+        for key, byte_range in key_ranges:
+            results.append(await self.get(key, prototype, byte_range))
+        return results
+
+    async def set(self, key: str, value: Buffer, byte_range=None) -> None:
+        raise NotImplementedError("Read-only store")
+
+    async def delete(self, key: str) -> None:
+        raise NotImplementedError("Read-only store")
+
+    async def exists(self, key: str) -> bool:
+        local_path = self._local_path(key)
+        if os.path.exists(local_path) and not self._is_expired(local_path):
+            return True
+        return self.s3.exists(f"{self.s3_root}/{key}")
+
+    async def list(self):
+        for entry in self.s3.ls(self.s3_root, detail=False):
+            yield os.path.relpath(entry, self.s3_root)
+
+    async def list_prefix(self, prefix: str):
+        s3_path = f"{self.s3_root}/{prefix}".rstrip("/")
+        for entry in self.s3.ls(s3_path, detail=False):
+            yield os.path.relpath(entry, self.s3_root)
+
+    async def list_dir(self, prefix: str):
+        s3_path = f"{self.s3_root}/{prefix}".rstrip("/")
+        for entry in self.s3.ls(s3_path, detail=False):
+            yield os.path.relpath(entry, self.s3_root)
