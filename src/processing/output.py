@@ -46,57 +46,106 @@ def prepare_mesh_output(lons, lats, vals, variable, mask_cropped, step_row, step
     return out
 
 
-def prepare_raw_output(vals, lons, lats, step_row, step_col):
-    flat_vals = vals.flatten()
-    flat_lons = lons.flatten()
-    flat_lats = lats.flatten()
+def prepare_output(var_names, vals, lons, lats, global_props=None, var_props=None):
+    if global_props is None:
+        global_props = {}
+    if var_props is None:
+        var_props = {}
 
-    valid_vals = flat_vals[~np.isnan(flat_vals)]
-    if valid_vals.size == 0:
+    if isinstance(var_names, str):
+        var_names = [var_names]
+    if len(var_names) != len(vals):
+        raise exceptions.GenericInternalError(
+            "Length of var_names must match length of vals"
+        )
+
+    flat_lons = lons.flatten().tolist()
+    flat_lats = lats.flatten().tolist()
+    vals_dict = {}
+    one_point = lons.shape[0] == 1 and lats.shape[0] == 1
+
+    no_data = True
+    out_vars_props = {}
+    for i, var_name in enumerate(var_names):
+        var_vals = vals[i].flatten()
+        valid_vals = var_vals[~np.isnan(var_vals)]
+        if valid_vals.size == 0:
+            continue
+        no_data = False
+        var_vals = np.where(np.isnan(var_vals), None, var_vals).tolist()
+        vals_dict[var_name] = var_vals
+        out_vars_props[var_name] = {
+            "bounds": {
+                "min": np.min(valid_vals).item(),
+                "max": np.max(valid_vals).item(),
+            },
+            **var_props.get(var_name, {}),
+        }
+    if no_data:
         raise exceptions.NoDataInSelection()
+
+    return flat_lons, flat_lats, vals_dict, global_props, out_vars_props, one_point
+
+
+def prepare_raw_output(var_names, vals, lons, lats, global_props=None, var_props=None):
+    flat_lons, flat_lats, vals_dict, collection_props, out_props, _ = (
+        prepare_output(
+            var_names,
+            vals,
+            lons,
+            lats,
+            global_props=global_props,
+            var_props=var_props,
+        )
+    )
+
     return {
-        "shape": vals.shape,
-        "bounds": {
-            "min": np.min(valid_vals).item(),
-            "max": np.max(valid_vals).item(),
-        },
-        "resolution_factor": {"row": step_row, "col": step_col},
-        "data": {
-            "longitudes": flat_lons.tolist(),
-            "latitudes": flat_lats.tolist(),
-            "values": [None if np.isnan(v) else v.item() for v in flat_vals],
+        "shape": vals[0].shape,
+        **collection_props,
+        "variables": out_props,
+        "longitudes": flat_lons,
+        "latitudes": flat_lats,
+        "values": {
+            **vals_dict
         },
     }
 
 
-def prepare_geojson_output(vals, lons, lats, step_row, step_col):
-    flat_vals = vals.flatten()
-    flat_lons = lons.flatten()
-    flat_lats = lats.flatten()
-
-    valid_vals = flat_vals[~np.isnan(flat_vals)]
-    if valid_vals.size == 0:
-        raise exceptions.NoDataInSelection()
+def prepare_geojson_output(
+    var_names, vals, lons, lats, collection_props=None, var_props=None
+):
+    flat_lons, flat_lats, vals_dict, collection_props, out_props, has_one_point = (
+        prepare_output(
+            var_names,
+            vals,
+            lons,
+            lats,
+            global_props=collection_props,
+            var_props=var_props,
+        )
+    )
 
     features = []
-    for i in range(flat_vals.shape[0]):
-        if not np.isnan(flat_vals[i]):
-            features.append(
-                {
-                    "type": "Feature",
-                    "geometry": {
-                        "type": "Point",
-                        "coordinates": [float(flat_lons[i]), float(flat_lats[i])],
-                    },
-                    "properties": {"id": i, "value": float(flat_vals[i])},
-                }
-            )
+    for i in range(len(flat_lons)):
+        if has_one_point:
+            out_vals = vals_dict
+        else:
+            out_vals = {
+                var_name: var_vals[i] for var_name, var_vals in vals_dict.items()
+            }
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": {
+                    "type": "Point",
+                    "coordinates": [float(flat_lons[i]), float(flat_lats[i])],
+                },
+                "properties": {"id": i, **out_vals},
+            }
+        )
+
     return {
         "type": "FeatureCollection",
-        "bounds": {
-            "min": np.min(valid_vals).item(),
-            "max": np.max(valid_vals).item(),
-        },
-        "resolution_factor": {"row": step_row, "col": step_col},
+        "properties": {**collection_props, "variables": out_props},
         "features": features,
     }

@@ -227,19 +227,21 @@ def extract(
     if mesh_tile_shape is not None:
         step_logger.step_start("Generate meshgrid")
         target_h, target_w = mesh_tile_shape
-        lons, lats, vals, mask_cropped = interpolation.generate_meshgrid_and_interpolate(
-            lons,
-            lats,
-            vals,
-            lons_1d,
-            lats_1d,
-            bounding_box,
-            target_w,
-            target_h,
-            is_regular_grid,
-            is_point_list,
-            interp_spatial_method,
-            interp_spatial_params,
+        lons, lats, vals, mask_cropped = (
+            interpolation.generate_meshgrid_and_interpolate(
+                lons,
+                lats,
+                vals,
+                lons_1d,
+                lats_1d,
+                bounding_box,
+                target_w,
+                target_h,
+                is_regular_grid,
+                is_point_list,
+                interp_spatial_method,
+                interp_spatial_params,
+            )
         )
 
     if format == "mesh":
@@ -249,11 +251,23 @@ def extract(
         )
     elif format == "raw":
         step_logger.step_start("Prepare output (raw)")
-        out = output.prepare_raw_output(vals, lons, lats, step_row, step_col)
+        out = output.prepare_raw_output(
+            [variable],
+            [vals],
+            lons,
+            lats,
+            {"resolution_factor": {"row": step_row, "col": step_col}},
+            {variable: dataset[variable].attrs},
+        )
     elif format == "geojson":
         step_logger.step_start("Prepare output (GeoJSON)")
         out = output.prepare_geojson_output(
-            vals, lons, lats, step_row, step_col
+            [variable],
+            [vals],
+            lons,
+            lats,
+            {"resolution_factor": {"row": step_row, "col": step_col}},
+            {variable: dataset[variable].attrs},
         )
     else:
         raise exceptions.BadConfigurationVariable(f"Unsupported format: {format}")
@@ -324,7 +338,11 @@ def probe(
 
     longitudes = dataset[lon_var]
     latitudes = dataset[lat_var]
-    is_regular_grid = longitudes.ndim == 1 and latitudes.ndim == 1 and longitudes.dims != latitudes.dims
+    is_regular_grid = (
+        longitudes.ndim == 1
+        and latitudes.ndim == 1
+        and longitudes.dims != latitudes.dims
+    )
     if is_regular_grid:
         fixed_coords[lon_var] = lon
         fixed_coords[lat_var] = lat
@@ -410,7 +428,8 @@ def probe(
             k: v for k, v in fixed_dims.items() if k not in longitudes.dims
         }
 
-    data = {}
+    data = []
+    var_props = {}
     for var in variables:
         if not is_regular_grid and interp_spatial_method != "nearest":
             filtered_da = sel(
@@ -426,23 +445,19 @@ def probe(
             interpolated_values = (
                 (neighbor_data * weights_da).sum(dim="neighbor").values
             )
-            data[var] = {
-                "values": interpolated_values.tolist(),
-                "attrs": dataset[var].attrs,
-            }
+            var_data = interpolated_values.tolist()
         else:
-            data[var] = {
-                "values": sel(
-                    dataset,
-                    var,
-                    fixed_coords,
-                    fixed_dims,
-                    interp_vars=interp_vars,
-                    interp_method=interp_vars_method,
-                    interp_config=interp_vars_params,
-                ).values.tolist(),
-                "attrs": dataset[var].attrs,
-            }
+            var_data = sel(
+                dataset,
+                var,
+                fixed_coords,
+                fixed_dims,
+                interp_vars=interp_vars,
+                interp_method=interp_vars_method,
+                interp_config=interp_vars_params,
+            ).values.tolist()
+        data.append(np.atleast_1d(var_data))
+        var_props[var] = dataset[var].attrs
 
     step_logger.step_start(
         "Get time values for probe location if time variable is defined"
@@ -466,21 +481,28 @@ def probe(
             else:
                 times = times.tolist()
 
-    out = {"variables": data}
-    if times is not None:
-        out["times"] = times
-
-    if format == "geojson" and times is not None:
-        out = {"type": "FeatureCollection", "features": []}
-        variables_props = {}
-        for var in data:
-            variables_props[var] = {"values": data[var]["values"], **data[var]["attrs"]}
-        feature = {
-            "type": "Feature",
-            "geometry": {"type": "Point", "coordinates": [float(lon), float(lat)]},
-            "properties": {"times": times, **variables_props},
-        }
-        out["features"].append(feature)
+    if format == "raw":
+        step_logger.step_start("Prepare output (raw)")
+        out = output.prepare_raw_output(
+            variables,
+            data,
+            np.atleast_1d(float(lon)),
+            np.atleast_1d(float(lat)),
+            global_props={"times": times} if times is not None else None,
+            var_props=var_props,
+        )
+    elif format == "geojson" and times is not None:
+        step_logger.step_start("Prepare output (GeoJSON)")
+        out = output.prepare_geojson_output(
+            variables,
+            data,
+            np.atleast_1d(float(lon)),
+            np.atleast_1d(float(lat)),
+            {"times": times},
+            var_props,
+        )
+    else:
+        raise exceptions.BadConfigurationVariable(f"Unsupported format: {format}")
 
     step_logger.end()
     return out
