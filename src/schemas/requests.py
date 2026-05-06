@@ -1,6 +1,7 @@
 from dataclasses import dataclass, fields, make_dataclass
-from typing import Literal, Type, TypeVar
+from typing import List, Literal, Optional, Type, TypeVar
 from fastapi import Query, Path
+from pydantic import BaseModel
 from pydantic_core import PydanticUndefined
 
 
@@ -27,6 +28,10 @@ class BaseParams:
     as_dims: list[str] = Query(
         [],
         description="If some variables have the same name as dimensions, will force them to be treated as dimensions",
+    )
+    is_3d: bool = Query(
+        False,
+        description="If True, performs a full 3D volume extraction. If False (default) and the dataset is 3D, a vertical coordinate must be provided.",
     )
 
 
@@ -66,6 +71,12 @@ class BBoxParams:
     lat_max: float | None = Query(
         None, description="Maximum latitude of the bounding box"
     )
+    z_min: float | None = Query(
+        None, description="Minimum vertical coordinate (altitude/depth) of the bounding box"
+    )
+    z_max: float | None = Query(
+        None, description="Maximum vertical coordinate (altitude/depth) of the bounding box"
+    )
 
 
 @dataclass
@@ -102,6 +113,16 @@ class SpatialInterpolationParams:
         "padding:1.0",
         description='Interpolation configuration. Must be defined with : "interpolation=padding:FLOAT_COEFF,optparam1:VALUE1,optparam2:VALUE2,..."',
     )
+
+
+class ProbePoint(BaseModel):
+    lon: float
+    lat: float
+    height: Optional[float] = None
+
+
+class MultiProbeBody(BaseModel):
+    points: List[ProbePoint]
 
 
 T = TypeVar("T")

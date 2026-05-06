@@ -11,36 +11,45 @@ from scipy.spatial import cKDTree
 from src import exceptions
 from src.processing.contexts import BBoxContext
 
-def cell_to_point_conversion(lons, lats, vals, variable, mesh_type, is_regular_grid):
-    lons_points, lats_points, height_points = extrapolate_edges_from_cell_data(
-        lons, lats, None, "radial" if mesh_type == "radial" else "rectilinear"
+def cell_to_point_conversion(lons, lats, heights, vals, variable, mesh_type, is_regular_grid, is_3d=False):
+    lons_points, lats_points, heights_points = extrapolate_edges_from_cell_data(
+        lons, lats, heights, "radial" if mesh_type == "radial" else "rectilinear"
     )
-    temp_grid = pv.StructuredGrid(lons_points, lats_points, height_points)
+    temp_grid = pv.StructuredGrid(lons_points, lats_points, heights_points)
     temp_grid.cell_data[variable] = vals.ravel(order="F")
     temp_point_grid = temp_grid.cell_data_to_point_data()
     new_shape = lons_points.shape
     vals = temp_point_grid.point_data[variable].reshape(new_shape, order="F")
-    lons, lats = lons_points, lats_points
-    lons_1d, lats_1d = None, None
+    lons, lats, heights = lons_points, lats_points, heights_points
+    lons_1d, lats_1d, levels_1d = None, None, None
     if is_regular_grid:
-        lons_1d = lons[0, :]
-        lats_1d = lats[:, 0]
-    return lons, lats, vals, lons_1d, lats_1d
+        if is_3d and lons.ndim == 3:
+            lons_1d = lons[0, 0, :]
+            lats_1d = lats[0, :, 0]
+            levels_1d = heights[:, 0, 0]
+        else:
+            lons_1d = lons[0, :]
+            lats_1d = lats[:, 0]
+    return lons, lats, heights, vals, lons_1d, lats_1d, levels_1d
 
 
 def generate_meshgrid_and_interpolate(
     lons,
     lats,
+    heights,
     vals,
     lons_1d,
     lats_1d,
+    levels_1d,
     bbox: BBoxContext,
     target_w,
     target_h,
+    target_d,
     is_regular_grid,
     is_point_list,
     interp_spatial_method,
     interp_spatial_params,
+    is_3d=False,
 ):
     t_lon_min = (
         bbox.lon_min if (bbox.has_bb and bbox.lon_min is not None) else lons.min()
@@ -57,46 +66,85 @@ def generate_meshgrid_and_interpolate(
 
     xi = np.linspace(t_lon_min, t_lon_max, target_w)
     yi = np.linspace(t_lat_min, t_lat_max, target_h)
-    xi_mesh, yi_mesh = np.meshgrid(xi, yi, indexing="ij")
 
-    if is_regular_grid and lons_1d is not None and not is_point_list:
-        if interp_spatial_method not in [
-            "linear",
-            "nearest",
-            "slinear",
-            "cubic",
-            "quintic",
-            "pchip",
-        ]:
-            interp_spatial_method = "linear"
-        try:
-            rgi = RegularGridInterpolator(
-                (lats_1d, lons_1d),
-                vals,
-                bounds_error=False,
-                method=interp_spatial_method,
-                fill_value=np.nan,
-            )
-            pts = np.stack([yi_mesh.ravel(), xi_mesh.ravel()], axis=-1)
-            interpolated_vals = rgi(pts).reshape(xi_mesh.shape)
-        except Exception as e:
-            raise exceptions.GenericInternalError(f"Interpolation failed: {str(e)}")
+    if is_3d and levels_1d is not None and heights is not None:
+        t_z_min = bbox.z_min if bbox.has_bb_z and bbox.z_min is not None else levels_1d.min()
+        t_z_max = bbox.z_max if bbox.has_bb_z and bbox.z_max is not None else levels_1d.max()
+        zi = np.linspace(t_z_min, t_z_max, max(target_d, 1))
+        xi_mesh, yi_mesh, zi_mesh = np.meshgrid(xi, yi, zi, indexing="ij")
+
+        if is_regular_grid and not is_point_list:
+            if interp_spatial_method not in ["linear", "nearest", "slinear", "cubic", "quintic", "pchip"]:
+                interp_spatial_method = "linear"
+            try:
+                rgi = RegularGridInterpolator(
+                    (lons_1d, lats_1d, levels_1d),
+                    vals,
+                    bounds_error=False,
+                    method=interp_spatial_method,
+                    fill_value=np.nan,
+                )
+                pts = np.stack([xi_mesh.ravel(), yi_mesh.ravel(), zi_mesh.ravel()], axis=-1)
+                interpolated_vals = rgi(pts).reshape(xi_mesh.shape)
+            except Exception as e:
+                raise exceptions.GenericInternalError(f"3D Interpolation failed: {str(e)}")
+        else:
+            try:
+                interpolated_vals = apply_spatial_interpolation_irregular_grid(
+                    source_lons=lons.ravel(),
+                    source_lats=lats.ravel(),
+                    source_values=vals.ravel(),
+                    target_lon_mesh=xi_mesh,
+                    target_lat_mesh=yi_mesh,
+                    method=interp_spatial_method,
+                    **interp_spatial_params,
+                )
+            except Exception as e:
+                raise exceptions.GenericInternalError(f"3D Interpolation failed: {str(e)}")
+
+        mask_cropped = np.isfinite(interpolated_vals)
+        return xi_mesh, yi_mesh, zi_mesh, interpolated_vals, mask_cropped
     else:
-        try:
-            interpolated_vals = apply_spatial_interpolation_irregular_grid(
-                source_lons=lons,
-                source_lats=lats,
-                source_values=vals,
-                target_lon_mesh=xi_mesh,
-                target_lat_mesh=yi_mesh,
-                method=interp_spatial_method,
-                **interp_spatial_params,
-            )
-        except Exception as e:
-            raise exceptions.GenericInternalError(f"Interpolation failed: {str(e)}")
+        xi_mesh, yi_mesh = np.meshgrid(xi, yi, indexing="ij")
 
-    mask_cropped = np.isfinite(interpolated_vals)
-    return xi_mesh, yi_mesh, interpolated_vals, mask_cropped
+        if is_regular_grid and lons_1d is not None and not is_point_list:
+            if interp_spatial_method not in [
+                "linear",
+                "nearest",
+                "slinear",
+                "cubic",
+                "quintic",
+                "pchip",
+            ]:
+                interp_spatial_method = "linear"
+            try:
+                rgi = RegularGridInterpolator(
+                    (lats_1d, lons_1d),
+                    vals,
+                    bounds_error=False,
+                    method=interp_spatial_method,
+                    fill_value=np.nan,
+                )
+                pts = np.stack([yi_mesh.ravel(), xi_mesh.ravel()], axis=-1)
+                interpolated_vals = rgi(pts).reshape(xi_mesh.shape)
+            except Exception as e:
+                raise exceptions.GenericInternalError(f"Interpolation failed: {str(e)}")
+        else:
+            try:
+                interpolated_vals = apply_spatial_interpolation_irregular_grid(
+                    source_lons=lons,
+                    source_lats=lats,
+                    source_values=vals,
+                    target_lon_mesh=xi_mesh,
+                    target_lat_mesh=yi_mesh,
+                    method=interp_spatial_method,
+                    **interp_spatial_params,
+                )
+            except Exception as e:
+                raise exceptions.GenericInternalError(f"Interpolation failed: {str(e)}")
+
+        mask_cropped = np.isfinite(interpolated_vals)
+        return xi_mesh, yi_mesh, None, interpolated_vals, mask_cropped
 
 
 def extrapolate_edges_from_cell_data(

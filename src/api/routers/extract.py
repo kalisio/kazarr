@@ -33,7 +33,8 @@ async def extract_data(
         raise exceptions.MissingQueryParameter("variable")
 
     config = {
-        "bbox": (bbox.lon_min, bbox.lat_min, bbox.lon_max, bbox.lat_max),
+        "bbox": (bbox.lon_min, bbox.lat_min, bbox.lon_max, bbox.lat_max, bbox.z_min, bbox.z_max),
+        "is_3d": base.is_3d,
         "as_dims": base.as_dims,
         "resolution_limit": resolution_limit,
         "mesh": {

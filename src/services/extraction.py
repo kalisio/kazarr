@@ -38,6 +38,7 @@ def extract(
     has_bb = bounding_box.has_bb
     has_bb_lon = bounding_box.has_bb_lon
     has_bb_lat = bounding_box.has_bb_lat
+    has_bb_z = bounding_box.has_bb_z
 
     step_logger.step_start("Load dataset and config")
     dataset, dataset_config = load_dataset(dataset_id)
@@ -49,7 +50,7 @@ def extract(
     if variable not in dataset:
         raise exceptions.VariableNotFound([variable])
 
-    lon_var, lat_var = dgets(dataset_config, ["variables.lon", "variables.lat"])
+    lon_var, lat_var, height_var = dgets(dataset_config, ["variables.lon", "variables.lat", "variables.height"])
     missing_vars = []
     if has_bb_lon and lon_var is None:
         raise exceptions.MissingConfigurationElement("variables.lon")
@@ -87,6 +88,15 @@ def extract(
     if not has_bb:
         index_padding, spatial_padding = 0, 0.0
 
+    heights_da = dataset[height_var] if height_var is not None and height_var in dataset else None
+    is_3d_dataset = heights_da is not None and heights_da.ndim == 1
+
+    if is_3d_dataset and config.is_3d:
+        # In 2D mode, the height/level dimension must be fixed by a query param
+        optional_coords = [lon_var, lat_var, height_var]
+    else:
+        optional_coords = [lon_var, lat_var]
+
     fixed_coords, fixed_dims = get_required_dims_and_coords(
         dataset,
         variable,
@@ -94,7 +104,7 @@ def extract(
         fixed_dims,
         request,
         interp_vars=interp_vars,
-        optional_coords=[lon_var, lat_var],
+        optional_coords=optional_coords,
         as_dims=config.as_dims or [],
     )
 
@@ -109,6 +119,22 @@ def extract(
 
     lons_vals_in = np.atleast_1d(lons.values)
     lats_vals_in = np.atleast_1d(lats.values)
+
+    levels_1d = None
+    level_min, level_max, step_level = 0, 0, 1
+    if is_3d_dataset and config.is_3d and is_regular_grid:
+        levels_1d = heights_da.values
+        if has_bb_z:
+            bb_z_min = bounding_box.z_min if bounding_box.z_min is not None else -np.inf
+            bb_z_max = bounding_box.z_max if bounding_box.z_max is not None else np.inf
+            z_mask = (levels_1d >= bb_z_min) & (levels_1d <= bb_z_max)
+            if not np.any(z_mask):
+                raise exceptions.NoDataInSelection()
+            z_indices = np.where(z_mask)[0]
+            level_min, level_max = int(z_indices[0]), int(z_indices[-1])
+        else:
+            level_min, level_max = 0, len(levels_1d) - 1
+        levels_1d = levels_1d[level_min:level_max + 1:step_level]
 
     if is_point_list:
         step_logger.step_start("Point list: apply bounding box")
@@ -167,21 +193,34 @@ def extract(
         if resolution_limit is not None and n_points > resolution_limit:
             point_indices = point_indices[::step_row]
         vals = np.atleast_1d(vals_da.values)[point_indices]
+    elif is_regular_grid and is_3d_dataset and config.is_3d:
+        if vals_da.ndim >= 3:
+            vals = vals_da.values[level_min:level_max + 1:step_level, row_min:row_max + 1:step_row, col_min:col_max + 1:step_col]
+        else:
+            vals = vals_da[..., row_min:row_max + 1:step_row, col_min:col_max + 1:step_col].values
+        vals = vals.transpose(2, 1, 0)
     else:
         vals = vals_da[
             ..., row_min : row_max + 1 : step_row, col_min : col_max + 1 : step_col
         ].values
+        # Squeeze out a trailing size-1 level dimension if doing 2D extraction from 3D dataset
+        if is_3d_dataset and not config.is_3d and vals.ndim == 3 and vals.shape[0] == 1:
+            vals = vals.squeeze(axis=0)
     vals = vals.astype(float)
 
     step_logger.step_start("Crop latitude and longitude")
     lons_1d, lats_1d = None, None
+    heights = None
     if is_point_list:
         lons = lons_vals_in[point_indices]
         lats = lats_vals_in[point_indices]
     elif is_regular_grid:
         lons_1d = lons_vals_in[col_min : col_max + 1 : step_col]
         lats_1d = lats_vals_in[row_min : row_max + 1 : step_row]
-        lons, lats = np.meshgrid(lons_1d, lats_1d)
+        if config.is_3d and levels_1d is not None:
+            lons, lats, heights = np.meshgrid(lons_1d, lats_1d, levels_1d, indexing="ij")
+        else:
+            lons, lats = np.meshgrid(lons_1d, lats_1d)
     else:
         lons = lons_vals[
             ..., row_min : row_max + 1 : step_row, col_min : col_max + 1 : step_col
@@ -220,34 +259,39 @@ def extract(
     )
     if cell_data and not is_point_list:
         step_logger.step_start("Cell to point data conversion")
-        lons, lats, vals, lons_1d, lats_1d = interpolation.cell_to_point_conversion(
-            lons, lats, vals, variable, mesh_type, is_regular_grid
+        lons, lats, heights, vals, lons_1d, lats_1d, levels_1d = interpolation.cell_to_point_conversion(
+            lons, lats, heights, vals, variable, mesh_type, is_regular_grid, is_3d=config.is_3d
         )
 
     if mesh_tile_shape is not None:
         step_logger.step_start("Generate meshgrid")
         target_h, target_w = mesh_tile_shape
-        lons, lats, vals, mask_cropped = (
+        target_d = levels_1d.shape[0] if (config.is_3d and levels_1d is not None) else 1
+        lons, lats, heights, vals, mask_cropped = (
             interpolation.generate_meshgrid_and_interpolate(
                 lons,
                 lats,
+                heights,
                 vals,
                 lons_1d,
                 lats_1d,
+                levels_1d,
                 bounding_box,
                 target_w,
                 target_h,
+                target_d,
                 is_regular_grid,
                 is_point_list,
                 interp_spatial_method,
                 interp_spatial_params,
+                is_3d=config.is_3d,
             )
         )
 
     if format == "mesh":
         step_logger.step_start("Clean data for PyVista")
         out = output.prepare_mesh_output(
-            lons, lats, vals, variable, mask_cropped, step_row, step_col
+            lons, lats, heights, vals, variable, mask_cropped, step_row, step_col
         )
     elif format == "raw":
         step_logger.step_start("Prepare output (raw)")
@@ -256,8 +300,9 @@ def extract(
             [vals],
             lons,
             lats,
-            {"resolution_factor": {"row": step_row, "col": step_col}},
-            {variable: dataset[variable].attrs},
+            zs=heights,
+            global_props={"resolution_factor": {"row": step_row, "col": step_col}},
+            var_props={variable: dataset[variable].attrs},
         )
     elif format == "geojson":
         step_logger.step_start("Prepare output (GeoJSON)")
@@ -266,8 +311,9 @@ def extract(
             [vals],
             lons,
             lats,
-            {"resolution_factor": {"row": step_row, "col": step_col}},
-            {variable: dataset[variable].attrs},
+            zs=heights,
+            collection_props={"resolution_factor": {"row": step_row, "col": step_col}},
+            var_props={variable: dataset[variable].attrs},
         )
     else:
         raise exceptions.BadConfigurationVariable(f"Unsupported format: {format}")

@@ -28,7 +28,8 @@ class InterpolationConfig(BaseModel):
 
 
 class ExtractionConfig(BaseModel):
-    bbox: tuple[float | None, float | None, float | None, float | None] | None = None
+    bbox: tuple[float | None, ...] | None = None
+    is_3d: bool = False
     as_dims: list[str] | None = Field(default_factory=list)
     resolution_limit: float | None = None
     mesh: MeshConfig = Field(default_factory=MeshConfig)

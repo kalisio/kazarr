@@ -19,8 +19,21 @@ async def mesh(
         None,
         description="Whether the data of the mesh is on cells or on vertices. This will override the dataset configuration. (Supported values: 'vertices', 'cells')",
     ),
+    is_3d: bool = Query(
+        False,
+        description="If True, generates a 3D volumetric mesh using the vertical coordinate defined in the dataset configuration.",
+    ),
+    z_min: float | None = Query(
+        None, description="Minimum vertical coordinate to include in the 3D mesh."
+    ),
+    z_max: float | None = Query(
+        None, description="Maximum vertical coordinate to include in the 3D mesh."
+    ),
 ):
-    config = {}
+    config = {
+        "is_3d": is_3d,
+        "bbox": (None, None, None, None, z_min, z_max),
+    }
     if mesh_data_mapping is not None:
         config["mesh"] = {"data_mapping": mesh_data_mapping}
     return await run_in_threadpool(

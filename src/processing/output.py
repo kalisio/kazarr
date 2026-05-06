@@ -5,9 +5,10 @@ import pyvista as pv
 from src import exceptions
 
 
-def prepare_mesh_output(lons, lats, vals, variable, mask_cropped, step_row, step_col):
-    z_zeros = np.zeros_like(lons)
-    grid = pv.StructuredGrid(lons, lats, z_zeros)
+def prepare_mesh_output(lons, lats, zs, vals, variable, mask_cropped, step_row, step_col):
+    if zs is None:
+        zs = np.zeros_like(lons)
+    grid = pv.StructuredGrid(lons, lats, zs)
     grid.point_data[variable] = vals.ravel(order="F")
     valid_mask = np.ones_like(grid.point_data[variable])
     if mask_cropped is not None:
@@ -26,7 +27,12 @@ def prepare_mesh_output(lons, lats, vals, variable, mask_cropped, step_row, step
     tri_grid = tri_grid.clean()
 
     vertices = tri_grid.points.flatten()
-    indices = tri_grid.cells.reshape((-1, 4))[:, 1:].flatten()
+    cells = tri_grid.cells
+    if tri_grid.n_cells > 0:
+        cell_size = cells[0]
+        indices = cells.reshape((-1, cell_size + 1))[:, 1:].flatten()
+    else:
+        indices = np.array([], dtype=int)
     values = tri_grid.point_data[variable]
 
     clean_values = [float(v) if np.isfinite(v) else None for v in values]
@@ -46,7 +52,7 @@ def prepare_mesh_output(lons, lats, vals, variable, mask_cropped, step_row, step
     return out
 
 
-def prepare_output(var_names, vals, lons, lats, global_props=None, var_props=None):
+def prepare_output(var_names, vals, lons, lats, zs=None, global_props=None, var_props=None):
     if global_props is None:
         global_props = {}
     if var_props is None:
@@ -61,6 +67,7 @@ def prepare_output(var_names, vals, lons, lats, global_props=None, var_props=Non
 
     flat_lons = lons.flatten().tolist()
     flat_lats = lats.flatten().tolist()
+    flat_zs = zs.flatten().tolist() if zs is not None else None
     vals_dict = {}
     one_point = lons.shape[0] == 1 and lats.shape[0] == 1
 
@@ -84,42 +91,48 @@ def prepare_output(var_names, vals, lons, lats, global_props=None, var_props=Non
     if no_data:
         raise exceptions.NoDataInSelection()
 
-    return flat_lons, flat_lats, vals_dict, global_props, out_vars_props, one_point
+    return flat_lons, flat_lats, flat_zs, vals_dict, global_props, out_vars_props, one_point
 
 
-def prepare_raw_output(var_names, vals, lons, lats, global_props=None, var_props=None):
-    flat_lons, flat_lats, vals_dict, collection_props, out_props, _ = (
+def prepare_raw_output(var_names, vals, lons, lats, zs=None, global_props=None, var_props=None):
+    flat_lons, flat_lats, flat_zs, vals_dict, collection_props, out_props, _ = (
         prepare_output(
             var_names,
             vals,
             lons,
             lats,
+            zs=zs,
             global_props=global_props,
             var_props=var_props,
         )
     )
 
+    data = {
+        "longitudes": flat_lons,
+        "latitudes": flat_lats,
+        "values": {**vals_dict},
+    }
+    if flat_zs is not None:
+        data["heights"] = flat_zs
+
     return {
         "shape": vals[0].shape,
         **collection_props,
         "variables": out_props,
-        "longitudes": flat_lons,
-        "latitudes": flat_lats,
-        "values": {
-            **vals_dict
-        },
+        **data,
     }
 
 
 def prepare_geojson_output(
-    var_names, vals, lons, lats, collection_props=None, var_props=None
+    var_names, vals, lons, lats, zs=None, collection_props=None, var_props=None
 ):
-    flat_lons, flat_lats, vals_dict, collection_props, out_props, has_one_point = (
+    flat_lons, flat_lats, flat_zs, vals_dict, collection_props, out_props, has_one_point = (
         prepare_output(
             var_names,
             vals,
             lons,
             lats,
+            zs=zs,
             global_props=collection_props,
             var_props=var_props,
         )
@@ -133,12 +146,15 @@ def prepare_geojson_output(
             out_vals = {
                 var_name: var_vals[i] for var_name, var_vals in vals_dict.items()
             }
+        coordinates = [float(flat_lons[i]), float(flat_lats[i])]
+        if flat_zs is not None:
+            coordinates.append(float(flat_zs[i]))
         features.append(
             {
                 "type": "Feature",
                 "geometry": {
                     "type": "Point",
-                    "coordinates": [float(flat_lons[i]), float(flat_lats[i])],
+                    "coordinates": coordinates,
                 },
                 "properties": {"id": i, **out_vals},
             }
