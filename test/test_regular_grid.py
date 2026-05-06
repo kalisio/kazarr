@@ -141,6 +141,21 @@ class TestRegularGrid:
         feature = data["features"][0]
         assert feature["geometry"]["type"] == "Point"
         assert "Value" in feature["properties"]
+        assert isinstance(feature["properties"]["Value"], (int, float))
+
+    def test_extract_geojson_time_interpolation(self, client: TestClient):
+        """GeoJSON format with time interpolation returns scalar values."""
+        response = client.get(
+            f"/datasets/{DATASET_NAME}/extract?variable=Value&time=2026-01-03T12:00:00&interp_time=true&interp_vars_method=linear&format=geojson"
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["type"] == "FeatureCollection"
+        assert len(data["features"]) > 0
+        feature = data["features"][0]
+        assert "Value" in feature["properties"]
+        assert isinstance(feature["properties"]["Value"], (int, float))
 
     def test_extract_tile(self, client: TestClient):
         """Bounding box extraction returns only points inside the box."""
@@ -502,6 +517,18 @@ class TestRegularGridComplex:
         value1 = data["values"]["Value1"]
         value2 = data["values"]["Value2"]
         value3 = data["values"]["Value3"]
-        assert isinstance(value1, list) and len(data["values"]["Value1"]) == 1 or isinstance(value1, (int, float))
-        assert isinstance(value2, list) and len(data["values"]["Value2"]) == 1 or isinstance(value2, (int, float))
-        assert isinstance(value3, list) and len(data["values"]["Value3"]) == 1 or isinstance(value3, (int, float))
+        assert (
+            isinstance(value1, list)
+            and len(data["values"]["Value1"]) == 1
+            or isinstance(value1, (int, float))
+        )
+        assert (
+            isinstance(value2, list)
+            and len(data["values"]["Value2"]) == 1
+            or isinstance(value2, (int, float))
+        )
+        assert (
+            isinstance(value3, list)
+            and len(data["values"]["Value3"]) == 1
+            or isinstance(value3, (int, float))
+        )

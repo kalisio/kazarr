@@ -136,7 +136,24 @@ class TestRadialGrid:
         assert response.status_code == 200
         data = response.json()
         assert data["type"] == "FeatureCollection"
+        feature = data["features"][0]
+        assert feature["geometry"]["type"] == "Point"
+        assert "WindSpeed" in feature["properties"]
+        assert isinstance(feature["properties"]["WindSpeed"], (int, float))
+
+    def test_extract_geojson_time_interpolation(self, client: TestClient):
+        """GeoJSON format with time interpolation returns scalar values."""
+        response = client.get(
+            f"/datasets/{DATASET_NAME}/extract?variable=WindSpeed&time=2026-01-01T12:00:00&interp_time=true&interp_vars_method=linear&format=geojson"
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["type"] == "FeatureCollection"
         assert len(data["features"]) > 0
+        feature = data["features"][0]
+        assert "WindSpeed" in feature["properties"]
+        assert isinstance(feature["properties"]["WindSpeed"], (int, float))
 
     def test_extract_time_interpolation(self, client: TestClient):
         """Time interpolation returns a midpoint value between two time steps."""

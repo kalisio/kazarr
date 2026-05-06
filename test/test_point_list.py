@@ -110,7 +110,7 @@ class TestPointList:
                 "type": "array",
                 "values": STATION_NAMES,
                 "dimensions": ["DimN"],
-            }
+            },
         }
         dataset = utils.DatasetGenerator(description=description).generate()
         dataset.save(DATASET_NAME, to_netcdf=True)
@@ -125,10 +125,20 @@ class TestPointList:
             input_path=os.path.join(TMP_FOLDER, f"{DATASET_NAME}.nc"),
             output_path=output_path,
             config={
-                "variables": {"lon": "lon", "lat": "lat", "height": "height", "time": "time"},
-                "assignCoords": { "name": "DimN" },
+                "variables": {
+                    "lon": "lon",
+                    "lat": "lat",
+                    "height": "height",
+                    "time": "time",
+                },
+                "assignCoords": {"name": "DimN"},
                 "pipelines": {
-                    "preprocess": ["load_from_netcdf", "assign_coords", "unify_chunks", "save"]
+                    "preprocess": [
+                        "load_from_netcdf",
+                        "assign_coords",
+                        "unify_chunks",
+                        "save",
+                    ]
                 },
                 "version": 2,
             },
@@ -171,6 +181,22 @@ class TestPointList:
             assert len(coords) == 2
             assert -180 <= coords[0] <= 180
             assert -90 <= coords[1] <= 90
+            assert "Humidity" in feature["properties"]
+            assert isinstance(feature["properties"]["Humidity"], (int, float))
+
+    def test_extract_geojson_time_interpolation(self, client: TestClient):
+        """GeoJSON format with time interpolation returns scalar values."""
+        response = client.get(
+            f"/datasets/{DATASET_NAME}/extract?variable=Humidity&time=2026-01-01T12:00:00&interp_time=true&interp_vars_method=linear&format=geojson"
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["type"] == "FeatureCollection"
+        assert len(data["features"]) > 0
+        feature = data["features"][0]
+        assert "Humidity" in feature["properties"]
+        assert isinstance(feature["properties"]["Humidity"], (int, float))
 
     def test_extract_with_bbox(self, client: TestClient):
         """Bounding box extraction returns only stations inside the box."""
@@ -236,7 +262,6 @@ class TestPointList:
         lille_value = ((np.cos(phi) + 1) / 2) * 100
         assert data["values"]["Humidity"][0] == pytest.approx(lille_value, abs=0.1)
 
-
     # ------------------------------------------------------------------
     # Probe
     # ------------------------------------------------------------------
@@ -290,7 +315,9 @@ class TestPointList:
         assert response.status_code == 200
         data = response.json()
         values = data["values"]["Humidity"]
-        assert (isinstance(values, list) and len(values) == 1) or isinstance(values, (int, float))
+        assert (isinstance(values, list) and len(values) == 1) or isinstance(
+            values, (int, float)
+        )
 
     def test_probe_with_height(self, client: TestClient):
         """Probe with height dimension falls back to nearest station."""

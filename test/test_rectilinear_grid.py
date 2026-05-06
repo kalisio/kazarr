@@ -116,7 +116,10 @@ class TestRectilinearGrid:
 
         assert response.status_code == 200
         data = response.json()
-        assert data["variables"]["Precipitation"]["bounds"] == {"min": 0, "max": HEIGHTS * LATS * LONS - 1}
+        assert data["variables"]["Precipitation"]["bounds"] == {
+            "min": 0,
+            "max": HEIGHTS * LATS * LONS - 1,
+        }
 
     def test_extract_time_interpolation(self, client: TestClient):
         """Time interpolation at midpoint between two steps (t=1h and t=2h)."""
@@ -145,6 +148,21 @@ class TestRectilinearGrid:
         feature = data["features"][0]
         assert feature["geometry"]["type"] == "Point"
         assert "Precipitation" in feature["properties"]
+        assert isinstance(feature["properties"]["Precipitation"], (int, float))
+
+    def test_extract_geojson_time_interpolation(self, client: TestClient):
+        """GeoJSON format with time interpolation returns scalar values."""
+        response = client.get(
+            f"/datasets/{DATASET_NAME}/extract?variable=Precipitation&time=2026-01-01T01:30:00&interp_time=true&interp_vars_method=linear&format=geojson"
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["type"] == "FeatureCollection"
+        assert len(data["features"]) > 0
+        feature = data["features"][0]
+        assert "Precipitation" in feature["properties"]
+        assert isinstance(feature["properties"]["Precipitation"], (int, float))
 
     def test_extract_tile(self, client: TestClient):
         """Bounding box extraction returns only points within the box."""
@@ -274,9 +292,7 @@ class TestRectilinearGrid:
 
         v1 = extract_scalar(r1.json()["values"]["Precipitation"])
         v2 = extract_scalar(r2.json()["values"]["Precipitation"])
-        v_interp = extract_scalar(
-            r_interp.json()["values"]["Precipitation"]
-        )
+        v_interp = extract_scalar(r_interp.json()["values"]["Precipitation"])
 
         assert v_interp == pytest.approx((v1 + v2) / 2)
 
@@ -293,15 +309,9 @@ class TestRectilinearGrid:
 
     def test_probes_multiple_points(self, client: TestClient):
         """Probe multiple points returns a list of probe results."""
-        payload = {
-            "points": [
-                {"lon": 2.3, "lat": 43.3},
-                {"lon": 2.4, "lat": 43.4}
-            ]
-        }
+        payload = {"points": [{"lon": 2.3, "lat": 43.3}, {"lon": 2.4, "lat": 43.4}]}
         response = client.post(
-            f"/datasets/{DATASET_NAME}/probes?variables=Precipitation",
-            json=payload
+            f"/datasets/{DATASET_NAME}/probes?variables=Precipitation", json=payload
         )
 
         assert response.status_code == 200
