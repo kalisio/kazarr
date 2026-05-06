@@ -534,6 +534,7 @@ def probe(
             data,
             np.atleast_1d(float(lon)),
             np.atleast_1d(float(lat)),
+            zs=np.atleast_1d(float(height)) if height is not None else None,
             global_props={"times": times} if times is not None else None,
             var_props=var_props,
         )
@@ -544,8 +545,9 @@ def probe(
             data,
             np.atleast_1d(float(lon)),
             np.atleast_1d(float(lat)),
-            {"times": times},
-            var_props,
+            zs=np.atleast_1d(float(height)) if height is not None else None,
+            collection_props={"times": times},
+            var_props=var_props,
         )
     else:
         raise exceptions.BadConfigurationVariable(f"Unsupported format: {format}")

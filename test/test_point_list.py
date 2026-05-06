@@ -285,6 +285,22 @@ class TestPointList:
             assert isinstance(v, (int, float))
             assert 0 <= v <= 100
 
+    def test_probe_geojson(self, client: TestClient):
+        """Probe in GeoJSON format returns a FeatureCollection."""
+        response = client.get(
+            f"/datasets/{DATASET_NAME}/probe?variables=Humidity&lat=48.856&lon=2.352&DimN=0&format=geojson"
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["type"] == "FeatureCollection"
+        assert len(data["features"]) == 1
+        feature = data["features"][0]
+        assert feature["geometry"]["type"] == "Point"
+        assert "Humidity" in feature["properties"]
+        assert isinstance(feature["properties"]["Humidity"], list)
+        assert len(feature["properties"]["Humidity"]) > 0
+
     def test_probes_multiple_points(self, client: TestClient):
         """Probe multiple points returns a list of probe results."""
         payload = {
