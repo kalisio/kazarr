@@ -5,7 +5,9 @@ import pyvista as pv
 from src import exceptions
 
 
-def prepare_mesh_output(lons, lats, zs, vals, variable, mask_cropped, step_row, step_col):
+def prepare_mesh_output(
+    lons, lats, zs, vals, variable, mask_cropped, step_row, step_col
+):
     if zs is None:
         zs = np.zeros_like(lons)
     grid = pv.StructuredGrid(lons, lats, zs)
@@ -52,7 +54,9 @@ def prepare_mesh_output(lons, lats, zs, vals, variable, mask_cropped, step_row, 
     return out
 
 
-def prepare_output(var_names, vals, lons, lats, zs=None, global_props=None, var_props=None):
+def prepare_output(
+    var_names, vals, lons, lats, zs=None, global_props=None, var_props=None
+):
     if global_props is None:
         global_props = {}
     if var_props is None:
@@ -69,7 +73,7 @@ def prepare_output(var_names, vals, lons, lats, zs=None, global_props=None, var_
     flat_lats = lats.flatten().tolist()
     flat_zs = zs.flatten().tolist() if zs is not None else None
     vals_dict = {}
-    one_point = lons.shape[0] == 1 and lats.shape[0] == 1
+    has_one_point = lons.size == 1 and lats.size == 1
 
     no_data = True
     out_vars_props = {}
@@ -91,10 +95,20 @@ def prepare_output(var_names, vals, lons, lats, zs=None, global_props=None, var_
     if no_data:
         raise exceptions.NoDataInSelection()
 
-    return flat_lons, flat_lats, flat_zs, vals_dict, global_props, out_vars_props, one_point
+    return (
+        flat_lons,
+        flat_lats,
+        flat_zs,
+        vals_dict,
+        global_props,
+        out_vars_props,
+        has_one_point,
+    )
 
 
-def prepare_raw_output(var_names, vals, lons, lats, zs=None, global_props=None, var_props=None):
+def prepare_raw_output(
+    var_names, vals, lons, lats, zs=None, global_props=None, var_props=None
+):
     flat_lons, flat_lats, flat_zs, vals_dict, collection_props, out_props, _ = (
         prepare_output(
             var_names,
@@ -126,26 +140,35 @@ def prepare_raw_output(var_names, vals, lons, lats, zs=None, global_props=None, 
 def prepare_geojson_output(
     var_names, vals, lons, lats, zs=None, collection_props=None, var_props=None
 ):
-    flat_lons, flat_lats, flat_zs, vals_dict, collection_props, out_props, has_one_point = (
-        prepare_output(
-            var_names,
-            vals,
-            lons,
-            lats,
-            zs=zs,
-            global_props=collection_props,
-            var_props=var_props,
-        )
+    (
+        flat_lons,
+        flat_lats,
+        flat_zs,
+        vals_dict,
+        collection_props,
+        out_props,
+        has_one_point,
+    ) = prepare_output(
+        var_names,
+        vals,
+        lons,
+        lats,
+        zs=zs,
+        global_props=collection_props,
+        var_props=var_props,
     )
 
     features = []
     for i in range(len(flat_lons)):
-        if has_one_point:
-            out_vals = vals_dict
-        else:
-            out_vals = {
-                var_name: var_vals[i] for var_name, var_vals in vals_dict.items()
-            }
+        out_vals = {}
+        for var_name, var_vals in vals_dict.items():
+            if has_one_point and len(var_vals) > 1:
+                # Time series or multiple values for a single point
+                out_vals[var_name] = var_vals
+            else:
+                # Spatial data (one value per point) or single scalar
+                out_vals[var_name] = var_vals[i]
+
         coordinates = [float(flat_lons[i]), float(flat_lats[i])]
         if flat_zs is not None:
             coordinates.append(float(flat_zs[i]))
