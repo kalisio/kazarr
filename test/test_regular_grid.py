@@ -270,6 +270,29 @@ class TestRegularGrid:
 
         assert v_interp == pytest.approx((v1 + v2) / 2)
 
+    def test_probes_multiple_points(self, client: TestClient):
+        """Probe multiple points returns a list of probe results."""
+        payload = {
+            "points": [
+                {"lon": LON_START, "lat": LAT_START},
+                {"lon": LON_START + LON_STEP, "lat": LAT_START + LAT_STEP},
+            ]
+        }
+        response = client.post(
+            f"/datasets/{DATASET_NAME}/probes?variables=Value", json=payload
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert isinstance(data, list)
+        assert len(data) == 2
+        for result in data:
+            assert "variables" in result
+            assert "Value" in result["variables"]
+            values = result["values"]["Value"]
+            assert isinstance(values, list)
+            assert len(values) > 0
+
     # ------------------------------------------------------------------
     # Select
     # ------------------------------------------------------------------

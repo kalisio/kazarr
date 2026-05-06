@@ -260,6 +260,26 @@ class TestPointList:
             assert isinstance(v, (int, float))
             assert 0 <= v <= 100
 
+    def test_probes_multiple_points(self, client: TestClient):
+        """Probe multiple points returns a list of probe results."""
+        payload = {
+            "points": [{"lon": 2.352, "lat": 48.856}, {"lon": 5.369, "lat": 43.296}]
+        }
+        response = client.post(
+            f"/datasets/{DATASET_NAME}/probes?variables=Humidity", json=payload
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert isinstance(data, list)
+        assert len(data) == 2
+        for result in data:
+            assert "variables" in result
+            assert "Humidity" in result["variables"]
+            values = result["values"]["Humidity"]
+            assert isinstance(values, list)
+            assert len(values) > 0
+
     def test_probe_time_at_station(self, client: TestClient):
         """Probe at a specific time returns a single value."""
         response = client.get(

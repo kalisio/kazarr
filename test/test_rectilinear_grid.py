@@ -291,6 +291,27 @@ class TestRectilinearGrid:
         assert "variables" in data
         assert "Precipitation" in data["values"]
 
+    def test_probes_multiple_points(self, client: TestClient):
+        """Probe multiple points returns a list of probe results."""
+        payload = {
+            "points": [
+                {"lon": 2.3, "lat": 43.3},
+                {"lon": 2.4, "lat": 43.4}
+            ]
+        }
+        response = client.post(
+            f"/datasets/{DATASET_NAME}/probes?variables=Precipitation",
+            json=payload
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert isinstance(data, list)
+        assert len(data) == 2
+        for result in data:
+            assert "variables" in result
+            assert "Precipitation" in result["values"]
+
     # ------------------------------------------------------------------
     # Mesh endpoint
     # ------------------------------------------------------------------
