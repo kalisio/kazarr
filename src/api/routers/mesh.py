@@ -1,6 +1,9 @@
-from fastapi import APIRouter, Query, Path
+from fastapi import APIRouter, Query, Path, Request
 from starlette.concurrency import run_in_threadpool
+import asyncio
+import threading
 
+from src.utils.requests import watch_disconnection
 from src.services import mesh as mesh_service
 
 router = APIRouter(tags=["Mesh"])
@@ -10,6 +13,7 @@ router = APIRouter(tags=["Mesh"])
     "/datasets/{dataset:path}/mesh", summary="Get mesh representation of the dataset"
 )
 async def mesh(
+    request: Request,
     dataset: str = Path(..., description="The path to the dataset"),
     format: str = Query(
         "mesh",
@@ -36,6 +40,15 @@ async def mesh(
     }
     if mesh_data_mapping is not None:
         config["mesh"] = {"data_mapping": mesh_data_mapping}
-    return await run_in_threadpool(
-        mesh_service.get_mesh, dataset, format=format, config=config
-    )
+    cancel_event = threading.Event()
+    watcher_task = asyncio.create_task(watch_disconnection(request, cancel_event))
+    try:
+        return await run_in_threadpool(
+            mesh_service.get_mesh,
+            dataset,
+            format=format,
+            config=config,
+            cancel_event=cancel_event,
+        )
+    finally:
+        watcher_task.cancel()

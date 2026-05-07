@@ -1,9 +1,12 @@
 from fastapi import APIRouter, Depends, Request
 from starlette.concurrency import run_in_threadpool
+import threading
+import asyncio
 
 import src.schemas.requests as models
 from src.services import extraction
 from src.utils.data import parse_query_dict
+from src.utils.requests import watch_disconnection
 import src.exceptions as exceptions
 
 
@@ -38,10 +41,16 @@ async def free_selection_data(
         },
     }
 
-    return await run_in_threadpool(
-        extraction.free_selection,
-        request,
-        base.dataset,
-        base.variable,
-        config=config,
-    )
+    cancel_event = threading.Event()
+    watcher_task = asyncio.create_task(watch_disconnection(request, cancel_event))
+    try:
+        return await run_in_threadpool(
+            extraction.free_selection,
+            request,
+            base.dataset,
+            base.variable,
+            config=config,
+            cancel_event=cancel_event,
+        )
+    finally:
+        watcher_task.cancel()

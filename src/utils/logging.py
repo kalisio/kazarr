@@ -3,6 +3,8 @@ import json
 import logging
 import time
 
+from src import exceptions
+
 from loguru import logger as log
 
 log.add("logs/app_fastapi.log", rotation="10 MB", compression="zip", level="INFO")
@@ -75,3 +77,20 @@ class StepDurationLogger:
     def end(self):
         self.step_end()
         self.log()
+
+class StepLoggerAndAborter(StepDurationLogger):
+    def __init__(self, method_name, parameters=None, cancel_event=None):
+        super().__init__(method_name, parameters)
+        self.cancel_event = cancel_event
+    
+    def check_cancelled(self, step_name=None):
+        if self.cancel_event and self.cancel_event.is_set():
+            previousStep = f"Previous step: {self.steps[-1]['name']}, " if self.steps else ""
+            nextStep = f"Next step: {step_name}" if step_name else ""
+            raise exceptions.RequestCancelled(
+                f"{self.method_name} process was cancelled by the client. ({previousStep}{nextStep})"
+            )
+        
+    def step_start(self, step_name, auto_end_previous=True):
+        self.check_cancelled(step_name=step_name)
+        super().step_start(step_name, auto_end_previous)

@@ -1,9 +1,12 @@
 from fastapi import APIRouter, Depends, Query, Request
 from starlette.concurrency import run_in_threadpool
+import threading
+import asyncio
 
 import src.schemas.requests as models
 from src.services import extraction
 from src.utils.data import parse_query_dict
+from src.utils.requests import watch_disconnection
 import src.exceptions as exceptions
 
 router = APIRouter(tags=["Extraction"])
@@ -33,7 +36,14 @@ async def extract_data(
         raise exceptions.MissingQueryParameter("variable")
 
     config = {
-        "bbox": (bbox.lon_min, bbox.lat_min, bbox.lon_max, bbox.lat_max, bbox.z_min, bbox.z_max),
+        "bbox": (
+            bbox.lon_min,
+            bbox.lat_min,
+            bbox.lon_max,
+            bbox.lat_max,
+            bbox.z_min,
+            bbox.z_max,
+        ),
         "is_3d": base.is_3d,
         "as_dims": base.as_dims,
         "resolution_limit": resolution_limit,
@@ -57,12 +67,18 @@ async def extract_data(
         },
     }
 
-    return await run_in_threadpool(
-        extraction.extract,
-        request,
-        base.dataset,
-        base.variable,
-        time=time.time,
-        format=base.format,
-        config=config,
-    )
+    cancel_event = threading.Event()
+    watcher_task = asyncio.create_task(watch_disconnection(request, cancel_event))
+    try:
+        return await run_in_threadpool(
+            extraction.extract,
+            request,
+            base.dataset,
+            base.variable,
+            time=time.time,
+            format=base.format,
+            config=config,
+            cancel_event=cancel_event,
+        )
+    finally:
+        watcher_task.cancel()

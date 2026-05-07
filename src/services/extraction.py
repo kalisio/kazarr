@@ -3,6 +3,7 @@ from scipy.spatial import cKDTree
 import xarray as xr
 from fastapi import Request
 from typing import Any, Dict, List, Optional, Union
+import threading
 
 from src import exceptions
 from src.schemas.config import ExtractionConfig
@@ -14,7 +15,7 @@ from src.utils.data import (
     get_bounded_time,
 )
 from src.utils.file import load_dataset
-from src.utils.logging import StepDurationLogger
+from src.utils.logging import StepLoggerAndAborter
 from src.processing import bbox, interpolation, output
 from src.processing.contexts import BBoxContext
 
@@ -26,12 +27,15 @@ def extract(
     time: Optional[str] = None,
     format: str = "raw",
     config: Union[Dict[str, Any], ExtractionConfig, None] = None,
+    cancel_event: Optional[threading.Event] = None,
 ) -> Dict[str, Any]:
     if not isinstance(config, ExtractionConfig):
         config = ExtractionConfig.model_validate(config or {})
 
-    step_logger = StepDurationLogger(
-        "extract", parameters=(dataset_id, variable, time, format, config)
+    step_logger = StepLoggerAndAborter(
+        "extract",
+        parameters=(dataset_id, variable, time, format, config),
+        cancel_event=cancel_event,
     )
 
     bounding_box = BBoxContext.from_tuple(config.bbox)
@@ -88,13 +92,18 @@ def extract(
     if not has_bb:
         index_padding, spatial_padding = 0, 0.0
 
-    heights_da = dataset[height_var] if height_var is not None and height_var in dataset else None
+    heights_da = (
+        dataset[height_var]
+        if height_var is not None and height_var in dataset
+        else None
+    )
     is_3d_dataset = heights_da is not None and heights_da.ndim == 1
 
     if is_3d_dataset and config.is_3d:
-        # In 2D mode, the height/level dimension must be fixed by a query param
+        # In 3D mode, the vertical dimension is not required to be fixed — we want all levels
         optional_coords = [lon_var, lat_var, height_var]
     else:
+        # In 2D mode, height_var is NOT optional: the user must provide a vertical coordinate
         optional_coords = [lon_var, lat_var]
 
     fixed_coords, fixed_dims = get_required_dims_and_coords(
@@ -134,7 +143,7 @@ def extract(
             level_min, level_max = int(z_indices[0]), int(z_indices[-1])
         else:
             level_min, level_max = 0, len(levels_1d) - 1
-        levels_1d = levels_1d[level_min:level_max + 1:step_level]
+        levels_1d = levels_1d[level_min : level_max + 1 : step_level]
 
     if is_point_list:
         step_logger.step_start("Point list: apply bounding box")
@@ -195,9 +204,16 @@ def extract(
         vals = np.atleast_1d(vals_da.values)[point_indices]
     elif is_regular_grid and is_3d_dataset and config.is_3d:
         if vals_da.ndim >= 3:
-            vals = vals_da.values[level_min:level_max + 1:step_level, row_min:row_max + 1:step_row, col_min:col_max + 1:step_col]
+            vals = vals_da.values[
+                level_min : level_max + 1 : step_level,
+                row_min : row_max + 1 : step_row,
+                col_min : col_max + 1 : step_col,
+            ]
         else:
-            vals = vals_da[..., row_min:row_max + 1:step_row, col_min:col_max + 1:step_col].values
+            vals = vals_da[
+                ..., row_min : row_max + 1 : step_row, col_min : col_max + 1 : step_col
+            ].values
+        # Transpose from (nz, ny, nx) → (nx, ny, nz) to match meshgrid(lons, lats, levels, indexing="ij")
         vals = vals.transpose(2, 1, 0)
     else:
         vals = vals_da[
@@ -218,7 +234,9 @@ def extract(
         lons_1d = lons_vals_in[col_min : col_max + 1 : step_col]
         lats_1d = lats_vals_in[row_min : row_max + 1 : step_row]
         if config.is_3d and levels_1d is not None:
-            lons, lats, heights = np.meshgrid(lons_1d, lats_1d, levels_1d, indexing="ij")
+            lons, lats, heights = np.meshgrid(
+                lons_1d, lats_1d, levels_1d, indexing="ij"
+            )
         else:
             lons, lats = np.meshgrid(lons_1d, lats_1d)
     else:
@@ -259,8 +277,17 @@ def extract(
     )
     if cell_data and not is_point_list:
         step_logger.step_start("Cell to point data conversion")
-        lons, lats, heights, vals, lons_1d, lats_1d, levels_1d = interpolation.cell_to_point_conversion(
-            lons, lats, heights, vals, variable, mesh_type, is_regular_grid, is_3d=config.is_3d
+        lons, lats, heights, vals, lons_1d, lats_1d, levels_1d = (
+            interpolation.cell_to_point_conversion(
+                lons,
+                lats,
+                heights,
+                vals,
+                variable,
+                mesh_type,
+                is_regular_grid,
+                is_3d=config.is_3d,
+            )
         )
 
     if mesh_tile_shape is not None:
@@ -289,7 +316,7 @@ def extract(
         )
 
     if format == "mesh":
-        step_logger.step_start("Clean data for PyVista")
+        step_logger.step_start("Prepare output (mesh)")
         out = output.prepare_mesh_output(
             lons, lats, heights, vals, variable, mask_cropped, step_row, step_col
         )
@@ -332,12 +359,14 @@ def probe(
     time: Optional[str] = None,
     format: str = "raw",
     config: Union[Dict[str, Any], ExtractionConfig, None] = None,
+    cancel_event: Optional[threading.Event] = None,
 ) -> Dict[str, Any]:
     if not isinstance(config, ExtractionConfig):
         config = ExtractionConfig.model_validate(config or {})
-    step_logger = StepDurationLogger(
+    step_logger = StepLoggerAndAborter(
         "probe",
         parameters=(dataset_id, variables, lon, lat, height, time, format, config),
+        cancel_event=cancel_event,
     )
     step_logger.step_start("Load dataset and config")
     variables = variables if isinstance(variables, list) else [variables]
@@ -561,11 +590,14 @@ def free_selection(
     dataset_id: str,
     variable: str,
     config: Union[Dict[str, Any], ExtractionConfig, None] = None,
+    cancel_event: Optional[threading.Event] = None,
 ) -> Dict[str, Any]:
     if not isinstance(config, ExtractionConfig):
         config = ExtractionConfig.model_validate(config or {})
-    step_logger = StepDurationLogger(
-        "free_selection", parameters=(dataset_id, variable, config)
+    step_logger = StepLoggerAndAborter(
+        "free_selection",
+        parameters=(dataset_id, variable, config),
+        cancel_event=cancel_event,
     )
 
     step_logger.step_start("Load dataset and config")

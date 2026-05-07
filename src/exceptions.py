@@ -137,3 +137,8 @@ class NoDataInSelection(UserInputBasedException):
 class BadSelection(UserInputBasedException):
     def __init__(self, message):
         super().__init__("BAD_SELECTION", message)
+
+
+class RequestCancelled(Exception):
+    def __init__(self, message="Request was cancelled by the client"):
+        super().__init__(message)

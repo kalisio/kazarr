@@ -1,9 +1,12 @@
 from fastapi import APIRouter, Body, Depends, Query, Request
 from starlette.concurrency import run_in_threadpool
+import threading
+import asyncio
 
 import src.schemas.requests as models
 from src.services import extraction
 from src.utils.data import parse_query_dict
+from src.utils.requests import watch_disconnection
 import src.exceptions as exceptions
 
 
@@ -36,7 +39,7 @@ async def probe_data(
     if base.variables is not None and base.variable is not None:
         raise exceptions.UserInputBasedException(
             "INVALID_QUERY_PARAMETERS",
-            "Cannot specify both 'variable' and 'variables' parameters. Please use 'variables' for probe endpoint."
+            "Cannot specify both 'variable' and 'variables' parameters. Please use 'variables' for probe endpoint.",
         )
 
     variables = [base.variable] if base.variable is not None else base.variables
@@ -57,18 +60,24 @@ async def probe_data(
         },
     }
 
-    return await run_in_threadpool(
-        extraction.probe,
-        request,
-        base.dataset,
-        variables,
-        lon,
-        lat,
-        height=height,
-        time=time.time,
-        format=base.format,
-        config=config,
-    )
+    cancel_event = threading.Event()
+    watcher_task = asyncio.create_task(watch_disconnection(request, cancel_event))
+    try:
+        return await run_in_threadpool(
+            extraction.probe,
+            request,
+            base.dataset,
+            variables,
+            lon,
+            lat,
+            height=height,
+            time=time.time,
+            format=base.format,
+            config=config,
+            cancel_event=cancel_event,
+        )
+    finally:
+        watcher_task.cancel()
 
 
 @router.post(
@@ -95,7 +104,7 @@ async def probe_data_multi(
     if base.variables is not None and base.variable is not None:
         raise exceptions.UserInputBasedException(
             "INVALID_QUERY_PARAMETERS",
-            "Cannot specify both 'variable' and 'variables' parameters. Please use 'variables' for probe endpoint."
+            "Cannot specify both 'variable' and 'variables' parameters. Please use 'variables' for probe endpoint.",
         )
 
     variables = [base.variable] if base.variable is not None else base.variables
@@ -116,20 +125,26 @@ async def probe_data_multi(
         },
     }
 
-    results = []
-    for point in body.points:
-        result = await run_in_threadpool(
-            extraction.probe,
-            request,
-            base.dataset,
-            variables,
-            point.lon,
-            point.lat,
-            height=point.height,
-            time=time.time,
-            format=base.format,
-            config=config,
-        )
-        results.append(result)
+    cancel_event = threading.Event()
+    watcher_task = asyncio.create_task(watch_disconnection(request, cancel_event))
+    try:
+        results = []
+        for point in body.points:
+            result = await run_in_threadpool(
+                extraction.probe,
+                request,
+                base.dataset,
+                variables,
+                point.lon,
+                point.lat,
+                height=point.height,
+                time=time.time,
+                format=base.format,
+                config=config,
+                cancel_event=cancel_event,
+            )
+            results.append(result)
 
-    return results
+        return results
+    finally:
+        watcher_task.cancel()

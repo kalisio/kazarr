@@ -5,21 +5,25 @@ from src import exceptions
 from src.schemas.config import ExtractionConfig
 from src.utils.data import dget, dgets
 from src.utils.file import load_dataset
-from src.utils.logging import StepDurationLogger
+from src.utils.logging import StepLoggerAndAborter
 from src.processing.interpolation import extrapolate_edges_from_cell_data
 from src.processing.contexts import BBoxContext
 
-from typing import Any, Dict, Union
+from typing import Any, Dict, Union, Optional
+import threading
 
 
 def get_mesh(
     dataset_id: str,
     format: str = "mesh",
     config: Union[Dict[str, Any], ExtractionConfig, None] = None,
+    cancel_event: Optional[threading.Event] = None,
 ) -> Dict[str, Any]:
     if not isinstance(config, ExtractionConfig):
         config = ExtractionConfig.model_validate(config or {})
-    step_logger = StepDurationLogger("mesh", parameters=(dataset_id, format, config))
+    step_logger = StepLoggerAndAborter(
+        "mesh", parameters=(dataset_id, format, config), cancel_event=cancel_event
+    )
     force_data_mapping = config.mesh.data_mapping
 
     bounding_box = BBoxContext.from_tuple(config.bbox)

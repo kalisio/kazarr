@@ -86,6 +86,12 @@ async def user_input_exception_handler(
     return JSONResponse(status_code=400, content={"detail": exc.get()})
 
 
+@app.exception_handler(exceptions.RequestCancelled)
+async def request_cancelled_handler(request: Request, exc: exceptions.RequestCancelled):
+    print("[KAZARR] Request cancelled by client:", str(exc))
+    return JSONResponse(status_code=499, content={"detail": str(exc)})
+
+
 @app.get(
     "/",
     summary="API Root",
