@@ -6,7 +6,6 @@ from src.utils import load_json, merge
 
 
 def new_dataset(
-    dataset_name,
     input_path,
     template=None,
     config={},
@@ -32,7 +31,6 @@ def new_dataset(
     pipeline_config = merge(
         pipeline_config,
         {
-            "name": dataset_name,
             "description": description,
             "path": input_path,
         },
@@ -72,9 +70,6 @@ def main():
 
     parser_create_dataset = subparsers.add_parser(
         "new-dataset", help="Create a new zarr dataset"
-    )
-    parser_create_dataset.add_argument(
-        "dataset_name", type=str, help="Name of the new dataset"
     )
     parser_create_dataset.add_argument(
         "input_path",
@@ -146,7 +141,6 @@ def main():
 
     if args.command == "new-dataset":
         new_dataset(
-            args.dataset_name,
             args.input_path,
             template=args.template,
             config=args.config,

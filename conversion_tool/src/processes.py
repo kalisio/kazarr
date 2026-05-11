@@ -205,6 +205,7 @@ def load_from_grib(dataset, config):
             )
     else:
         if os.path.isfile(path):
+            backend_kwargs["errors"] = "raise"
             try:
                 dataset = xr.open_dataset(
                     path, engine="cfgrib", chunks="auto", backend_kwargs=backend_kwargs
@@ -470,14 +471,14 @@ def rename_variables(dataset, config):
     for old_name, new_name in rename_map.items():
         if old_name not in dataset:
             print(
-                f"Warning: Variable '{old_name}' not found in dataset for rename_variables process. Skipping."
+                f"[KAZARR] Warning: Variable '{old_name}' not found in dataset for rename_variables process. Skipping."
             )
         elif new_name in dataset:
             print(
-                f"Warning: Variable '{new_name}' already exists in dataset. Cannot rename '{old_name}' to '{new_name}'. Skipping."
+                f"[KAZARR] Warning: Variable '{new_name}' already exists in dataset. Cannot rename '{old_name}' to '{new_name}'. Skipping."
             )
         else:
-            print(f"Renaming variable '{old_name}' to '{new_name}'")
+            print(f"[KAZARR] Renaming variable '{old_name}' to '{new_name}'")
 
     dataset = dataset.rename(rename_map)
     return dataset, config
@@ -661,9 +662,6 @@ def reproject_coordinates(dataset, config):
         raise ValueError(
             "Longitude or latitude variable not found in dataset for reproject_coordinates process."
         )
-    height_var = get_ci(config, "variables.height")
-    if height_var is not None and height_var in dataset:
-        has_height = True
 
     transformer = Transformer.from_crs(from_crs, to_crs, always_xy=True)
 
@@ -671,8 +669,6 @@ def reproject_coordinates(dataset, config):
         return transformer.transform(*args)
 
     vars_to_reproject = [lon_var, lat_var]
-    if has_height:
-        vars_to_reproject.append(height_var)
     values = [dataset[var].values for var in vars_to_reproject]
 
     # Use xarray apply_ufunc to reproject coordinates with Dask arrays (parallelized)
@@ -686,12 +682,6 @@ def reproject_coordinates(dataset, config):
 
     dataset[lon_var] = (dataset[lon_var].dims, output[0], dataset[lon_var].attrs)
     dataset[lat_var] = (dataset[lat_var].dims, output[1], dataset[lat_var].attrs)
-    if has_height:
-        dataset[height_var] = (
-            dataset[height_var].dims,
-            output[2],
-            dataset[height_var].attrs,
-        )
 
     return dataset, config
 
