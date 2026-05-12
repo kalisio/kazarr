@@ -142,3 +142,19 @@ class BadSelection(UserInputBasedException):
 class RequestCancelled(Exception):
     def __init__(self, message="Request was cancelled by the client"):
         super().__init__(message)
+
+
+class DifferentTypesOfLevel(UserInputBasedException):
+    def __init__(self):
+        message = (
+            "Not all variables uses the same type of level."
+        )
+        super().__init__("DIFFERENT_TYPES_OF_LEVEL", message)
+
+
+class CantFindHeightVariable(UserInputBasedException):
+    def __init__(self):
+        message = (
+            "Unable to determine height variable for 3D mesh generation."
+        )
+        super().__init__("CANT_FIND_HEIGHT_VARIABLE", message)

@@ -34,3 +34,7 @@ class ExtractionConfig(BaseModel):
     resolution_limit: float | None = None
     mesh: MeshConfig = Field(default_factory=MeshConfig)
     interpolation: InterpolationConfig = Field(default_factory=InterpolationConfig)
+
+class MeshExtractionConfig(ExtractionConfig):
+    variable: str | None = None
+    height_variable: str | None = None

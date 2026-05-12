@@ -10,6 +10,8 @@ from src.schemas.config import ExtractionConfig
 from src.utils.data import (
     dget,
     dgets,
+    get_height_var,
+    get_dataset_height_vars,
     sel,
     get_required_dims_and_coords,
     get_bounded_time,
@@ -54,7 +56,10 @@ def extract(
     if variable not in dataset:
         raise exceptions.VariableNotFound([variable])
 
-    lon_var, lat_var, height_var = dgets(dataset_config, ["variables.lon", "variables.lat", "variables.height"])
+    lon_var, lat_var = dgets(
+        dataset_config, ["variables.lon", "variables.lat"]
+    )
+    height_var = get_height_var(dataset, dataset_config, variable)
     missing_vars = []
     if has_bb_lon and lon_var is None:
         raise exceptions.MissingConfigurationElement("variables.lon")
@@ -102,9 +107,11 @@ def extract(
     if is_3d_dataset and config.is_3d:
         # In 3D mode, the vertical dimension is not required to be fixed — we want all levels
         optional_coords = [lon_var, lat_var, height_var]
+        coords_keep_dims = [lon_var, lat_var, height_var]
     else:
         # In 2D mode, height_var is NOT optional: the user must provide a vertical coordinate
         optional_coords = [lon_var, lat_var]
+        coords_keep_dims = [lon_var, lat_var]
 
     fixed_coords, fixed_dims = get_required_dims_and_coords(
         dataset,
@@ -114,6 +121,7 @@ def extract(
         request,
         interp_vars=interp_vars,
         optional_coords=optional_coords,
+        coords_keep_dims=coords_keep_dims,
         as_dims=config.as_dims or [],
     )
 
@@ -376,11 +384,22 @@ def probe(
         dataset_config, ["variables.fixed", "dimensions.fixed"], {}
     )
     interp_vars = config.interpolation.vars.items
-    lon_var, lat_var, height_var, time_var = dgets(
+    lon_var, lat_var, time_var = dgets(
         dataset_config,
-        ["variables.lon", "variables.lat", "variables.height", "variables.time"],
+        ["variables.lon", "variables.lat", "variables.time"],
     )
     time_dim = dget(dataset_config, "dimensions.time")
+    height_vars = get_dataset_height_vars(dataset, dataset_config)
+    height_var = None
+    if height_vars is None or isinstance(height_vars, str):
+        height_var = height_vars
+    else:
+        for hv in height_vars:
+            if all([var in height_vars[hv] for var in variables]):
+                height_var = hv
+                break
+        if height_var is None:
+            raise exceptions.DifferentTypesOfLevel()
 
     not_found_vars = []
     for var in variables:

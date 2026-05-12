@@ -68,6 +68,7 @@ def isoline(
         fixed_dims,
         request,
         optional_coords=[lon_var, lat_var],
+        coords_keep_dims=[lon_var, lat_var],
         as_dims=config.as_dims or [],
     )
 

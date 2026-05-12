@@ -1,7 +1,7 @@
 import numpy as np
 from typing import Any, Dict, Optional
 
-from src.utils.data import dgets, dget
+from src.utils.data import dgets, dget, get_dataset_height_vars
 from src.utils.file import load_datasets, load_dataset
 
 
@@ -31,8 +31,8 @@ def dataset_metadata(dataset_id: str) -> Dict[str, Any]:
         if len(dataset[coord].dims) == 0:
             coords[coord]["value"] = dataset[coord].values.item()
 
-    lon_var, lat_var, height_var = dgets(
-        config, ["variables.lon", "variables.lat", "variables.height"]
+    lon_var, lat_var = dgets(
+        config, ["variables.lon", "variables.lat"]
     )
     bounding_box = False
     if lon_var in dataset and lat_var in dataset:
@@ -46,8 +46,16 @@ def dataset_metadata(dataset_id: str) -> Dict[str, Any]:
                 "max": float(dataset[lat_var].max()),
             },
         }
+    vertical_axis = {}
+    height_vars = get_dataset_height_vars(dataset, config)
+    if isinstance(height_vars, str):
+        height_vars = [height_vars]
+    elif height_vars is None:
+        height_vars = []
+    
+    for height_var in height_vars:
         if height_var in dataset:
-            bounding_box["height"] = {
+            vertical_axis[height_var] = {
                 "min": float(dataset[height_var].min()),
                 "max": float(dataset[height_var].max()),
             }
@@ -73,6 +81,7 @@ def dataset_metadata(dataset_id: str) -> Dict[str, Any]:
         "variables": variables,
         "coordinates": coords,
         "bounding_box": bounding_box if bounding_box else None,
+        "vertical_axis": vertical_axis if vertical_axis else None,
         "time_bounds": time_bounds if time_bounds else None,
         "attributes": dataset.attrs,
     }

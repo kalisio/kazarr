@@ -30,6 +30,7 @@ def get_required_dims_and_coords(
     interp_vars=None,
     optional_coords=None,
     optional_dims=None,
+    coords_keep_dims=None,
     as_dims=None,
     greedy=True,
 ):
@@ -39,6 +40,8 @@ def get_required_dims_and_coords(
         optional_coords = []
     if optional_dims is None:
         optional_dims = []
+    if coords_keep_dims is None:
+        coords_keep_dims = []
     if as_dims is None:
         as_dims = []
 
@@ -93,6 +96,13 @@ def get_required_dims_and_coords(
                 missing_dims[dim] = assigned_coords
     if missing_dims:
         raise exceptions.MissingDimensionsOrCoordinates(missing_dims)
+    
+    # Convert coords_keep_dims coordinates to list if they are in fixed_coords, so that they are not squeezed during selection
+    # This allows to keep the dimension of these coordinates even if only one value is selected
+    # example: longitude or latitude value is fixed for an extract => we want to keep the longitude and latitude dimensions in the output, even if only one value is selected for each of them
+    for coord in coords_keep_dims:
+        if coord in fixed_coords:
+            fixed_coords[coord] = [fixed_coords[coord]]
 
     return fixed_coords, fixed_dims
 
@@ -169,7 +179,7 @@ def sel(
         raise exceptions.BadSelection(
             "Data selection failed due to an index error. Please check your query parameters and dataset configuration."
         )
-    except Exception as e:
+    except Exception:
         raise exceptions.GenericInternalError("Data selection failed. Please check your query parameters and dataset configuration.")
     # Interpolate if needed
     if len(interp_vars) > 0:
@@ -229,6 +239,33 @@ def dgets(d, keys, default=None):
     for key in keys if isinstance(keys, list) else [keys]:
         values.append(dget(d, key, default=default))
     return tuple(values)
+
+
+def get_dataset_height_vars(dataset, config):
+    height_var = dget(config, "variables.height")
+    if height_var is not None and (height_var.startswith("ATTRS.") or height_var.startswith("ATTRIBUTES.")):
+        height_var_name = height_var.replace("ATTRS.", "").replace("ATTRIBUTES.", "")
+        height_vars = {}
+        for var in dataset.data_vars:
+            if height_var_name in dataset[var].attrs:
+                target_height_var = dataset[var].attrs[height_var_name]
+                if target_height_var not in height_vars:
+                    height_vars[target_height_var] = [var]
+                else:
+                    height_vars[target_height_var].append(var)
+        if len(height_vars) == 0:
+            return None
+        elif len(height_vars) == 1:
+            return list(height_vars.keys())[0]
+        return height_vars
+    return height_var
+
+
+def get_height_var(dataset, config, variable):
+    height_var = dget(config, "variables.height")
+    if height_var is not None and (height_var.startswith("ATTRS.") or height_var.startswith("ATTRIBUTES.")):
+        height_var = dataset[variable].attrs.get(height_var.replace("ATTRS.", "").replace("ATTRIBUTES.", ""), None)
+    return height_var
 
 
 def parse_query_dict(query_string):

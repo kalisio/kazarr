@@ -2,8 +2,8 @@ import numpy as np
 import pyvista as pv
 
 from src import exceptions
-from src.schemas.config import ExtractionConfig
-from src.utils.data import dget, dgets
+from src.schemas.config import MeshExtractionConfig
+from src.utils.data import dget, dgets, get_dataset_height_vars, get_height_var
 from src.utils.file import load_dataset
 from src.utils.logging import StepLoggerAndAborter
 from src.processing.interpolation import extrapolate_edges_from_cell_data
@@ -16,11 +16,12 @@ import threading
 def get_mesh(
     dataset_id: str,
     format: str = "mesh",
-    config: Union[Dict[str, Any], ExtractionConfig, None] = None,
+    config: Union[Dict[str, Any], MeshExtractionConfig, None] = None,
     cancel_event: Optional[threading.Event] = None,
 ) -> Dict[str, Any]:
-    if not isinstance(config, ExtractionConfig):
-        config = ExtractionConfig.model_validate(config or {})
+
+    if not isinstance(config, MeshExtractionConfig):
+        config = MeshExtractionConfig.model_validate(config or {})
     step_logger = StepLoggerAndAborter(
         "mesh", parameters=(dataset_id, format, config), cancel_event=cancel_event
     )
@@ -31,19 +32,35 @@ def get_mesh(
     step_logger.step_start("Load dataset and config")
     dataset, dataset_config = load_dataset(dataset_id)
 
-    lon_var, lat_var, height_var = dgets(
-        dataset_config, ["variables.lon", "variables.lat", "variables.height"]
+    lon_var, lat_var= dgets(
+        dataset_config, ["variables.lon", "variables.lat"]
     )
     missing_vars = []
     if lon_var not in dataset:
         missing_vars.append(f"lon ({lon_var})")
     if lat_var not in dataset:
         missing_vars.append(f"lat ({lat_var})")
+
+    height_vars = get_dataset_height_vars(dataset, dataset_config)
+    height_var = None
+    if isinstance(height_vars, str) or height_vars is None:
+        height_var = height_vars
+    elif config.is_3d and config.variable is not None:
+        height_var = get_height_var(dataset, dataset_config, config.variable)
+    elif config.is_3d and config.height_variable is not None:
+        if config.height_variable not in dataset:
+            missing_vars.append(f"height ({config.height_variable})")
+        else:
+            height_var = config.height_variable
     if len(missing_vars) > 0:
         raise exceptions.BadConfigurationVariable(missing_vars)
+    
+    if height_var is None and config.is_3d:
+        raise exceptions.CantFindHeightVariable()
 
     lons = dataset[lon_var]
     lats = dataset[lat_var]
+
     heights_da = (
         dataset[height_var]
         if height_var is not None and height_var in dataset
