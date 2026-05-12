@@ -82,7 +82,6 @@ class TestRegularGrid:
         """Convert the NetCDF to Zarr format via conversion_tool."""
         output_path = os.path.join(TMP_FOLDER, f"{DATASET_NAME}.zarr")
         convert(
-            dataset_name=DATASET_NAME,
             input_path=os.path.join(TMP_FOLDER, f"{DATASET_NAME}.nc"),
             output_path=output_path,
             config={
@@ -473,7 +472,6 @@ class TestRegularGridComplex:
         """Convert the complex NetCDF to Zarr format."""
         output_path = os.path.join(TMP_FOLDER, f"{DATASET_NAME_COMPLEX}.zarr")
         convert(
-            dataset_name=DATASET_NAME_COMPLEX,
             input_path=os.path.join(TMP_FOLDER, f"{DATASET_NAME_COMPLEX}.nc"),
             output_path=output_path,
             config={

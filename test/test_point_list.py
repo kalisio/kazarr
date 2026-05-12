@@ -121,7 +121,6 @@ class TestPointList:
         """Convert the NetCDF to Zarr format."""
         output_path = os.path.join(TMP_FOLDER, f"{DATASET_NAME}.zarr")
         convert(
-            dataset_name=DATASET_NAME,
             input_path=os.path.join(TMP_FOLDER, f"{DATASET_NAME}.nc"),
             output_path=output_path,
             config={

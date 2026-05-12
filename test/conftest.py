@@ -60,7 +60,6 @@ def convert():
     Returns standard output (stdout) on success, raises an error on failure.
     """
     def _run(
-        dataset_name: str,
         input_path: str,
         template=None,
         config=None,
@@ -99,7 +98,7 @@ def convert():
             elif arg_value is not None:
                 cmd += [f"--{arg_name.replace('_', '-')}", str(arg_value)]
 
-        cmd += [dataset_name, input_path]
+        cmd += [input_path]
 
         env = os.environ.copy()
         env["PYTHONPATH"] = str(_tool_dir)

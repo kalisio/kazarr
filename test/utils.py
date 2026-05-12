@@ -146,6 +146,7 @@ class DatasetGenerator:
             data_vars[var_name] = (
                 var_dims,
                 self._generate_values(data_type, var_shape, config),
+                config.get("attributes", {}),
             )
 
         ds = xr.Dataset(data_vars=data_vars, coords=coords)

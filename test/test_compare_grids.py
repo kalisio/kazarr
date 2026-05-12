@@ -90,7 +90,6 @@ class TestRegularGridVsRectilinearGrid:
             REGULAR_DATASET, to_netcdf=True
         )
         convert(
-            dataset_name=REGULAR_DATASET,
             input_path=os.path.join(TMP_FOLDER, f"{REGULAR_DATASET}.nc"),
             output_path=os.path.join(TMP_FOLDER, f"{REGULAR_DATASET}.zarr"),
             config={
@@ -151,7 +150,6 @@ class TestRegularGridVsRectilinearGrid:
             RECTILINEAR_DATASET, to_netcdf=True
         )
         convert(
-            dataset_name=RECTILINEAR_DATASET,
             input_path=os.path.join(TMP_FOLDER, f"{RECTILINEAR_DATASET}.nc"),
             output_path=os.path.join(TMP_FOLDER, f"{RECTILINEAR_DATASET}.zarr"),
             config={

@@ -81,7 +81,6 @@ class TestRectilinearGrid:
     def test_convert_dataset(self, convert):
         output_path = os.path.join(TMP_FOLDER, f"{DATASET_NAME}.zarr")
         convert(
-            dataset_name=DATASET_NAME,
             input_path=os.path.join(TMP_FOLDER, f"{DATASET_NAME}.nc"),
             output_path=output_path,
             config={
@@ -120,6 +119,18 @@ class TestRectilinearGrid:
             "min": 0,
             "max": HEIGHTS * LATS * LONS - 1,
         }
+
+    def test_extract_spatial_dimensions_fixed(self, client: TestClient):
+        """Extraction with fixed spatial dimension returns correct shape."""
+        response = client.get(
+            f"/datasets/{DATASET_NAME}/extract?variable=Precipitation&time=2026-01-01&DimJ=10"
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["latitudes"]) == LONS * 1 # DimJ is fixed, so only 1 value per latitude
+        assert len(data["longitudes"]) == LONS * 1
+        assert len(data["values"]["Precipitation"]) == LONS * 1
 
     def test_extract_time_interpolation(self, client: TestClient):
         """Time interpolation at midpoint between two steps (t=1h and t=2h)."""

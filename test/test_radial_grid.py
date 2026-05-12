@@ -79,13 +79,13 @@ class TestRadialGrid:
         """Convert the NetCDF to Zarr, specifying radial mesh_type."""
         output_path = os.path.join(TMP_FOLDER, f"{DATASET_NAME}.zarr")
         convert(
-            dataset_name=DATASET_NAME,
             input_path=os.path.join(TMP_FOLDER, f"{DATASET_NAME}.nc"),
             output_path=output_path,
             config={
                 "variables": {"lon": "lon", "lat": "lat", "time": "time"},
+                "reprojection": {"fromCrs": "EPSG:32631", "toCrs": "EPSG:4326"},
                 "pipelines": {
-                    "preprocess": ["load_from_netcdf", "unify_chunks", "save"]
+                    "preprocess": ["load_from_netcdf", "reproject_coordinates", "unify_chunks", "save"]
                 },
                 "version": 2,
             },
