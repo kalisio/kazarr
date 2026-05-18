@@ -10,8 +10,12 @@ from scipy.spatial import cKDTree
 
 from src import exceptions
 from src.processing.contexts import BBoxContext
+from src.utils.spatial import get_cached_ckdtree
 
-def cell_to_point_conversion(lons, lats, heights, vals, variable, mesh_type, is_regular_grid, is_3d=False):
+
+def cell_to_point_conversion(
+    lons, lats, heights, vals, variable, mesh_type, is_regular_grid, is_3d=False
+):
     lons_points, lats_points, heights_points = extrapolate_edges_from_cell_data(
         lons, lats, heights, "radial" if mesh_type == "radial" else "rectilinear"
     )
@@ -67,14 +71,45 @@ def generate_meshgrid_and_interpolate(
     xi = np.linspace(t_lon_min, t_lon_max, target_w)
     yi = np.linspace(t_lat_min, t_lat_max, target_h)
 
-    if is_3d and levels_1d is not None and heights is not None:
-        t_z_min = bbox.z_min if bbox.has_bb_z and bbox.z_min is not None else levels_1d.min()
-        t_z_max = bbox.z_max if bbox.has_bb_z and bbox.z_max is not None else levels_1d.max()
+    if is_3d and heights is not None:
+        # Determine Z target bounds.
+        # For regular 3D: use the 1-D levels vector.
+        # For irregular 3D (levels_1d is None): use the height array.
+        if levels_1d is not None:
+            t_z_min = (
+                bbox.z_min
+                if bbox.has_bb_z and bbox.z_min is not None
+                else levels_1d.min()
+            )
+            t_z_max = (
+                bbox.z_max
+                if bbox.has_bb_z and bbox.z_max is not None
+                else levels_1d.max()
+            )
+        else:
+            t_z_min = (
+                bbox.z_min
+                if bbox.has_bb_z and bbox.z_min is not None
+                else float(heights.min())
+            )
+            t_z_max = (
+                bbox.z_max
+                if bbox.has_bb_z and bbox.z_max is not None
+                else float(heights.max())
+            )
         zi = np.linspace(t_z_min, t_z_max, max(target_d, 1))
         xi_mesh, yi_mesh, zi_mesh = np.meshgrid(xi, yi, zi, indexing="ij")
 
-        if is_regular_grid and not is_point_list:
-            if interp_spatial_method not in ["linear", "nearest", "slinear", "cubic", "quintic", "pchip"]:
+        if is_regular_grid and not is_point_list and levels_1d is not None:
+            # Fully regular 3D grid: use RegularGridInterpolator.
+            if interp_spatial_method not in [
+                "linear",
+                "nearest",
+                "slinear",
+                "cubic",
+                "quintic",
+                "pchip",
+            ]:
                 interp_spatial_method = "linear"
             try:
                 rgi = RegularGridInterpolator(
@@ -84,11 +119,35 @@ def generate_meshgrid_and_interpolate(
                     method=interp_spatial_method,
                     fill_value=np.nan,
                 )
-                pts = np.stack([xi_mesh.ravel(), yi_mesh.ravel(), zi_mesh.ravel()], axis=-1)
+                pts = np.stack(
+                    [xi_mesh.ravel(), yi_mesh.ravel(), zi_mesh.ravel()], axis=-1
+                )
                 interpolated_vals = rgi(pts).reshape(xi_mesh.shape)
             except Exception as e:
-                raise exceptions.GenericInternalError(f"3D Interpolation failed: {str(e)}")
+                raise exceptions.GenericInternalError(
+                    f"3D Interpolation failed: {str(e)}"
+                )
+        elif levels_1d is None:
+            # Irregular 3D grid: lat/lon/height are all 3D arrays.
+            # Use true 3D scattered interpolation on (lon, lat, height) triplets.
+            try:
+                interpolated_vals = apply_spatial_interpolation_irregular_grid_3d(
+                    source_lons=lons.ravel(),
+                    source_lats=lats.ravel(),
+                    source_heights=heights.ravel(),
+                    source_values=vals.ravel(),
+                    target_lon_mesh=xi_mesh,
+                    target_lat_mesh=yi_mesh,
+                    target_height_mesh=zi_mesh,
+                    method=interp_spatial_method,
+                    **interp_spatial_params,
+                )
+            except Exception as e:
+                raise exceptions.GenericInternalError(
+                    f"3D Interpolation failed: {str(e)}"
+                )
         else:
+            # Spatially irregular but Z-regular: 2D spatial interpolation per level.
             try:
                 interpolated_vals = apply_spatial_interpolation_irregular_grid(
                     source_lons=lons.ravel(),
@@ -100,7 +159,9 @@ def generate_meshgrid_and_interpolate(
                     **interp_spatial_params,
                 )
             except Exception as e:
-                raise exceptions.GenericInternalError(f"3D Interpolation failed: {str(e)}")
+                raise exceptions.GenericInternalError(
+                    f"3D Interpolation failed: {str(e)}"
+                )
 
         mask_cropped = np.isfinite(interpolated_vals)
         return xi_mesh, yi_mesh, zi_mesh, interpolated_vals, mask_cropped
@@ -214,6 +275,98 @@ def extrapolate_edges_from_cell_data(
     return x_bounds, y_bounds, z_bounds
 
 
+def apply_spatial_interpolation_irregular_grid_3d(
+    source_lons,
+    source_lats,
+    source_heights,
+    source_values,
+    target_lon_mesh,
+    target_lat_mesh,
+    target_height_mesh,
+    method="linear",
+    **kwargs,
+):
+    """
+    Scattered 3D interpolation for irregular grids where lat, lon, and height
+    are all 3D arrays. Source points are (lon, lat, height) triplets.
+
+    Supports 'nearest' and 'linear' via scipy griddata, 'idw', and 'rbf'.
+    Note: scipy griddata does not support 'cubic' in 3D — falls back to 'linear'.
+    """
+    points = np.column_stack(
+        (
+            source_lons.ravel(),
+            source_lats.ravel(),
+            source_heights.ravel(),
+        )
+    )
+    values = source_values.ravel()
+
+    valid_mask = np.isfinite(values)
+    points = points[valid_mask]
+    values = values[valid_mask]
+
+    if points.shape[0] < 4:
+        raise exceptions.TooFewPoints()
+
+    pts_target = np.column_stack(
+        (
+            target_lon_mesh.ravel(),
+            target_lat_mesh.ravel(),
+            target_height_mesh.ravel(),
+        )
+    )
+
+    if method == "cubic":
+        print(
+            "[Kazarr - Warning] 'cubic' is not supported for 3D interpolation. "
+            "Falling back to 'linear'."
+        )
+        method = "linear"
+    if method not in ["nearest", "linear", "idw", "rbf"]:
+        print(
+            f"[Kazarr - Warning] Unsupported 3D interpolation method: {method}. "
+            "Falling back to 'linear'."
+        )
+        method = "linear"
+
+    if method in ["nearest", "linear"]:
+        interpolated_flat = griddata(
+            points, values, pts_target, method=method, fill_value=np.nan
+        )
+    elif method == "idw":
+        max_radius = kwargs.get("radius", 0.5)
+        power = kwargs.get("power", 2.0)
+
+        tree = get_cached_ckdtree(points)
+        indices_list = tree.query_ball_point(pts_target, r=max_radius)
+        interpolated_flat = np.full(pts_target.shape[0], np.nan)
+
+        for i, indices in enumerate(indices_list):
+            if not indices:
+                continue
+            neighbors_coords = points[indices]
+            dists = np.linalg.norm(neighbors_coords - pts_target[i], axis=1)
+            zero_dist = dists < 1e-12
+            if np.any(zero_dist):
+                interpolated_flat[i] = values[np.array(indices)[zero_dist][0]]
+            else:
+                weights = 1.0 / (dists**power)
+                interpolated_flat[i] = np.sum(weights * values[indices]) / np.sum(
+                    weights
+                )
+    elif method == "rbf":
+        points_uniques, indices_uniques = np.unique(points, axis=0, return_index=True)
+        points = points_uniques
+        values = values[indices_uniques]
+        kernel = kwargs.get("kernel", "thin_plate_spline")
+        smoothing = kwargs.get("smoothing", 0.0)
+        rbf = RBFInterpolator(points, values, kernel=kernel, smoothing=smoothing)
+        interpolated_flat = rbf(pts_target)
+
+    return interpolated_flat.reshape(target_lon_mesh.shape)
+
+
 def apply_spatial_interpolation_irregular_grid(
     source_lons,
     source_lats,
@@ -250,7 +403,7 @@ def apply_spatial_interpolation_irregular_grid(
         max_radius = kwargs.get("radius", 0.02)
         power = kwargs.get("power", 2.0)
 
-        tree = cKDTree(points)
+        tree = get_cached_ckdtree(points)
         indices_list = tree.query_ball_point(pts_target, r=max_radius)
 
         interpolated_flat = np.full(pts_target.shape[0], np.nan)

@@ -1,8 +1,7 @@
-from dataclasses import dataclass, fields, make_dataclass
-from typing import List, Literal, Optional, Type, TypeVar
+from dataclasses import dataclass
+from typing import List, Literal, Optional
 from fastapi import Query, Path
 from pydantic import BaseModel
-from pydantic_core import PydanticUndefined
 
 
 @dataclass
@@ -29,16 +28,18 @@ class BaseParams:
         [],
         description="If some variables have the same name as dimensions, will force them to be treated as dimensions",
     )
-    is_3d: bool = Query(
-        False,
-        description="If True, performs a full 3D volume extraction. If False (default) and the dataset is 3D, a vertical coordinate must be provided.",
-    )
 
 
 @dataclass
 class MultipleVariablesParams(BaseParams):
-    variable: str = Query(None, description="Name of the variable to query. One of 'variable' or 'variables' must be provided")
-    variables: list[str] = Query(None, description="List of variables to query. One of 'variable' or 'variables' must be provided")
+    variable: str = Query(
+        None,
+        description="Name of the variable to query. One of 'variable' or 'variables' must be provided",
+    )
+    variables: list[str] = Query(
+        None,
+        description="List of variables to query. One of 'variable' or 'variables' must be provided",
+    )
 
 
 @dataclass
@@ -72,10 +73,12 @@ class BBoxParams:
         None, description="Maximum latitude of the bounding box"
     )
     z_min: float | None = Query(
-        None, description="Minimum vertical coordinate (altitude/depth) of the bounding box"
+        None,
+        description="Minimum vertical coordinate (altitude/depth) of the bounding box",
     )
     z_max: float | None = Query(
-        None, description="Maximum vertical coordinate (altitude/depth) of the bounding box"
+        None,
+        description="Maximum vertical coordinate (altitude/depth) of the bounding box",
     )
 
 

@@ -18,6 +18,7 @@ from src.utils.data import (
 )
 from src.utils.file import load_dataset
 from src.utils.logging import StepLoggerAndAborter
+from src.utils.spatial import get_cached_ckdtree
 from src.processing import bbox, interpolation, output
 from src.processing.contexts import BBoxContext
 
@@ -56,9 +57,7 @@ def extract(
     if variable not in dataset:
         raise exceptions.VariableNotFound([variable])
 
-    lon_var, lat_var = dgets(
-        dataset_config, ["variables.lon", "variables.lat"]
-    )
+    lon_var, lat_var = dgets(dataset_config, ["variables.lon", "variables.lat"])
     height_var = get_height_var(dataset, dataset_config, variable)
     missing_vars = []
     if has_bb_lon and lon_var is None:
@@ -102,9 +101,10 @@ def extract(
         if height_var is not None and height_var in dataset
         else None
     )
-    is_3d_dataset = heights_da is not None and heights_da.ndim == 1
+    
+    is_3d_grid = config.is_3d and heights_da is not None
 
-    if is_3d_dataset and config.is_3d:
+    if is_3d_grid:
         # In 3D mode, the vertical dimension is not required to be fixed — we want all levels
         optional_coords = [lon_var, lat_var, height_var]
         coords_keep_dims = [lon_var, lat_var, height_var]
@@ -139,19 +139,16 @@ def extract(
 
     levels_1d = None
     level_min, level_max, step_level = 0, 0, 1
-    if is_3d_dataset and config.is_3d and is_regular_grid:
+    if is_3d_grid and is_regular_grid:
+        # Regular 3D: height is a 1-D coordinate vector
         levels_1d = heights_da.values
         if has_bb_z:
-            bb_z_min = bounding_box.z_min if bounding_box.z_min is not None else -np.inf
-            bb_z_max = bounding_box.z_max if bounding_box.z_max is not None else np.inf
-            z_mask = (levels_1d >= bb_z_min) & (levels_1d <= bb_z_max)
-            if not np.any(z_mask):
-                raise exceptions.NoDataInSelection()
-            z_indices = np.where(z_mask)[0]
-            level_min, level_max = int(z_indices[0]), int(z_indices[-1])
+            level_min, level_max, levels_1d = bbox.apply_levels_bounding_box(
+                levels_1d, bounding_box
+            )
         else:
             level_min, level_max = 0, len(levels_1d) - 1
-        levels_1d = levels_1d[level_min : level_max + 1 : step_level]
+            levels_1d = levels_1d[level_min : level_max + 1 : step_level]
 
     if is_point_list:
         step_logger.step_start("Point list: apply bounding box")
@@ -166,6 +163,21 @@ def extract(
         lats_1d = lats.values
         indices = bbox.apply_regular_grid_bounding_box(
             lons_1d, lats_1d, bounding_box, pad
+        )
+        col_min, col_max = indices.col_min, indices.col_max
+        row_min, row_max = indices.row_min, indices.row_max
+        width_raw, height_raw = indices.width_raw, indices.height_raw
+    elif is_3d_grid and not is_regular_grid:
+        step_logger.step_start("Irregular 3D grid: apply bounding box")
+        lons_2d_slice = lons_vals_in[0]
+        lats_2d_slice = lats_vals_in[0]
+        lons_vals, lats_vals, indices = bbox.apply_unstructured_bounding_box(
+            lons_2d_slice,
+            lats_2d_slice,
+            bounding_box,
+            False,
+            spatial_padding,
+            pad,
         )
         col_min, col_max = indices.col_min, indices.col_max
         row_min, row_max = indices.row_min, indices.row_max
@@ -210,7 +222,13 @@ def extract(
         if resolution_limit is not None and n_points > resolution_limit:
             point_indices = point_indices[::step_row]
         vals = np.atleast_1d(vals_da.values)[point_indices]
-    elif is_regular_grid and is_3d_dataset and config.is_3d:
+    elif is_3d_grid and not is_regular_grid:
+        vals = vals_da.values[
+            :,
+            row_min : row_max + 1 : step_row,
+            col_min : col_max + 1 : step_col,
+        ]
+    elif is_3d_grid and is_regular_grid:
         if vals_da.ndim >= 3:
             vals = vals_da.values[
                 level_min : level_max + 1 : step_level,
@@ -227,8 +245,13 @@ def extract(
         vals = vals_da[
             ..., row_min : row_max + 1 : step_row, col_min : col_max + 1 : step_col
         ].values
-        # Squeeze out a trailing size-1 level dimension if doing 2D extraction from 3D dataset
-        if is_3d_dataset and not config.is_3d and vals.ndim == 3 and vals.shape[0] == 1:
+        # Squeeze out a trailing size-1 level when doing 2D extraction from a dataset that has height
+        if (
+            heights_da is not None
+            and not config.is_3d
+            and vals.ndim == 3
+            and vals.shape[0] == 1
+        ):
             vals = vals.squeeze(axis=0)
     vals = vals.astype(float)
 
@@ -238,6 +261,23 @@ def extract(
     if is_point_list:
         lons = lons_vals_in[point_indices]
         lats = lats_vals_in[point_indices]
+    elif is_3d_grid and not is_regular_grid:
+        # Crop the full 3D coordinate arrays along spatial axes; keep all heights
+        lons = lons_vals_in[
+            :,
+            row_min : row_max + 1 : step_row,
+            col_min : col_max + 1 : step_col,
+        ]
+        lats = lats_vals_in[
+            :,
+            row_min : row_max + 1 : step_row,
+            col_min : col_max + 1 : step_col,
+        ]
+        heights = heights_da.values[
+            :,
+            row_min : row_max + 1 : step_row,
+            col_min : col_max + 1 : step_col,
+        ]
     elif is_regular_grid:
         lons_1d = lons_vals_in[col_min : col_max + 1 : step_col]
         lats_1d = lats_vals_in[row_min : row_max + 1 : step_row]
@@ -273,9 +313,15 @@ def extract(
                 bounding_box.lat_max if bounding_box.lat_max is not None else np.inf
             )
             mask_cropped &= (lats >= bb_lat_min) & (lats <= bb_lat_max)
+        if is_3d_grid and not is_regular_grid and has_bb_z and heights is not None:
+            mask_cropped &= bbox.apply_z_bounding_box(heights, bounding_box)
 
         if format != "mesh":
             vals[~mask_cropped] = np.nan
+    elif is_3d_grid and not is_regular_grid and has_bb_z and heights is not None:
+        # No spatial bbox but a Z bbox is present
+        mask_cropped = bbox.apply_z_bounding_box(heights, bounding_box)
+        vals[~mask_cropped] = np.nan
     else:
         mask_cropped = None
 
@@ -301,7 +347,12 @@ def extract(
     if mesh_tile_shape is not None:
         step_logger.step_start("Generate meshgrid")
         target_h, target_w = mesh_tile_shape
-        target_d = levels_1d.shape[0] if (config.is_3d and levels_1d is not None) else 1
+        if is_3d_grid and is_regular_grid and levels_1d is not None:
+            target_d = levels_1d.shape[0]
+        elif is_3d_grid and not is_regular_grid and heights is not None:
+            target_d = heights.shape[0]
+        else:
+            target_d = 1
         lons, lats, heights, vals, mask_cropped = (
             interpolation.generate_meshgrid_and_interpolate(
                 lons,
@@ -323,6 +374,27 @@ def extract(
             )
         )
 
+    # Crop irregular grids to the bounding box after interpolation to avoid returning huge arrays with mostly NaNs when a tight bbox is applied on a sparse grid (e.g. Z-bounding box on an irregular grid with few vertical levels)
+    if not is_regular_grid and mask_cropped is not None:
+        # As vals can have been squeezed to 2D if height was only a single level
+        # we need to do the same with lons and lats
+        lons = lons.squeeze()
+        lats = lats.squeeze()
+        vals = vals.squeeze()
+        mask_cropped = mask_cropped.squeeze()
+
+        lons_cropped = lons[mask_cropped]
+        lats_cropped = lats[mask_cropped]
+        heights_cropped = heights[mask_cropped] if heights is not None else None
+        vals_cropped = vals[mask_cropped]
+    else:
+        lons_cropped, lats_cropped, heights_cropped, vals_cropped = (
+            lons,
+            lats,
+            heights,
+            vals,
+        )
+
     if format == "mesh":
         step_logger.step_start("Prepare output (mesh)")
         out = output.prepare_mesh_output(
@@ -332,21 +404,22 @@ def extract(
         step_logger.step_start("Prepare output (raw)")
         out = output.prepare_raw_output(
             [variable],
-            [vals],
-            lons,
-            lats,
-            zs=heights,
+            [vals_cropped],
+            lons_cropped,
+            lats_cropped,
+            zs=heights_cropped,
             global_props={"resolution_factor": {"row": step_row, "col": step_col}},
             var_props={variable: dataset[variable].attrs},
         )
     elif format == "geojson":
         step_logger.step_start("Prepare output (GeoJSON)")
+
         out = output.prepare_geojson_output(
             [variable],
-            [vals],
-            lons,
-            lats,
-            zs=heights,
+            [vals_cropped],
+            lons_cropped,
+            lats_cropped,
+            zs=heights_cropped,
             collection_props={"resolution_factor": {"row": step_row, "col": step_col}},
             var_props={variable: dataset[variable].attrs},
         )
@@ -455,8 +528,11 @@ def probe(
             )
             target_pt = np.array([lon, lat])
 
-        step_logger.step_start("Build spatial index for probe")
-        tree = cKDTree(points)
+        step_logger.step_start("Build or retrieve spatial index for probe")
+        coord_vars = (
+            (lon_var, lat_var, height_var) if with_height else (lon_var, lat_var)
+        )
+        tree = get_cached_ckdtree(points, dataset_id=dataset_id, coord_vars=coord_vars)
 
         if interp_spatial_method != "nearest":
             step_logger.step_start("Probe interpolation (IDW)")

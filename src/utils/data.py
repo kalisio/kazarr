@@ -96,7 +96,7 @@ def get_required_dims_and_coords(
                 missing_dims[dim] = assigned_coords
     if missing_dims:
         raise exceptions.MissingDimensionsOrCoordinates(missing_dims)
-    
+
     # Convert coords_keep_dims coordinates to list if they are in fixed_coords, so that they are not squeezed during selection
     # This allows to keep the dimension of these coordinates even if only one value is selected
     # example: longitude or latitude value is fixed for an extract => we want to keep the longitude and latitude dimensions in the output, even if only one value is selected for each of them
@@ -180,7 +180,9 @@ def sel(
             "Data selection failed due to an index error. Please check your query parameters and dataset configuration."
         )
     except Exception:
-        raise exceptions.GenericInternalError("Data selection failed. Please check your query parameters and dataset configuration.")
+        raise exceptions.GenericInternalError(
+            "Data selection failed. Please check your query parameters and dataset configuration."
+        )
     # Interpolate if needed
     if len(interp_vars) > 0:
         interpolated_vars = {
@@ -243,7 +245,9 @@ def dgets(d, keys, default=None):
 
 def get_dataset_height_vars(dataset, config):
     height_var = dget(config, "variables.height")
-    if height_var is not None and (height_var.startswith("ATTRS.") or height_var.startswith("ATTRIBUTES.")):
+    if height_var is not None and (
+        height_var.startswith("ATTRS.") or height_var.startswith("ATTRIBUTES.")
+    ):
         height_var_name = height_var.replace("ATTRS.", "").replace("ATTRIBUTES.", "")
         height_vars = {}
         for var in dataset.data_vars:
@@ -263,8 +267,12 @@ def get_dataset_height_vars(dataset, config):
 
 def get_height_var(dataset, config, variable):
     height_var = dget(config, "variables.height")
-    if height_var is not None and (height_var.startswith("ATTRS.") or height_var.startswith("ATTRIBUTES.")):
-        height_var = dataset[variable].attrs.get(height_var.replace("ATTRS.", "").replace("ATTRIBUTES.", ""), None)
+    if height_var is not None and (
+        height_var.startswith("ATTRS.") or height_var.startswith("ATTRIBUTES.")
+    ):
+        height_var = dataset[variable].attrs.get(
+            height_var.replace("ATTRS.", "").replace("ATTRIBUTES.", ""), None
+        )
     return height_var
 
 

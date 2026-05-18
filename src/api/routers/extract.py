@@ -23,6 +23,10 @@ async def extract_data(
     resolution_limit: float | None = Query(
         None, description="The resolution limit for data extraction"
     ),
+    is_3d: bool = Query(
+        False,
+        description="If True, performs a full 3D volume extraction. If False (default) and the dataset is 3D, a vertical coordinate must be provided.",
+    ),
 ):
     interp_vars_params = base.interp_vars_params
     if interp_vars_params is not None and ":" in interp_vars_params:
@@ -44,7 +48,7 @@ async def extract_data(
             bbox.z_min,
             bbox.z_max,
         ),
-        "is_3d": base.is_3d,
+        "is_3d": is_3d,
         "as_dims": base.as_dims,
         "resolution_limit": resolution_limit,
         "mesh": {

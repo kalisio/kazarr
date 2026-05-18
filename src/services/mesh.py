@@ -8,6 +8,7 @@ from src.utils.file import load_dataset
 from src.utils.logging import StepLoggerAndAborter
 from src.processing.interpolation import extrapolate_edges_from_cell_data
 from src.processing.contexts import BBoxContext
+from src.processing.bbox import apply_levels_bounding_box, apply_z_bounding_box
 
 from typing import Any, Dict, Union, Optional
 import threading
@@ -32,9 +33,7 @@ def get_mesh(
     step_logger.step_start("Load dataset and config")
     dataset, dataset_config = load_dataset(dataset_id)
 
-    lon_var, lat_var= dgets(
-        dataset_config, ["variables.lon", "variables.lat"]
-    )
+    lon_var, lat_var = dgets(dataset_config, ["variables.lon", "variables.lat"])
     missing_vars = []
     if lon_var not in dataset:
         missing_vars.append(f"lon ({lon_var})")
@@ -54,7 +53,7 @@ def get_mesh(
             height_var = config.height_variable
     if len(missing_vars) > 0:
         raise exceptions.BadConfigurationVariable(missing_vars)
-    
+
     if height_var is None and config.is_3d:
         raise exceptions.CantFindHeightVariable()
 
@@ -66,23 +65,26 @@ def get_mesh(
         if height_var is not None and height_var in dataset
         else None
     )
-    is_3d_dataset = heights_da is not None and heights_da.ndim == 1
 
+    is_3d_grid = config.is_3d and heights_da is not None
     is_regular_grid = lons.ndim == 1 and lats.ndim == 1 and lons.dims != lats.dims
     is_point_list = lons.ndim == 1 and lats.ndim == 1 and lons.dims == lats.dims
 
     levels_1d = None
-    if is_3d_dataset and config.is_3d and is_regular_grid:
+    if is_3d_grid and is_regular_grid:
+        # Regular 3D: height is a 1-D coordinate vector
         levels_1d = heights_da.values
         if bounding_box.has_bb_z:
-            bb_z_min = bounding_box.z_min if bounding_box.z_min is not None else -np.inf
-            bb_z_max = bounding_box.z_max if bounding_box.z_max is not None else np.inf
-            z_mask = (levels_1d >= bb_z_min) & (levels_1d <= bb_z_max)
-            if not np.any(z_mask):
-                raise exceptions.NoDataInSelection()
-            levels_1d = levels_1d[z_mask]
+            _, _, levels_1d = apply_levels_bounding_box(levels_1d, bounding_box)
 
-    if is_regular_grid:
+    if is_3d_grid and not is_regular_grid:
+        # Irregular 3D: lat/lon/height are all (DimK, DimJ, DimI).
+        lons_points = lons.values
+        lats_points = lats.values
+        height_points = heights_da.values
+        if bounding_box.has_bb_z:
+            apply_z_bounding_box(height_points, bounding_box)
+    elif is_regular_grid:
         lons_vals = lons.values
         lats_vals = lats.values
         if config.is_3d and levels_1d is not None:
@@ -95,7 +97,8 @@ def get_mesh(
     else:
         lons_points = lons.values
         lats_points = lats.values
-        if is_3d_dataset and heights_da is not None:
+        # Use heights_da only when it is a 1-D vector (regular 3D in 2D slice, point list)
+        if heights_da is not None and heights_da.ndim == 1:
             height_points = heights_da.values
         else:
             height_points = np.zeros_like(lons_points)
@@ -110,7 +113,7 @@ def get_mesh(
         lons_points, lats_points, height_points = extrapolate_edges_from_cell_data(
             lons_points,
             lats_points,
-            height_points if (is_3d_dataset and config.is_3d) else None,
+            height_points if is_3d_grid else None,
             "radial" if mesh_type == "radial" else "rectilinear",
         )
 

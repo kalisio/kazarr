@@ -112,19 +112,10 @@ def apply_unstructured_bounding_box(
             mask &= (lats_vals >= bb_lat_min) & (lats_vals <= bb_lat_max)
 
         if not np.any(mask):
-            center_lon = (bb_lon_min + bb_lon_max) / 2.0
-            center_lat = (bb_lat_min + bb_lat_max) / 2.0
-            dist = (lons_vals - center_lon) ** 2 + (lats_vals - center_lat) ** 2
-            nearest_idx = np.argmin(dist)
-            indices = np.unravel_index(nearest_idx, lons_vals.shape)
-            nearest_row, nearest_col = indices[-2], indices[-1]
-            fallback_pad = max(pad, 1)
-            row_min = max(0, nearest_row - fallback_pad)
-            row_max = min(lons_vals.shape[-2] - 1, nearest_row + fallback_pad)
-            col_min = max(0, nearest_col - fallback_pad)
-            col_max = min(lons_vals.shape[1] - 1, nearest_col + fallback_pad)
+            raise exceptions.NoDataInSelection()
         else:
-            rows, cols = np.where(mask)
+            where_indices = np.where(mask)
+            rows, cols = where_indices[-2], where_indices[-1]
             row_min, row_max = rows.min(), rows.max()
             col_min, col_max = cols.min(), cols.max()
     else:
@@ -158,3 +149,25 @@ def apply_resolution_limit(
             if width_raw > resolution_limit:
                 step_col = math.ceil(width_raw / resolution_limit)
     return step_row, step_col
+
+
+def apply_levels_bounding_box(
+    levels_1d, bbox
+):
+    bb_z_min = bbox.z_min if bbox.z_min is not None else -np.inf
+    bb_z_max = bbox.z_max if bbox.z_max is not None else np.inf
+    z_mask = (levels_1d >= bb_z_min) & (levels_1d <= bb_z_max)
+    if not np.any(z_mask):
+        raise exceptions.NoDataInSelection()
+    z_indices = np.where(z_mask)[0]
+    level_min, level_max = int(z_indices[0]), int(z_indices[-1])
+    return level_min, level_max, levels_1d[level_min : level_max + 1]
+
+
+def apply_z_bounding_box(heights, bbox):
+    bb_z_min = bbox.z_min if bbox.z_min is not None else -np.inf
+    bb_z_max = bbox.z_max if bbox.z_max is not None else np.inf
+    z_mask = (heights >= bb_z_min) & (heights <= bb_z_max)
+    if not np.any(z_mask):
+        raise exceptions.NoDataInSelection()
+    return z_mask

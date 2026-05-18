@@ -10,13 +10,32 @@ def prepare_mesh_output(
 ):
     if zs is None:
         zs = np.zeros_like(lons)
-    grid = pv.StructuredGrid(lons, lats, zs)
-    grid.point_data[variable] = vals.ravel(order="F")
-    valid_mask = np.ones_like(grid.point_data[variable])
+
+    lons_flat = np.ravel(lons, order="C")
+    lats_flat = np.ravel(lats, order="C")
+    zs_flat = np.ravel(zs, order="C")
+    vals_flat = np.ravel(vals, order="C")
+
+    # Create an empty structured grid and assign geometry manually
+    grid = pv.StructuredGrid()
+    grid.points = np.column_stack((lons_flat, lats_flat, zs_flat))
+
+    if lons.ndim == 2:
+        grid.dimensions = [lons.shape[1], lons.shape[0], 1]
+    elif lons.ndim == 3:
+        grid.dimensions = [lons.shape[2], lons.shape[1], lons.shape[0]]
+    else:
+        grid.dimensions = [lons.shape[0], 1, 1]
+
+    grid.point_data[variable] = vals_flat
+
+    valid_mask = np.ones_like(vals_flat)
     if mask_cropped is not None:
-        valid_mask *= mask_cropped.ravel(order="F").astype(float)
-    valid_mask[np.isnan(grid.point_data[variable])] = 0.0
+        valid_mask *= np.ravel(mask_cropped, order="C").astype(float)
+
+    valid_mask[np.isnan(vals_flat)] = 0.0
     grid.point_data["valid_mask"] = valid_mask
+
     try:
         thresholded = grid.threshold(0.5, scalars="valid_mask")
     except Exception as e:
@@ -30,15 +49,18 @@ def prepare_mesh_output(
 
     vertices = tri_grid.points.flatten()
     cells = tri_grid.cells
+
     if tri_grid.n_cells > 0:
         cell_size = cells[0]
         indices = cells.reshape((-1, cell_size + 1))[:, 1:].flatten()
     else:
         indices = np.array([], dtype=int)
+
     values = tri_grid.point_data[variable]
 
     clean_values = [float(v) if np.isfinite(v) else None for v in values]
     valid_numbers = values[np.isfinite(values)]
+
     if valid_numbers.size == 0:
         val_min, val_max = None, None
     else:
