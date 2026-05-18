@@ -21,6 +21,12 @@ Check for service's health, return a json object with a single member `status`.
 
 Return a list of all available Zarr datasets with their id and description.
 
+The `datasets` endpoint accepts the following query parameters:
+
+| Name          | Description                                                             | Optional | Default |
+| ------------- | ----------------------------------------------------------------------- | :------: | ------- |
+| `search_path` | Path to search for datasets. Paths are always returned from root folder |    ✓     |         |
+
 #### /datasets/{dataset}/metadata (GET)
 
 Return metadata (dimensions, variables, attributes) for a specific Zarr dataset.
@@ -35,25 +41,28 @@ Extracts a subset of the data based on a bounding box and a specific variable.
 
 The `extract` endpoint accepts the following query parameters:
 
-| Name                    | Description                                                                                                                                    | Optional | Default        |
-| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | :------: | -------------- |
-| `variable`              | The variable to extract.                                                                                                                       |    ✗     |                |
-| `lon_min`               | Minimum longitude of the bounding box.                                                                                                         |    ✓     | `None`         |
-| `lat_min`               | Minimum latitude of the bounding box.                                                                                                          |    ✓     | `None`         |
-| `lon_max`               | Maximum longitude of the bounding box.                                                                                                         |    ✓     | `None`         |
-| `lat_max`               | Maximum latitude of the bounding box.                                                                                                          |    ✓     | `None`         |
-| `time`                  | The time value/slice to extract.                                                                                                               |    ✓     | `None`         |
-| `resolution_limit`      | Limit the amount of data for lat/lon axis (decimate)                                                                                           |    ✓     | `None`         |
-| `format`                | Format of the extracted data (Supported: `raw`, `geojson`, `mesh`).                                                                            |    ✓     | `raw`          |
-| `mesh_tile_size`        | When `format=mesh`, resample data with a grid of `mesh_tile_size`x`mesh_tile_size`                                                             |    ✓     | `None`         |
-| `mesh_data_mapping`     | Whether the data of the mesh is on cells or on vertices. This will override the dataset configuration. (Supported values: 'vertices', 'cells') |    ✓     | `vertices`     |
-| `interp_vars`           | Variables to interpolate during extraction                                                                                                     |    ✓     | `[]`           |
-| `interp_vars_method`    | Method for variable/time interpolation (e.g. `linear`, `cubic`, ...)                                                                           |    ✓     | `nearest`      |
-| `interp_vars_params`    | Parameters for variable interpolation (e.g. `method:linear`)                                                                                   |    ✓     | `None`         |
-| `interp_time`           | Whether to interpolate values on time dimension or to get the closest time step. Shortcut to `interp_vars=YOUR_TIME_DIMENSION`                 |    ✓     | `False`        |
-| `interp_spatial_method` | The method to use for spatial interpolation. (Supported: `nearest`, `linear`, `cubic`, `idw`, `rbf`)                                           |    ✓     | `nearest`      |
-| `interp_spatial_params` | Parameters for spatial interpolation (e.g. `padding:1.0`)                                                                                      |    ✓     | `padding:1.0`  |
-| `as_dims`               | If a variable has the same name as a dim, force query parameters in this list to be treated as dimensions                                      |    ✓     | `[]`           |
+| Name                    | Description                                                                                                                                    | Optional | Default       |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | :------: | ------------- |
+| `variable`              | The variable to extract.                                                                                                                       |    ✗     |               |
+| `lon_min`               | Minimum longitude of the bounding box.                                                                                                         |    ✓     | `None`        |
+| `lat_min`               | Minimum latitude of the bounding box.                                                                                                          |    ✓     | `None`        |
+| `lon_max`               | Maximum longitude of the bounding box.                                                                                                         |    ✓     | `None`        |
+| `lat_max`               | Maximum latitude of the bounding box.                                                                                                          |    ✓     | `None`        |
+| `time`                  | The time value/slice to extract.                                                                                                               |    ✓     | `None`        |
+| `resolution_limit`      | Limit the amount of data for lat/lon axis (decimate)                                                                                           |    ✓     | `None`        |
+| `format`                | Format of the extracted data (Supported: `raw`, `geojson`, `mesh`).                                                                            |    ✓     | `raw`         |
+| `mesh_tile_size`        | When `format=mesh`, resample data with a grid of `mesh_tile_size`x`mesh_tile_size`                                                             |    ✓     | `None`        |
+| `mesh_data_mapping`     | Whether the data of the mesh is on cells or on vertices. This will override the dataset configuration. (Supported values: 'vertices', 'cells') |    ✓     | `vertices`    |
+| `is_3d`                 | If True, performs a full 3D volume extraction. If False and the dataset is 3D, a vertical coordinate must be provided.                         |    ✓     | `False`       |
+| `z_min`                 | Minimum vertical coordinate (altitude/depth) of the bounding box                                                                               |    ✓     | `None`        |
+| `z_max`                 | Maximum vertical coordinate (altitude/depth) of the bounding box                                                                               |    ✓     | `None`        |
+| `interp_vars`           | Variables to interpolate during extraction                                                                                                     |    ✓     | `[]`          |
+| `interp_vars_method`    | Method for variable/time interpolation (e.g. `linear`, `cubic`, ...)                                                                           |    ✓     | `nearest`     |
+| `interp_vars_params`    | Parameters for variable interpolation (e.g. `method:linear`)                                                                                   |    ✓     | `None`        |
+| `interp_time`           | Whether to interpolate values on time dimension or to get the closest time step. Shortcut to `interp_vars=YOUR_TIME_DIMENSION`                 |    ✓     | `False`       |
+| `interp_spatial_method` | The method to use for spatial interpolation. (Supported: `nearest`, `linear`, `cubic`, `idw`, `rbf`)                                           |    ✓     | `nearest`     |
+| `interp_spatial_params` | Parameters for spatial interpolation (e.g. `padding:1.0`)                                                                                      |    ✓     | `padding:1.0` |
+| `as_dims`               | If a variable has the same name as a dim, force query parameters in this list to be treated as dimensions                                      |    ✓     | `[]`          |
 
 > [!IMPORTANT]
 > You may need to specify additional non-generic variables or dimensions according to your dataset. To do so, you can add query parameters with `&my_additional_variable={VALUE}`
@@ -76,6 +85,7 @@ The `probe` endpoint accepts the following query parameters:
 | `interp_spatial_params` | Parameters for spatial interpolation (e.g. `padding:1.0`)                                                 |    ✓     | `padding:1.0` |
 | `interp_vars`           | Variables to interpolate during probe                                                                     |    ✓     | `[]`          |
 | `interp_vars_method`    | Method for variable/time interpolation                                                                    |    ✓     | `nearest`     |
+| `format`                | Format of the extracted data (Supported: `raw`, `geojson`).                                               |    ✓     | `raw`         |
 | `as_dims`               | If a variable has the same name as a dim, force query parameters in this list to be treated as dimensions |    ✓     | `[]`          |
 
 > [!IMPORTANT]
@@ -84,21 +94,45 @@ The `probe` endpoint accepts the following query parameters:
 > [!TIP]
 > You can request multiple variables at once by repeating the `variables` parameter in the query string (e.g., `?variables=temp&variables=wind`).
 
+### /datasets/{dataset}/probes (POST)
+
+Retrieves the values of specified variables at multiple geographical locations.
+
+The `probes` endpoint accepts the following query parameters:
+
+| Name                    | Description                                                                                               | Optional | Default       |
+| ----------------------- | --------------------------------------------------------------------------------------------------------- | :------: | ------------- |
+| `variables`             | The list of variables to probe.                                                                           |    ✗     |               |
+| `time`                  | The time value/slice to probe.                                                                            |    ✓     | `None`        |
+| `interp_time`           | Whether to interpolate values on time dimension                                                           |    ✓     | `False`       |
+| `interp_spatial_method` | The method to use for spatial interpolation. (Supported: `nearest`, `linear`, `cubic`, `idw`, `rbf`)      |    ✓     | `nearest`     |
+| `interp_spatial_params` | Parameters for spatial interpolation (e.g. `padding:1.0`)                                                 |    ✓     | `padding:1.0` |
+| `interp_vars`           | Variables to interpolate during probe                                                                     |    ✓     | `[]`          |
+| `interp_vars_method`    | Method for variable/time interpolation                                                                    |    ✓     | `nearest`     |
+| `format`                | Format of the extracted data (Supported: `raw`, `geojson`).                                               |    ✓     | `raw`         |
+| `as_dims`               | If a variable has the same name as a dim, force query parameters in this list to be treated as dimensions |    ✓     | `[]`          |
+
+The `probes` endpoint accepts the following body structure:
+
+`{ "points": [{"lat": {"lon": 5.35964198232827, "lat": 45.01486461788593, "height": 100.0}, {"lon": 7.79425497419718, "lat": 48.45134263206789, "height": 50.0}}, ...] }`
+
+For each point, the `height` property is optional.
+
 ### /datasets/{dataset}/isoline (GET)
 
 Computes isolines (contour lines) for a given variable and specific levels.
 
 The `isoline` endpoint accepts the following query parameters:
 
-| Name                 | Description                                                                                               | Optional | Default    |
-| -------------------- | --------------------------------------------------------------------------------------------------------- | :------: | ---------- |
-| `variable`           | The variable to generate isolines for.                                                                    |    ✗     |            |
-| `levels`             | Comma-separated list of levels for isoline generation.                                                    |    ✗     |            |
-| `time`               | The time value to use for isoline generation.                                                             |    ✓     | `None`     |
-| `format`             | Format of the extracted data (Supported: `raw`, `geojson`). Ignored when `mesh_tile_size` is defined      |    ✓     | `raw`      |
-| `interp_time`        | Whether to interpolate values on time dimension                                                           |    ✓     | `False`    |
-| `interp_vars_method` | Method for variable/time interpolation                                                                    |    ✓     | `nearest`  |
-| `as_dims`            | If a variable has the same name as a dim, force query parameters in this list to be treated as dimensions |    ✓     | `[]`       |
+| Name                 | Description                                                                                               | Optional | Default   |
+| -------------------- | --------------------------------------------------------------------------------------------------------- | :------: | --------- |
+| `variable`           | The variable to generate isolines for.                                                                    |    ✗     |           |
+| `levels`             | Comma-separated list of levels for isoline generation.                                                    |    ✗     |           |
+| `time`               | The time value to use for isoline generation.                                                             |    ✓     | `None`    |
+| `format`             | Format of the extracted data (Supported: `raw`, `geojson`). Ignored when `mesh_tile_size` is defined      |    ✓     | `raw`     |
+| `interp_time`        | Whether to interpolate values on time dimension                                                           |    ✓     | `False`   |
+| `interp_vars_method` | Method for variable/time interpolation                                                                    |    ✓     | `nearest` |
+| `as_dims`            | If a variable has the same name as a dim, force query parameters in this list to be treated as dimensions |    ✓     | `[]`      |
 
 > [!IMPORTANT]
 > You may need to specify additional non-generic variables or dimensions according to your dataset. To do so, you can add query parameters with `&my_additional_variable={VALUE}`
@@ -120,10 +154,13 @@ The `select` endpoint accepts the following query parameters:
 Get only the support mesh of the dataset
 
 The `mesh` endpoint accepts the following query parameters:
-| Name                | Description                                                                                                                                    | Optional | Default    |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | :------: | ---------- |
-| `format`            | The format of the extracted data (Currently supported: 'mesh', 'geojson'. Default to `mesh`)                                                   |    ✓     | `mesh`     |
-| `mesh_data_mapping` | Whether the data of the mesh is on cells or on vertices. This will override the dataset configuration. (Supported values: 'vertices', 'cells') |    ✓     | `vertices` |
+| Name                | Description                                                                                                                                                                                             | Optional | Default    |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :------: | ---------- |
+| `format`            | The format of the extracted data (Currently supported: 'mesh', 'geojson'. Default to `mesh`)                                                                                                            |    ✓     | `mesh`     |
+| `mesh_data_mapping` | Whether the data of the mesh is on cells or on vertices. This will override the dataset configuration. (Supported values: 'vertices', 'cells')                                                          |    ✓     | `vertices` |
+| `is_3d`             | If True, generates a 3D volumetric mesh using the vertical coordinate defined in the dataset configuration if the dataset use a unique one, otherwise, see 'variable' and 'height_variable' parameters. | `False`  |
+| `variable`          | The variable to base the mesh geometry on. Not mandatory if the dataset use a unique vertical coordinate.                                                                                               |  `None`  |
+| `height_variable`   | The variable to use as height coordinate for the mesh geometry. This will override the dataset configuration and the 'variable' parameter.                                                              |  `None`  |
 
 ## Interpolation Overview
 
@@ -156,7 +193,7 @@ For the `extract` and `probe` endpoints, you can pass interpolation options usin
 ### Environment variables
 
 | Variable              | Description                                                                                               | Default value |
-|-----------------------|-----------------------------------------------------------------------------------------------------------|---------------|
+| --------------------- | --------------------------------------------------------------------------------------------------------- | ------------- |
 | PORT                  | The port to be used when exposing the service                                                             | 8000          |
 | HOSTNAME              | The hostname to be used when exposing the service                                                         | localhost     |
 | AWS_ACCESS_KEY_ID     | Access key ID of the S3 in which zarr data is stored                                                      |               |
@@ -167,6 +204,7 @@ For the `extract` and `probe` endpoints, you can pass interpolation options usin
 | DATASETS_PATH         | Path to the JSON file containing datasets description                                                     | datasets.json |
 | CACHE_DIR             | Path to the directory where cache will be stored. Cache will not be used if this variable is not provided |               |
 | CACHE_SIZE            | Max size of cache folder (e.g. 1024KB, 512MB, 4GB)                                                        | 512MB         |
+| KDTREE_MAX_CACHE_SIZE | Max number of cKDTree cached                                                                              | 10            |
 
 > [!IMPORTANT]
 > With some S3 provider, some errors about checksum calculation can occur (error: `botocore.exceptions.ClientError: An error occurred (InvalidArgument) when calling the PutObject operation: x-amz-content-sha256 must be UNSIGNED-PAYLOAD, or a valid sha256 value.`). In that case, you should set `AWS_REQUEST_CHECKSUM_CALCULATION` environment variable to `when_required`

@@ -48,12 +48,11 @@ The tool is a command-line interface with the following subcommands.
 Create a new zarr dataset from an input source.
 
 ```bash
-conversion_tool new-dataset [OPTIONS] DATASET_NAME INPUT_PATH
+conversion_tool new-dataset [OPTIONS] INPUT_PATH
 ```
 
 **Arguments:**
 
-*   `DATASET_NAME`: Name of the new dataset.
 *   `INPUT_PATH`: Path of the input file or folder used for generating this new dataset (local or `s3://`).
 
 **Options:**
@@ -251,14 +250,14 @@ If your dataset uses a time dimension with an offset from a reference date (e.g.
 
 **Parameters:**
 
-| Name                         | Type    | Description                                                                                                       |
-| ---------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------- |
-| `referenceTime.variable`     | String  | Name of the variable containing the reference time string                                                         |
-| `referenceTime.format`       | String  | Format string of the reference time (e.g. "%Y-%m-%d %H:%M:%S")                                                     |
-| `referenceTime.delta_unit`   | String  | Unit of the offset values (e.g., 'h', 'D'). Optional if it can be deduced from unit attribute                     |
-| `variables.time`             | String  | Name of the variable containing the time offsets                                                                  |
-| `dimensions.time`            | String  | Name of the dimension associated with time (Optional, deduced if possible)                                        |
-| `updateTimeVar`              | Boolean | If true (default), replaces the `variables.time` variable with the computed datetimes                             |
+| Name                       | Type    | Description                                                                                   |
+| -------------------------- | ------- | --------------------------------------------------------------------------------------------- |
+| `referenceTime.variable`   | String  | Name of the variable containing the reference time string                                     |
+| `referenceTime.format`     | String  | Format string of the reference time (e.g. "%Y-%m-%d %H:%M:%S", or "timestamp")                |
+| `referenceTime.delta_unit` | String  | Unit of the offset values (e.g., 'h', 'D'). Optional if it can be deduced from unit attribute |
+| `variables.time`           | String  | Name of the variable containing the time offsets                                              |
+| `dimensions.time`          | String  | Name of the dimension associated with time (Optional, deduced if possible)                    |
+| `updateTimeVar`            | Boolean | If true (default), replaces the `variables.time` variable with the computed datetimes         |
 
 
 ### `reproject_coordinates`
