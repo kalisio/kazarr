@@ -115,17 +115,23 @@ class TestRadialGrid:
 
     def test_extract_tile(self, client: TestClient):
         """Bounding box extraction on radial grid returns points inside the box."""
-        # Use a bounding box known to overlap the radial grid sample data
+        bbox = "lon_min=5.1&lon_max=5.4&lat_min=45.63&lat_max=45.9"
+        response = client.get(
+            f"/datasets/{DATASET_NAME}/extract?variable=WindSpeed&time=2026-01-01&{bbox}"
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "WindSpeed" in data["variables"]
+
+    def test_extract_tile_out_of_bbox(self, client: TestClient):
+        """Bounding box extraction on radial grid outside of the dataset bounding box."""
         bbox = "lon_min=2.0&lon_max=4.0&lat_min=43.0&lat_max=44.0"
         response = client.get(
             f"/datasets/{DATASET_NAME}/extract?variable=WindSpeed&time=2026-01-01&{bbox}"
         )
 
-        # May return 400 if bbox is outside the radial grid extent — both are valid
-        assert response.status_code in (200, 400)
-        if response.status_code == 200:
-            data = response.json()
-            assert "data" in data
+        assert response.status_code == 400
 
     def test_extract_geojson(self, client: TestClient):
         """GeoJSON format returns a FeatureCollection."""

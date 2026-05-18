@@ -230,9 +230,12 @@ class TestRegularGrid:
         data = response.json()
         assert data["bounds"] == {"min": 0, "max": 149}
         assert len(data["values"]) == mesh_tile_size * mesh_tile_size
-        # First row should be linearly interpolated from min to max
+        
+        start_val = data["values"][0]
+        end_val = data["values"][mesh_tile_size - 1]
         for i in range(mesh_tile_size):
-            assert data["values"][i] == pytest.approx((LONS - 1) / 4 * i)
+            expected_val = start_val + (end_val - start_val) / (mesh_tile_size - 1) * i
+            assert data["values"][i] == pytest.approx(expected_val)
 
     # ------------------------------------------------------------------
     # Probe

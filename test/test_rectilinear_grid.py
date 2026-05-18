@@ -184,7 +184,6 @@ class TestRectilinearGrid:
 
         assert response.status_code == 200
         data = response.json()
-        # All non-null points must fall inside the bounding box
         for idx, value in enumerate(data["values"]["Precipitation"]):
             if value is not None:
                 lon = data["longitudes"][idx]
