@@ -1,0 +1,59 @@
+{
+  /*
+  Note: In the template, all the names referring to kazarr (process names, process parameters) can be provided with python_case or camelCase.
+  */
+  "templateName": { // The name of the template will be used in the --template parameter of the conversion tool.
+    "variables": {
+      /*
+      This section is used to specify the names of the variables in the input dataset that should be used for specific purposes.
+      As kazarr is designed to work with spatial data, lon and lat variables are required, but their names can be specified here.
+      lon, lat, height and time are the only keys currently supported.
+      */
+      "lon": "MyLongitudeVar",
+      "lat": "MyLatitudeVar",
+      "height": "MyHeightVar",
+      "time": "MyTimeVar"
+    },
+    "dimensions": {
+      "fixed": {
+        /*
+        In some cases, dimensions can be useless (e.g. a time dimension when there is only one time step).
+        You can specify in this section, the index you want to use for those fixed dimensions.
+        This will not remove the dimension from the dataset, but it will save you from having to specify this value when using kazarr API.
+        */
+        "MyDimensionWithAFixedValue": 0
+      }
+    },
+    "assignCoords": {
+      /*
+      This section is used as parameter of the assign_coords process. It allows to specify the coordinates to assign to the dataset, and their corresponding variables and dimensions.
+      */
+      // In some cases, you can have indexed variables that correspond to indexed dimensions. In this case, you can use the {n} syntax to specify the index of the variable and dimension.
+      // It will iterate over the values of n. If an index is not found, it will be ignored.
+      "MyIndexedVariable{n}": { "dim": "MyIndexedDim{n}", "variables": { "n": { "min": 0, "max": 8 } } },
+      // You can also specify non-indexed variables and dimensions.
+      "MyOtherVariable": "MyOtherDim"
+    },
+    "referenceTime": {
+      /*
+      This section is used as parameter of the delta_time_to_datetime process. See the documentation of this process for more details on the expected format of the reference time variable and the format string.
+      */
+      "variable": "MyTimeRefVar",
+      "format": "%d/%m/%Y %H:%M:%S"
+    },
+    "pipelines": {
+      "subPipelineName1": [ // A pipeline is a sequence of processes that can be executed in order. It can be called from another pipeline, which allows to reuse common processes.
+        { "type": "process", "name": "load_from_netcdf", "params": { "concatDim": "MyOtherDim" } }
+      ],
+      "mainPipelineName1": [
+        { "type": "pipeline", "name": "subPipelineName1" }, // You can call a pipeline from another pipeline, which allows to reuse common processes.
+        { "type": "process", "name": "rename_variables", "params": { "renameMap": { "MyOtherVariable": "MyVariableWithANewName" } } },
+        "delta_time_to_datetime", // This process does not provide specific parameters, so global parameters will be used (referenceTime in this case)
+        "assign_coords", // Same for this one, global parameters will be used (assignCoords in this case)
+        "unify_chunks", // This process does not require any parameters, but should be always be used before save
+        "save",
+        { "type": "process", "name": "clean", "params": { "used": false, "generated": true, "idx": true } }
+      ]
+    }
+  }
+}
