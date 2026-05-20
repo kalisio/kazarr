@@ -11,19 +11,18 @@ def prepare_mesh_output(
     if zs is None:
         zs = np.zeros_like(lons)
 
-    lons_flat = np.ravel(lons, order="C")
-    lats_flat = np.ravel(lats, order="C")
-    zs_flat = np.ravel(zs, order="C")
-    vals_flat = np.ravel(vals, order="C")
+    lons_flat = np.ravel(lons, order="F")
+    lats_flat = np.ravel(lats, order="F")
+    zs_flat = np.ravel(zs, order="F")
+    vals_flat = np.ravel(vals, order="F")
 
-    # Create an empty structured grid and assign geometry manually
     grid = pv.StructuredGrid()
     grid.points = np.column_stack((lons_flat, lats_flat, zs_flat))
 
     if lons.ndim == 2:
-        grid.dimensions = [lons.shape[1], lons.shape[0], 1]
+        grid.dimensions = [lons.shape[0], lons.shape[1], 1]
     elif lons.ndim == 3:
-        grid.dimensions = [lons.shape[2], lons.shape[1], lons.shape[0]]
+        grid.dimensions = [lons.shape[0], lons.shape[1], lons.shape[2]]
     else:
         grid.dimensions = [lons.shape[0], 1, 1]
 
@@ -31,7 +30,7 @@ def prepare_mesh_output(
 
     valid_mask = np.ones_like(vals_flat)
     if mask_cropped is not None:
-        valid_mask *= np.ravel(mask_cropped, order="C").astype(float)
+        valid_mask *= np.ravel(mask_cropped, order="F").astype(float)
 
     valid_mask[np.isnan(vals_flat)] = 0.0
     grid.point_data["valid_mask"] = valid_mask
