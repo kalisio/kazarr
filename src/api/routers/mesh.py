@@ -34,7 +34,7 @@ async def mesh(
     height_variable: str | None = Query(
         None,
         description="The variable to use as height coordinate for the mesh geometry. This will override the dataset configuration and the 'variable' parameter.",
-    )
+    ),
 ):
     config = {
         "is_3d": is_3d,

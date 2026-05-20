@@ -151,9 +151,7 @@ def apply_resolution_limit(
     return step_row, step_col
 
 
-def apply_levels_bounding_box(
-    levels_1d, bbox
-):
+def apply_levels_bounding_box(levels_1d, bbox):
     bb_z_min = bbox.z_min if bbox.z_min is not None else -np.inf
     bb_z_max = bbox.z_max if bbox.z_max is not None else np.inf
     z_mask = (levels_1d >= bb_z_min) & (levels_1d <= bb_z_max)

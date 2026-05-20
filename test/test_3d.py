@@ -272,7 +272,10 @@ class TestRegularGrid3D:
         assert "vertical_axis" in data
         assert "level" in data["vertical_axis"]
         assert data["vertical_axis"]["level"]["min"] == LEVEL_START
-        assert data["vertical_axis"]["level"]["max"] == LEVEL_START + (LEVELS - 1) * LEVEL_STEP
+        assert (
+            data["vertical_axis"]["level"]["max"]
+            == LEVEL_START + (LEVELS - 1) * LEVEL_STEP
+        )
 
 
 DATASET_NON_REGULAR = "dataset_3d_non_regular"
@@ -324,14 +327,14 @@ class TestNonRegularGrid3D:
                 "type": "load",
                 "sample": "3d_grid.nc",
                 "variable": "CoordX0",
-                "dimensions": ["DimK", "DimJ", "DimI"]
+                "dimensions": ["DimK", "DimJ", "DimI"],
             },
             "level": {
                 "type": "load",
                 "sample": "3d_grid.nc",
                 "variable": "CoordZ0",
-                "dimensions": ["DimK", "DimJ", "DimI"]
-            }
+                "dimensions": ["DimK", "DimJ", "DimI"],
+            },
         }
         dataset = utils.DatasetGenerator(description=description).generate()
         dataset.save(DATASET_NON_REGULAR, to_netcdf=True)
@@ -353,7 +356,12 @@ class TestNonRegularGrid3D:
                 },
                 "reprojection": {"fromCrs": "EPSG:32631", "toCrs": "EPSG:4326"},
                 "pipelines": {
-                    "preprocess": ["load_from_netcdf", "reproject_coordinates", "unify_chunks", "save"]
+                    "preprocess": [
+                        "load_from_netcdf",
+                        "reproject_coordinates",
+                        "unify_chunks",
+                        "save",
+                    ]
                 },
                 "version": 2,
             },
@@ -380,10 +388,12 @@ class TestNonRegularGrid3D:
 
     def test_extract_2d_missing_level_fails(self, client: TestClient):
         """Requesting 2D extraction (is_3d=false) without a level should fail."""
-        response = client.get(
+        client.get(
             f"/datasets/{DATASET_NON_REGULAR}/extract?variable=Value&time=2026-01-01"
         )
-        pytest.skip("With irregular grids, extract allow latitude and longitude coordinates not to be fixed, and so their dimensions are not fixed either. But, as height share the same dimensions as lat/lon, it is currently not possible to check if the level dimension is fixed or not. This test should be re-enabled once we have a better way to check if the level dimension is satisfied or not.")
+        pytest.skip(
+            "With irregular grids, extract allow latitude and longitude coordinates not to be fixed, and so their dimensions are not fixed either. But, as height share the same dimensions as lat/lon, it is currently not possible to check if the level dimension is fixed or not. This test should be re-enabled once we have a better way to check if the level dimension is satisfied or not."
+        )
 
     # ------------------------------------------------------------------
     # Extract — full 3D volume
@@ -415,7 +425,7 @@ class TestNonRegularGrid3D:
 
     def test_extract_3d_z_bbox(self, client: TestClient):
         """3D extraction with z_min/z_max returns only levels inside the range."""
-        z = 100 # only one level
+        z = 100  # only one level
 
         response = client.get(
             f"/datasets/{DATASET_NON_REGULAR}/extract"
@@ -711,7 +721,10 @@ class TestDataset3DMultiLevel:
         assert "vertical_axis" in data
         assert "isobaricInhPa" in data["vertical_axis"]
         assert data["vertical_axis"]["isobaricInhPa"]["min"] == 100.0
-        assert data["vertical_axis"]["isobaricInhPa"]["max"] == 100.0 + (LEVELS - 1) * 100.0
+        assert (
+            data["vertical_axis"]["isobaricInhPa"]["max"]
+            == 100.0 + (LEVELS - 1) * 100.0
+        )
         assert "heightAboveGround" in data["vertical_axis"]
         assert data["vertical_axis"]["heightAboveGround"]["min"] == 2.0
         assert data["vertical_axis"]["heightAboveGround"]["max"] == 2.0 + 8.0

@@ -128,7 +128,9 @@ class TestRectilinearGrid:
 
         assert response.status_code == 200
         data = response.json()
-        assert len(data["latitudes"]) == LONS * 1 # DimJ is fixed, so only 1 value per latitude
+        assert (
+            len(data["latitudes"]) == LONS * 1
+        )  # DimJ is fixed, so only 1 value per latitude
         assert len(data["longitudes"]) == LONS * 1
         assert len(data["values"]["Precipitation"]) == LONS * 1
 

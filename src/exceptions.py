@@ -40,7 +40,7 @@ class MissingQueryParameter(UserInputBasedException):
             parameter_names = [parameter_names]
         if len(parameter_names) == 0:
             parameter_names = ["UNKNOWN"]
-        
+
         if len(parameter_names) == 1:
             message = f"Missing required query parameter: '{parameter_names[0]}'."
         else:
@@ -60,7 +60,7 @@ class BadConfigurationVariable(ConfigurationBasedException):
             variable_name = [variable_name]
         if len(variable_name) == 0:
             variable_name = ["UNKNOWN"]
-        
+
         if len(variable_name) == 1:
             message = f"Variable '{variable_name[0]}' not found in configuration or in dataset."
         if isinstance(variable_name, list) and len(variable_name) > 1:
@@ -87,7 +87,7 @@ class VariableNotFound(UserInputBasedException):
             variable_name = [variable_name]
         if len(variable_name) == 0:
             variable_name = ["UNKNOWN"]
-        
+
         if len(variable_name) == 1:
             message = f"Variable '{variable_name[0]}' not found in dataset."
         if isinstance(variable_name, list) and len(variable_name) > 1:
@@ -146,15 +146,11 @@ class RequestCancelled(Exception):
 
 class DifferentTypesOfLevel(UserInputBasedException):
     def __init__(self):
-        message = (
-            "Not all variables uses the same type of level."
-        )
+        message = "Not all variables uses the same type of level."
         super().__init__("DIFFERENT_TYPES_OF_LEVEL", message)
 
 
 class CantFindHeightVariable(UserInputBasedException):
     def __init__(self):
-        message = (
-            "Unable to determine height variable for 3D mesh generation."
-        )
+        message = "Unable to determine height variable for 3D mesh generation."
         super().__init__("CANT_FIND_HEIGHT_VARIABLE", message)

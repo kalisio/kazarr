@@ -35,6 +35,7 @@ class ExtractionConfig(BaseModel):
     mesh: MeshConfig = Field(default_factory=MeshConfig)
     interpolation: InterpolationConfig = Field(default_factory=InterpolationConfig)
 
+
 class MeshExtractionConfig(ExtractionConfig):
     variable: str | None = None
     height_variable: str | None = None

@@ -85,7 +85,12 @@ class TestRadialGrid:
                 "variables": {"lon": "lon", "lat": "lat", "time": "time"},
                 "reprojection": {"fromCrs": "EPSG:32631", "toCrs": "EPSG:4326"},
                 "pipelines": {
-                    "preprocess": ["load_from_netcdf", "reproject_coordinates", "unify_chunks", "save"]
+                    "preprocess": [
+                        "load_from_netcdf",
+                        "reproject_coordinates",
+                        "unify_chunks",
+                        "save",
+                    ]
                 },
                 "version": 2,
             },

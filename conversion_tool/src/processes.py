@@ -1,5 +1,4 @@
 import os
-import json
 import itertools
 import re
 import shutil
@@ -22,10 +21,12 @@ from src.utils import (
     get_s3_storage_options,
     get_s3_filesystem,
     timestamp_to_datetime,
+    check_store_as_secondary,
 )
 
 
 def init_dask_dashboard(dataset, config):
+    """Initialize the Dask dashboard to monitor computation progress and load."""
     client = Client()
     link = client.dashboard_link
     print("======================================" + (len(link) * "="))
@@ -37,6 +38,7 @@ def init_dask_dashboard(dataset, config):
 
 
 def load_from_netcdf(dataset, config):
+    """Load a dataset from local or S3 NetCDF files."""
     ds_count = 0
     total_count = 0
 
@@ -129,6 +131,7 @@ def load_from_netcdf(dataset, config):
 
 
 def load_from_grib(dataset, config):
+    """Load a dataset from local or S3 GRIB files."""
     ds_count = 0
     total_count = 0
 
@@ -280,6 +283,7 @@ def load_from_grib(dataset, config):
 
 
 def load_from_zarr(dataset, config):
+    """Load a dataset from a local or S3 Zarr store."""
     path = get_ci(
         config,
         "load_path",
@@ -304,6 +308,8 @@ def load_from_zarr(dataset, config):
 
 
 def load_and_merge_from_grib(dataset, config):
+    """Load and merge multiple GRIB files based on the specified discriminators."""
+
     # List of strings that can be used to discriminate files to merge together
     # TODO: improve this by allowing to extract discriminator values with regex capture groups, to support more complex cases
     discriminator = get_ci(
@@ -371,6 +377,7 @@ def load_and_merge_from_grib(dataset, config):
 
 
 def assign_coords(dataset, config):
+    """Assign coordinates to dataset dimensions based on the provided configuration."""
     coords = get_ci(
         config,
         "assign_coords",
@@ -452,11 +459,13 @@ def assign_coords(dataset, config):
 
 
 def unify_chunks(dataset, config):
+    """Unify chunk sizes across variables in the dataset to optimize Dask performance."""
     (dataset,) = xr.unify_chunks(dataset)
     return dataset, config
 
 
 def rename_variables(dataset, config):
+    """Rename dataset variables using the provided renaming map."""
     rename_map = get_ci(
         config,
         "rename_map",
@@ -485,6 +494,7 @@ def rename_variables(dataset, config):
 
 
 def exclude_variables(dataset, config):
+    """Drop specified variables from the dataset."""
     exclude_vars = get_ci(
         config,
         "exclude_vars",
@@ -500,6 +510,7 @@ def exclude_variables(dataset, config):
 
 
 def keep_variables(dataset, config):
+    """Keep only the specified variables and drop all others from the dataset."""
     keep_vars = get_ci(
         config,
         "keep_vars",
@@ -516,6 +527,7 @@ def keep_variables(dataset, config):
 
 
 def delta_time_to_datetime(dataset, config):
+    """Convert a relative time delta variable into absolute datetime values based on a reference time."""
     time_ref_var = get_ci(
         config,
         "referenceTime.variable",
@@ -637,6 +649,7 @@ def delta_time_to_datetime(dataset, config):
 
 
 def reproject_coordinates(dataset, config):
+    """Reproject dataset coordinates (longitude, latitude, altitude) to another CRS."""
     from_crs = get_ci(
         config,
         "reprojection.from_crs",
@@ -687,6 +700,7 @@ def reproject_coordinates(dataset, config):
 
 
 def save(dataset, config):
+    """Save the final dataset to Zarr format locally or on S3."""
     path = get_ci(config, "save_path")
     if path is None:
         path = get_ci(
@@ -763,18 +777,8 @@ def save(dataset, config):
     return dataset, config
 
 
-def save_config(dataset, config):
-    path = get_ci(
-        config,
-        "config_save_path",
-        message="Missing 'config_save_path' config parameter for save_config process.",
-    )
-    with open(path, "w") as f:
-        json.dump(config, f, indent=2)
-    return dataset, config
-
-
 def clean(dataset, config):
+    """Clean temporary, generated, or index files."""
     clean = get_ci(
         config, "clean", default={"used": False, "generated": True, "idx": True}
     )

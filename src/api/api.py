@@ -1,7 +1,7 @@
 import os
 import sys
-import logging
-import time
+# import logging
+# import time
 
 from fastapi import FastAPI, Request
 from fastapi.openapi.docs import get_swagger_ui_html
@@ -33,7 +33,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=False, # Cannot be True when allow_origins is ["*"]
+    allow_credentials=False,  # Cannot be True when allow_origins is ["*"]
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -60,6 +60,9 @@ app.include_router(probe.router)
 app.include_router(isoline.router)
 app.include_router(select.router)
 app.include_router(mesh.router)
+
+
+# Global exception handlers for custom exceptions
 
 
 @app.exception_handler(exceptions.GenericInternalError)
@@ -90,6 +93,9 @@ async def user_input_exception_handler(
 async def request_cancelled_handler(request: Request, exc: exceptions.RequestCancelled):
     print("[KAZARR] Request cancelled by client:", str(exc))
     return JSONResponse(status_code=499, content={"detail": str(exc)})
+
+
+# Base endpoints
 
 
 @app.get(

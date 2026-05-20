@@ -42,6 +42,7 @@ def clear_cache():
     """Clear the dataset loading cache before each test to prevent interference."""
     load.cache_clear()
 
+
 # ---------------------------------------------------------------------------
 # Session-scoped fixtures (created once for the whole test run)
 # ---------------------------------------------------------------------------
@@ -59,6 +60,7 @@ def convert():
     Execute the conversion_tool in an isolated subprocess.
     Returns standard output (stdout) on success, raises an error on failure.
     """
+
     def _run(
         input_path: str,
         template=None,
@@ -72,7 +74,7 @@ def convert():
         mesh_type=None,
         dask_dashboard=False,
     ) -> str:
-        # This function use subprocess to run the conversion tool 
+        # This function use subprocess to run the conversion tool
         # to avoid conflicts with the main app's imports and environment.
 
         entry_script = _tool_dir / "main.py"

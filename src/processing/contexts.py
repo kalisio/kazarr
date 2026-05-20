@@ -28,7 +28,18 @@ class BBoxContext:
         has_bb_lat = lat_min is not None or lat_max is not None
         has_bb_z = z_min is not None or z_max is not None
         has_bb = has_bb_lon or has_bb_lat
-        return cls(lon_min, lat_min, lon_max, lat_max, z_min, z_max, has_bb_lon, has_bb_lat, has_bb_z, has_bb)
+        return cls(
+            lon_min,
+            lat_min,
+            lon_max,
+            lat_max,
+            z_min,
+            z_max,
+            has_bb_lon,
+            has_bb_lat,
+            has_bb_z,
+            has_bb,
+        )
 
 
 @dataclass

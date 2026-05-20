@@ -5,7 +5,6 @@ from scipy.interpolate import (
     RegularGridInterpolator,
     RBFInterpolator,
 )
-from scipy.spatial import cKDTree
 
 
 from src import exceptions

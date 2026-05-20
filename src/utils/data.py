@@ -57,7 +57,7 @@ def get_required_dims_and_coords(
 
     if optional_coords == "*" or optional_dims == "*":
         return fixed_coords, fixed_dims
-    
+
     # Expand optional dimensions from optional coordinates
     optional_coords_list = (
         optional_coords if isinstance(optional_coords, list) else [optional_coords]

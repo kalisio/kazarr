@@ -44,10 +44,16 @@ def get_cached_ckdtree(
         cache_key = (data_hash,)
 
     if cache_key in _spatial_index_cache:
-        print("[KAZARR] Using cached spatial index (cKDTree) for points with shape", points.shape)
+        print(
+            "[KAZARR] Using cached spatial index (cKDTree) for points with shape",
+            points.shape,
+        )
         return _spatial_index_cache[cache_key]
 
-    print("[KAZARR] Building new spatial index (cKDTree) for points with shape", points.shape)
+    print(
+        "[KAZARR] Building new spatial index (cKDTree) for points with shape",
+        points.shape,
+    )
     tree = cKDTree(points)
 
     # Manage cache size

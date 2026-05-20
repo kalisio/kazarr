@@ -5,6 +5,7 @@ from src import processes as proc
 
 
 def pipeline(config, name, dataset=None):
+    """Run a defined pipeline of processes on the dataset according to the provided configuration."""
     start_time = time.time()
     pipelines = dget(config, "pipelines", {})
 

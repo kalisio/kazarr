@@ -1,5 +1,4 @@
 import numpy as np
-from scipy.spatial import cKDTree
 import xarray as xr
 from fastapi import Request
 from typing import Any, Dict, List, Optional, Union
@@ -101,7 +100,7 @@ def extract(
         if height_var is not None and height_var in dataset
         else None
     )
-    
+
     is_3d_grid = config.is_3d and heights_da is not None
 
     if is_3d_grid:
