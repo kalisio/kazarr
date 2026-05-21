@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import List, Literal, Optional
 from fastapi import Query, Path
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 
 @dataclass
@@ -124,5 +124,44 @@ class ProbePoint(BaseModel):
     height: Optional[float] = None
 
 
+class GeoJSONPoint(BaseModel):
+    type: str
+    coordinates: list[float]
+
+
+class GeoJSONFeature(BaseModel):
+    type: str
+    geometry: GeoJSONPoint
+
+
+class GeoJSONFeatureCollection(BaseModel):
+    type: str
+    features: list[GeoJSONFeature]
+
+
 class MultiProbeBody(BaseModel):
-    points: List[ProbePoint]
+    # ad hoc format
+    points: List[ProbePoint] | None = None
+    # GeoJSON FeatureCollection format
+    type: str | None = None
+    features: list[GeoJSONFeature] | None = None
+
+    @model_validator(mode="after")
+    def resolve_points(self) -> "MultiProbeBody":
+        if self.type == "FeatureCollection" and self.features is not None:
+            self.points = [
+                ProbePoint(
+                    lon=f.geometry.coordinates[0],
+                    lat=f.geometry.coordinates[1],
+                    height=f.geometry.coordinates[2]
+                    if len(f.geometry.coordinates) > 2
+                    else None,
+                )
+                for f in self.features
+                if f.geometry.type == "Point"
+            ]
+        if not self.points:
+            raise ValueError(
+                "Body must contain 'points' or a GeoJSON FeatureCollection of Points"
+            )
+        return self
