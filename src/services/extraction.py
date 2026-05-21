@@ -79,6 +79,17 @@ def extract(
             # Remove "time" from request parameters to avoid confusion in later steps (case where time is a variable in the dataset)
             request.query_params._dict.pop("time", None)
 
+    # Detect multi-timestep mode: when time is not specified but time_var is defined,
+    # we will return data for all timesteps.
+    is_multi_time = time is None and time_var is not None and time_var in dataset
+    time_values = None
+    if is_multi_time:
+        time_data = dataset[time_var].values
+        if np.issubdtype(time_data.dtype, np.datetime64):
+            time_values = [str(np.datetime_as_string(t)) for t in time_data]
+        else:
+            time_values = time_data.tolist()
+
     mesh_type = dget(dataset_config, "mesh_type", "auto")
     if len(missing_vars) > 0:
         raise exceptions.BadConfigurationVariable(missing_vars)
@@ -111,6 +122,9 @@ def extract(
         # In 2D mode, height_var is NOT optional: the user must provide a vertical coordinate
         optional_coords = [lon_var, lat_var]
         coords_keep_dims = [lon_var, lat_var]
+
+    if is_multi_time and time_var is not None and time_var not in optional_coords:
+        optional_coords.append(time_var)
 
     fixed_coords, fixed_dims = get_required_dims_and_coords(
         dataset,
@@ -220,7 +234,15 @@ def extract(
     if is_point_list:
         if resolution_limit is not None and n_points > resolution_limit:
             point_indices = point_indices[::step_row]
-        vals = np.atleast_1d(vals_da.values)[point_indices]
+        vals = np.atleast_1d(vals_da.values)
+        if is_multi_time:
+            if vals.ndim == 1:
+                # Point selection collapsed spatial dimension for a single point.
+                vals = vals[:, np.newaxis]
+            else:
+                vals = vals[:, point_indices]
+        else:
+            vals = vals[point_indices]
     elif is_3d_grid and not is_regular_grid:
         vals = vals_da.values[
             :,
@@ -248,10 +270,14 @@ def extract(
         if (
             heights_da is not None
             and not config.is_3d
-            and vals.ndim == 3
-            and vals.shape[0] == 1
+            and vals.ndim >= 3
+            and vals.shape[-3] == 1
         ):
-            vals = vals.squeeze(axis=0)
+            vals = vals.squeeze(axis=-3)
+            lons_vals_in = lons_vals_in.squeeze(axis=-3)
+            lats_vals_in = lats_vals_in.squeeze(axis=-3)
+            lons_vals = lons_vals.squeeze(axis=-3)
+            lats_vals = lats_vals.squeeze(axis=-3)
     vals = vals.astype(float)
 
     step_logger.step_start("Crop latitude and longitude")
@@ -316,11 +342,17 @@ def extract(
             mask_cropped &= bbox.apply_z_bounding_box(heights, bounding_box)
 
         if format != "mesh":
-            vals[~mask_cropped] = np.nan
+            if is_multi_time:
+                vals[:, ~mask_cropped] = np.nan
+            else:
+                vals[~mask_cropped] = np.nan
     elif is_3d_grid and not is_regular_grid and has_bb_z and heights is not None:
         # No spatial bbox but a Z bbox is present
         mask_cropped = bbox.apply_z_bounding_box(heights, bounding_box)
-        vals[~mask_cropped] = np.nan
+        if is_multi_time:
+            vals[:, ~mask_cropped] = np.nan
+        else:
+            vals[~mask_cropped] = np.nan
     else:
         mask_cropped = None
 
@@ -385,7 +417,10 @@ def extract(
         lons_cropped = lons[mask_cropped]
         lats_cropped = lats[mask_cropped]
         heights_cropped = heights[mask_cropped] if heights is not None else None
-        vals_cropped = vals[mask_cropped]
+        if is_multi_time and vals.ndim > 1:
+            vals_cropped = vals[:, mask_cropped]
+        else:
+            vals_cropped = vals[mask_cropped]
     else:
         lons_cropped, lats_cropped, heights_cropped, vals_cropped = (
             lons,
@@ -393,6 +428,10 @@ def extract(
             heights,
             vals,
         )
+
+    global_props = {"resolution_factor": {"row": step_row, "col": step_col}}
+    if is_multi_time:
+        global_props["times"] = time_values
 
     if format == "mesh":
         step_logger.step_start("Prepare output (mesh)")
@@ -407,8 +446,9 @@ def extract(
             lons_cropped,
             lats_cropped,
             zs=heights_cropped,
-            global_props={"resolution_factor": {"row": step_row, "col": step_col}},
+            global_props=global_props,
             var_props={variable: dataset[variable].attrs},
+            has_time_dimension=is_multi_time
         )
     elif format == "geojson":
         step_logger.step_start("Prepare output (GeoJSON)")
@@ -419,8 +459,9 @@ def extract(
             lons_cropped,
             lats_cropped,
             zs=heights_cropped,
-            collection_props={"resolution_factor": {"row": step_row, "col": step_col}},
+            collection_props=global_props,
             var_props={variable: dataset[variable].attrs},
+            has_time_dimension=is_multi_time
         )
     else:
         raise exceptions.BadConfigurationVariable(f"Unsupported format: {format}")
@@ -676,6 +717,72 @@ def probe(
         raise exceptions.BadConfigurationVariable(f"Unsupported format: {format}")
 
     step_logger.end()
+    return out
+
+def multi_probe(
+    request: Request,
+    dataset_id: str,
+    variables: Union[str, List[str]],
+    points: List[Dict[str, float]],
+    time: Optional[str] = None,
+    format: str = "raw",
+    config: Union[Dict[str, Any], ExtractionConfig, None] = None,
+    cancel_event: Optional[threading.Event] = None, 
+):
+    variables = variables if isinstance(variables, list) else [variables]
+
+
+    lats, lons, zs, vals = [], [], [], {}
+    times, var_props = None, None
+    for point in points:
+        result = probe(
+            request,
+            dataset_id,
+            variables,
+            point.lon,
+            point.lat,
+            point.height,
+            time,
+            "raw",
+            config,
+            cancel_event,
+        )
+        lats.append(point.lat)
+        lons.append(point.lon)
+        zs.append(point.height)
+        for var in variables:
+            if var not in vals:
+                vals[var] = []
+            vals[var].append(result["values"][var])
+        if times is None:
+            times = result.get("times")
+        if var_props is None:
+            var_props = {var: result["variables"][var] for var in variables}
+    vals = [vals[var] for var in variables]
+    if format == "raw":
+        out = output.prepare_raw_output(
+            variables,
+            np.asarray(vals),
+            np.asarray(lons),
+            np.asarray(lats),
+            zs=np.asarray(zs) if zs and any(zs) else None,
+            global_props={"times": times} if times is not None else None,
+            has_time_dimension=times is not None,
+        )
+    elif format == "geojson":
+        out = output.prepare_geojson_output(
+            variables,
+            np.asarray(vals),
+            np.asarray(lons),
+            np.asarray(lats),
+            zs=np.asarray(zs) if zs and any(zs) else None,
+            collection_props={"times": times} if times is not None else None,
+            var_props=var_props,
+            has_time_dimension=times is not None,
+        )
+    else:
+        raise exceptions.BadConfigurationVariable(f"Unsupported format: {format}")
+    
     return out
 
 

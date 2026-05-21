@@ -76,7 +76,7 @@ def prepare_mesh_output(
 
 
 def prepare_output(
-    var_names, vals, lons, lats, zs=None, global_props=None, var_props=None
+    var_names, vals, lons, lats, zs=None, global_props=None, var_props=None, has_time_dimension=False
 ):
     if global_props is None:
         global_props = {}
@@ -104,14 +104,15 @@ def prepare_output(
         if valid_vals.size == 0:
             continue
         no_data = False
-        var_vals = np.where(np.isnan(var_vals), None, var_vals).tolist()
-        vals_dict[var_name] = var_vals
-        out_vars_props[var_name] = {
-            "bounds": {
-                "min": np.min(valid_vals).item(),
-                "max": np.max(valid_vals).item(),
-            },
-            **var_props.get(var_name, {}),
+        var_vals = np.where(np.isnan(var_vals), None, var_vals)
+        var_vals = (
+            var_vals.reshape(vals[0].shape[0], -1) if has_time_dimension else var_vals
+        )
+        vals_dict[var_name] = var_vals.tolist()
+        out_vars_props[var_name] = var_props.get(var_name, {})
+        out_vars_props[var_name]["bounds"] = {
+            "min": float(valid_vals.min()),
+            "max": float(valid_vals.max()),
         }
     if no_data:
         raise exceptions.NoDataInSelection()
@@ -128,7 +129,7 @@ def prepare_output(
 
 
 def prepare_raw_output(
-    var_names, vals, lons, lats, zs=None, global_props=None, var_props=None
+    var_names, vals, lons, lats, zs=None, global_props=None, var_props=None, has_time_dimension=False
 ):
     flat_lons, flat_lats, flat_zs, vals_dict, collection_props, out_props, _ = (
         prepare_output(
@@ -139,6 +140,7 @@ def prepare_raw_output(
             zs=zs,
             global_props=global_props,
             var_props=var_props,
+            has_time_dimension=has_time_dimension,
         )
     )
 
@@ -159,7 +161,7 @@ def prepare_raw_output(
 
 
 def prepare_geojson_output(
-    var_names, vals, lons, lats, zs=None, collection_props=None, var_props=None
+    var_names, vals, lons, lats, zs=None, collection_props=None, var_props=None, has_time_dimension=False
 ):
     (
         flat_lons,
@@ -177,6 +179,7 @@ def prepare_geojson_output(
         zs=zs,
         global_props=collection_props,
         var_props=var_props,
+        has_time_dimension=has_time_dimension,
     )
 
     features = []
@@ -186,12 +189,15 @@ def prepare_geojson_output(
             if has_one_point and len(var_vals) > 1:
                 # Time series or multiple values for a single point
                 out_vals[var_name] = var_vals
+            elif has_time_dimension:
+                # Time series for multiple points
+                out_vals[var_name] = [var_vals[j][i] for j in range(len(var_vals))]
             else:
                 # Spatial data (one value per point) or single scalar
                 out_vals[var_name] = var_vals[i]
 
         coordinates = [float(flat_lons[i]), float(flat_lats[i])]
-        if flat_zs is not None:
+        if flat_zs is not None and flat_zs[i] is not None and not np.isnan(flat_zs[i]):
             coordinates.append(float(flat_zs[i]))
         features.append(
             {

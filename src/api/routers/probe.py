@@ -128,23 +128,16 @@ async def probe_data_multi(
     cancel_event = threading.Event()
     watcher_task = asyncio.create_task(watch_disconnection(request, cancel_event))
     try:
-        results = []
-        for point in body.points:
-            result = await run_in_threadpool(
-                extraction.probe,
-                request,
-                base.dataset,
-                variables,
-                point.lon,
-                point.lat,
-                height=point.height,
-                time=time.time,
-                format=base.format,
-                config=config,
-                cancel_event=cancel_event,
-            )
-            results.append(result)
-
-        return results
+        return await run_in_threadpool(
+            extraction.multi_probe,
+            request,
+            base.dataset,
+            variables,
+            body.points,
+            time=time.time,
+            format=base.format,
+            config=config,
+            cancel_event=cancel_event,
+        )
     finally:
         watcher_task.cancel()
