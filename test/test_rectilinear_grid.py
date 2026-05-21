@@ -100,6 +100,7 @@ class TestRectilinearGrid:
                 },
                 "version": 2,
             },
+            mesh_type="rectilinear",
         )
         assert os.path.exists(output_path)
 
@@ -119,6 +120,20 @@ class TestRectilinearGrid:
             "min": 0,
             "max": HEIGHTS * LATS * LONS - 1,
         }
+
+    def test_extract_without_time(self, client: TestClient):
+        """Extraction without time returns all available timesteps."""
+        response = client.get(
+            f"/datasets/{DATASET_NAME}/extract?variable=Precipitation"
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "times" in data
+        assert len(data["times"]) == 5
+        assert "values" in data
+        assert len(data["values"]["Precipitation"]) == 5
+        assert len(data["values"]["Precipitation"][0]) > 0
 
     def test_extract_spatial_dimensions_fixed(self, client: TestClient):
         """Extraction with fixed spatial dimension returns correct shape."""
@@ -163,6 +178,21 @@ class TestRectilinearGrid:
         assert "Precipitation" in feature["properties"]
         assert isinstance(feature["properties"]["Precipitation"], (int, float))
 
+    def test_extract_geojson_without_time(self, client: TestClient):
+        """GeoJSON extraction without time returns a FeatureCollection with all timestep values."""
+        response = client.get(
+            f"/datasets/{DATASET_NAME}/extract?variable=Precipitation&format=geojson"
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["type"] == "FeatureCollection"
+        assert "properties" in data
+        assert "times" in data["properties"]
+        assert len(data["properties"]["times"]) == 5
+        assert isinstance(data["features"][0]["properties"]["Precipitation"], list)
+        assert len(data["features"][0]["properties"]["Precipitation"]) == 5
+
     def test_extract_geojson_time_interpolation(self, client: TestClient):
         """GeoJSON format with time interpolation returns scalar values."""
         response = client.get(
@@ -176,6 +206,20 @@ class TestRectilinearGrid:
         feature = data["features"][0]
         assert "Precipitation" in feature["properties"]
         assert isinstance(feature["properties"]["Precipitation"], (int, float))
+    def test_extract_cells_data_mapping(self, client: TestClient):
+        """Extract endpoint with mesh_data_mapping=cells returns a list of cell values."""
+        response = client.get(
+            f"/datasets/{DATASET_NAME}/extract?variable=Precipitation&time=2026-01-01&mesh_data_mapping=cells"
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "values" in data
+        assert "Precipitation" in data["values"]
+        assert isinstance(data["values"]["Precipitation"], list)
+        assert len(data["values"]["Precipitation"]) > 0
+        assert all(isinstance(v, (int, float)) for v in data["values"]["Precipitation"])
+        assert len(data["longitudes"]) == (LONS + 1) * (LATS + 1)
 
     def test_extract_tile(self, client: TestClient):
         """Bounding box extraction returns only points within the box."""
@@ -192,6 +236,20 @@ class TestRectilinearGrid:
                 lat = data["latitudes"][idx]
                 assert 2.0 <= lon <= 4.0
                 assert 43.0 <= lat <= 44.0
+
+    def test_extract_tile_without_time(self, client: TestClient):
+        """Bounding box extraction without time returns all timestep values."""
+        bbox = "lon_min=2.0&lon_max=4.0&lat_min=43.0&lat_max=44.0"
+        response = client.get(
+            f"/datasets/{DATASET_NAME}/extract?variable=Precipitation&{bbox}"
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "times" in data
+        assert len(data["times"]) == 5
+        assert len(data["values"]["Precipitation"]) == 5
+        assert len(data["values"]["Precipitation"][0]) > 0
 
     # ------------------------------------------------------------------
     # Extract — mesh format
@@ -328,11 +386,46 @@ class TestRectilinearGrid:
 
         assert response.status_code == 200
         data = response.json()
-        assert isinstance(data, list)
-        assert len(data) == 2
-        for result in data:
-            assert "variables" in result
-            assert "Precipitation" in result["values"]
+        assert "times" in data
+        assert "variables" in data
+        assert "Precipitation" in data["variables"]
+        values = data["values"]["Precipitation"]
+        assert isinstance(values, list)
+        assert len(values) == 2  # 2 probe points
+        assert all(
+            isinstance(v, list) and len(v) == 5 for v in values
+        )  # 5 time steps
+
+    def test_probes_multiple_points_geojson(self, client: TestClient):
+        """Probe multiple points with GeoJSON FeatureCollection body."""
+        payload = {
+            "type": "FeatureCollection",
+            "features": [
+                {
+                    "type": "Feature",
+                    "geometry": {"type": "Point", "coordinates": [2.3, 43.3]},
+                },
+                {
+                    "type": "Feature",
+                    "geometry": {"type": "Point", "coordinates": [2.4, 43.4]},
+                },
+            ],
+        }
+        response = client.post(
+            f"/datasets/{DATASET_NAME}/probes?variables=Precipitation", json=payload
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "times" in data
+        assert "variables" in data
+        assert "Precipitation" in data["variables"]
+        values = data["values"]["Precipitation"]
+        assert isinstance(values, list)
+        assert len(values) == 2
+        assert all(
+            isinstance(v, list) and len(v) == 5 for v in values
+        )
 
     # ------------------------------------------------------------------
     # Mesh endpoint

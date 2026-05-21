@@ -82,7 +82,7 @@ class TestRadialGrid:
             input_path=os.path.join(TMP_FOLDER, f"{DATASET_NAME}.nc"),
             output_path=output_path,
             config={
-                "variables": {"lon": "lon", "lat": "lat", "time": "time"},
+                "variables": {"lon": "lon", "lat": "lat", "height": "height", "time": "time"},
                 "reprojection": {"fromCrs": "EPSG:32631", "toCrs": "EPSG:4326"},
                 "pipelines": {
                     "preprocess": [
@@ -118,6 +118,19 @@ class TestRadialGrid:
         assert "values" in data
         assert len(data["values"]["WindSpeed"]) > 0
 
+    def test_extract_without_time(self, client: TestClient):
+        """Extraction without time returns all available timesteps."""
+        response = client.get(
+            f"/datasets/{DATASET_NAME}/extract?variable=WindSpeed"
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "times" in data
+        assert len(data["times"]) == 5
+        assert "values" in data
+        assert len(data["values"]["WindSpeed"]) == 5
+
     def test_extract_tile(self, client: TestClient):
         """Bounding box extraction on radial grid returns points inside the box."""
         bbox = "lon_min=5.1&lon_max=5.4&lat_min=45.63&lat_max=45.9"
@@ -128,6 +141,19 @@ class TestRadialGrid:
         assert response.status_code == 200
         data = response.json()
         assert "WindSpeed" in data["variables"]
+
+    def test_extract_tile_without_time(self, client: TestClient):
+        """Bounding box extraction without time returns all timestep values."""
+        bbox = "lon_min=5.1&lon_max=5.4&lat_min=45.63&lat_max=45.9"
+        response = client.get(
+            f"/datasets/{DATASET_NAME}/extract?variable=WindSpeed&{bbox}"
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "times" in data
+        assert len(data["times"]) == 5
+        assert len(data["values"]["WindSpeed"]) == 5
 
     def test_extract_tile_out_of_bbox(self, client: TestClient):
         """Bounding box extraction on radial grid outside of the dataset bounding box."""
@@ -151,6 +177,21 @@ class TestRadialGrid:
         assert feature["geometry"]["type"] == "Point"
         assert "WindSpeed" in feature["properties"]
         assert isinstance(feature["properties"]["WindSpeed"], (int, float))
+
+    def test_extract_geojson_without_time(self, client: TestClient):
+        """GeoJSON extraction without time returns a FeatureCollection with all timestep values."""
+        response = client.get(
+            f"/datasets/{DATASET_NAME}/extract?variable=WindSpeed&format=geojson"
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["type"] == "FeatureCollection"
+        assert "properties" in data
+        assert "times" in data["properties"]
+        assert len(data["properties"]["times"]) == 5
+        assert isinstance(data["features"][0]["properties"]["WindSpeed"], list)
+        assert len(data["features"][0]["properties"]["WindSpeed"]) == 5
 
     def test_extract_geojson_time_interpolation(self, client: TestClient):
         """GeoJSON format with time interpolation returns scalar values."""
@@ -190,6 +231,21 @@ class TestRadialGrid:
         # Interpolated min/max should fall between the two time steps
         assert min(b1["min"], b2["min"]) <= b_interp["min"] + 0.01  # approx tolerance
         assert b_interp["max"] <= max(b1["max"], b2["max"]) + 0.01
+
+    def test_extract_cells_data_mapping(self, client: TestClient):
+        """Extract endpoint with mesh_data_mapping=cells returns a list of cell values."""
+        response = client.get(
+            f"/datasets/{DATASET_NAME}/extract?variable=WindSpeed&time=2026-01-01&mesh_data_mapping=cells"
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "values" in data
+        assert "WindSpeed" in data["values"]
+        assert isinstance(data["values"]["WindSpeed"], list)
+        assert len(data["values"]["WindSpeed"]) > 0
+        assert all(isinstance(v, (int, float)) for v in data["values"]["WindSpeed"])
+        assert len(data["longitudes"]) == 146 * 26
 
     # ------------------------------------------------------------------
     # Extract — mesh format
@@ -237,14 +293,42 @@ class TestRadialGrid:
 
         assert response.status_code == 200
         data = response.json()
-        assert isinstance(data, list)
-        assert len(data) == 2
-        for result in data:
-            assert "variables" in result
-            assert "WindSpeed" in result["variables"]
-            values = result["values"]["WindSpeed"]
-            assert isinstance(values, list)
-            assert len(values) > 0
+        assert "times" in data
+        assert "variables" in data
+        assert "WindSpeed" in data["variables"]
+        values = data["values"]["WindSpeed"]
+        assert isinstance(values, list)
+        assert len(values) == 2 # 2 probe points
+        assert all(isinstance(v, list) and len(v) == 5 for v in values) # 5 time steps in the dataset
+
+    def test_probes_multiple_points_geojson(self, client: TestClient):
+        """Probe multiple points with GeoJSON FeatureCollection body."""
+        payload = {
+            "type": "FeatureCollection",
+            "features": [
+                {
+                    "type": "Feature",
+                    "geometry": {"type": "Point", "coordinates": [2.3, 43.3]},
+                },
+                {
+                    "type": "Feature",
+                    "geometry": {"type": "Point", "coordinates": [2.4, 43.4]},
+                },
+            ],
+        }
+        response = client.post(
+            f"/datasets/{DATASET_NAME}/probes?variables=WindSpeed", json=payload
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "times" in data
+        assert "variables" in data
+        assert "WindSpeed" in data["variables"]
+        values = data["values"]["WindSpeed"]
+        assert isinstance(values, list)
+        assert len(values) == 2
+        assert all(isinstance(v, list) and len(v) == 5 for v in values) # 5 time steps in the dataset
 
     # ------------------------------------------------------------------
     # Mesh endpoint

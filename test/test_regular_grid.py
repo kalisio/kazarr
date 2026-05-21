@@ -91,6 +91,7 @@ class TestRegularGrid:
                 },
                 "version": 2,
             },
+            mesh_type="regular",
         )
 
         assert os.path.exists(output_path)
@@ -113,6 +114,20 @@ class TestRegularGrid:
         assert "latitudes" in data
         assert "values" in data
         assert len(data["values"]["Value"]) == LATS * LONS
+
+    def test_extract_without_time(self, client: TestClient):
+        """Extraction without time returns all available timesteps."""
+        response = client.get(
+            f"/datasets/{DATASET_NAME}/extract?variable=Value"
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "times" in data
+        assert len(data["times"]) == TIMES
+        assert "values" in data
+        assert len(data["values"]["Value"]) == TIMES
+        assert len(data["values"]["Value"][0]) == LATS * LONS
 
     def test_extract_time_interpolation(self, client: TestClient):
         """Time interpolation between two steps returns midpoint values."""
@@ -142,6 +157,21 @@ class TestRegularGrid:
         assert "Value" in feature["properties"]
         assert isinstance(feature["properties"]["Value"], (int, float))
 
+    def test_extract_geojson_without_time(self, client: TestClient):
+        """GeoJSON extraction without time returns a FeatureCollection with all timestep values."""
+        response = client.get(
+            f"/datasets/{DATASET_NAME}/extract?variable=Value&format=geojson"
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["type"] == "FeatureCollection"
+        assert "properties" in data
+        assert "times" in data["properties"]
+        assert len(data["properties"]["times"]) == TIMES
+        assert isinstance(data["features"][0]["properties"]["Value"], list)
+        assert len(data["features"][0]["properties"]["Value"]) == TIMES
+
     def test_extract_geojson_time_interpolation(self, client: TestClient):
         """GeoJSON format with time interpolation returns scalar values."""
         response = client.get(
@@ -155,6 +185,21 @@ class TestRegularGrid:
         feature = data["features"][0]
         assert "Value" in feature["properties"]
         assert isinstance(feature["properties"]["Value"], (int, float))
+
+    def test_extract_cells_data_mapping(self, client: TestClient):
+        """Extract endpoint with mesh_data_mapping=cells returns a list of cell values."""
+        response = client.get(
+            f"/datasets/{DATASET_NAME}/extract?variable=Value&time=2026-01-01&mesh_data_mapping=cells"
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "values" in data
+        assert "Value" in data["values"]
+        assert isinstance(data["values"]["Value"], list)
+        assert len(data["values"]["Value"]) > 0
+        assert all(isinstance(v, (int, float)) for v in data["values"]["Value"])
+        assert len(data["longitudes"]) == (LATS + 1) * (LONS + 1)
 
     def test_extract_tile(self, client: TestClient):
         """Bounding box extraction returns only points inside the box."""
@@ -186,6 +231,24 @@ class TestRegularGrid:
         assert max_lat <= lat_max
         assert min_lon >= lon_min
         assert max_lon <= lon_max
+
+    def test_extract_tile_without_time(self, client: TestClient):
+        """Bounding box extraction without time returns all timestep values."""
+        lat_min = LAT_START + 0.25
+        lat_max = LAT_START + LAT_STEP * LATS - 0.25
+        lon_min = LON_START + 0.25
+        lon_max = LON_START + LON_STEP * LONS - 0.25
+
+        response = client.get(
+            f"/datasets/{DATASET_NAME}/extract?variable=Value&lat_min={lat_min}&lat_max={lat_max}&lon_min={lon_min}&lon_max={lon_max}"
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "times" in data
+        assert len(data["times"]) == TIMES
+        assert len(data["values"]["Value"]) == TIMES
+        assert len(data["values"]["Value"][0]) > 0
 
     def test_extract_bounding_box_out_of_range(self, client: TestClient):
         """Bounding box entirely outside dataset extent should return an error."""
@@ -301,14 +364,46 @@ class TestRegularGrid:
 
         assert response.status_code == 200
         data = response.json()
-        assert isinstance(data, list)
-        assert len(data) == 2
-        for result in data:
-            assert "variables" in result
-            assert "Value" in result["variables"]
-            values = result["values"]["Value"]
-            assert isinstance(values, list)
-            assert len(values) > 0
+        assert "times" in data
+        assert "variables" in data
+        assert "Value" in data["variables"]
+        values = data["values"]["Value"]
+        assert isinstance(values, list)
+        assert len(values) == 2  # 2 probe points
+        assert all(
+            isinstance(v, list) and len(v) == TIMES for v in values
+        )  # 5 time steps in the dataset
+
+    def test_probes_multiple_points_geojson(self, client: TestClient):
+        """Probe multiple points with GeoJSON FeatureCollection body."""
+        payload = {
+            "type": "FeatureCollection",
+            "features": [
+                {
+                    "type": "Feature",
+                    "geometry": {"type": "Point", "coordinates": [LON_START, LAT_START]},
+                },
+                {
+                    "type": "Feature",
+                    "geometry": {"type": "Point", "coordinates": [LON_START + LON_STEP, LAT_START + LAT_STEP]},
+                },
+            ],
+        }
+        response = client.post(
+            f"/datasets/{DATASET_NAME}/probes?variables=Value", json=payload
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "times" in data
+        assert "variables" in data
+        assert "Value" in data["variables"]
+        values = data["values"]["Value"]
+        assert isinstance(values, list)
+        assert len(values) == 2
+        assert all(
+            isinstance(v, list) and len(v) == TIMES for v in values
+        )
 
     # ------------------------------------------------------------------
     # Select

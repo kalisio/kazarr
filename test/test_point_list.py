@@ -163,6 +163,20 @@ class TestPointList:
         assert data["variables"]["Humidity"]["bounds"]["min"] >= 0
         assert data["variables"]["Humidity"]["bounds"]["max"] <= 100
 
+    def test_extract_without_time(self, client: TestClient):
+        """Extraction without time returns all available timesteps."""
+        response = client.get(
+            f"/datasets/{DATASET_NAME}/extract?variable=Humidity"
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "times" in data
+        assert len(data["times"]) == N_TIMES
+        assert "values" in data
+        assert len(data["values"]["Humidity"]) == N_TIMES
+        assert len(data["values"]["Humidity"][0]) == N_STATIONS
+
     def test_extract_geojson(self, client: TestClient):
         """GeoJSON extraction returns one Feature per station."""
         response = client.get(
@@ -182,6 +196,23 @@ class TestPointList:
             assert -90 <= coords[1] <= 90
             assert "Humidity" in feature["properties"]
             assert isinstance(feature["properties"]["Humidity"], (int, float))
+
+    def test_extract_geojson_without_time(self, client: TestClient):
+        """GeoJSON extraction without time returns a FeatureCollection with all timesteps."""
+        response = client.get(
+            f"/datasets/{DATASET_NAME}/extract?variable=Humidity&format=geojson"
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["type"] == "FeatureCollection"
+        assert "properties" in data
+        assert "times" in data["properties"]
+        assert len(data["properties"]["times"]) == N_TIMES
+        assert len(data["features"]) == N_STATIONS
+        first_feature = data["features"][0]
+        assert isinstance(first_feature["properties"]["Humidity"], list)
+        assert len(first_feature["properties"]["Humidity"]) == N_TIMES
 
     def test_extract_geojson_time_interpolation(self, client: TestClient):
         """GeoJSON format with time interpolation returns scalar values."""
@@ -210,6 +241,21 @@ class TestPointList:
         non_null_count = sum(1 for v in data["values"]["Humidity"] if v is not None)
         assert non_null_count > 0
         assert non_null_count < N_STATIONS  # Not all stations are in the box
+
+    def test_extract_with_bbox_without_time(self, client: TestClient):
+        """Bounding box extraction without time returns all timesteps for points in the box."""
+        bbox = "lon_min=0.0&lon_max=8.0&lat_min=43.0&lat_max=44.5"
+        response = client.get(
+            f"/datasets/{DATASET_NAME}/extract?variable=Humidity&{bbox}"
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "times" in data
+        assert len(data["times"]) == N_TIMES
+        assert "values" in data
+        assert len(data["values"]["Humidity"]) == N_TIMES
+        assert len(data["values"]["Humidity"][0]) < N_STATIONS
 
     def test_extract_bbox_no_stations(self, client: TestClient):
         """Bounding box with no stations returns 400."""
@@ -261,6 +307,21 @@ class TestPointList:
         lille_value = ((np.cos(phi) + 1) / 2) * 100
         assert data["values"]["Humidity"][0] == pytest.approx(lille_value, abs=0.1)
 
+    def test_extract_point_name_without_time(self, client: TestClient):
+        """Extracting by station name without time returns all timesteps for that station."""
+        city_index = 9  # Lille
+        response = client.get(
+            f"/datasets/{DATASET_NAME}/extract?variable=Humidity&name={STATION_NAMES[city_index].decode()}"
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "times" in data
+        assert len(data["times"]) == N_TIMES
+        assert len(data["values"]["Humidity"]) == N_TIMES
+        assert all(isinstance(v, list) and len(v) == 1 for v in data["values"]["Humidity"])
+
+
     # ------------------------------------------------------------------
     # Probe
     # ------------------------------------------------------------------
@@ -311,14 +372,46 @@ class TestPointList:
 
         assert response.status_code == 200
         data = response.json()
-        assert isinstance(data, list)
-        assert len(data) == 2
-        for result in data:
-            assert "variables" in result
-            assert "Humidity" in result["variables"]
-            values = result["values"]["Humidity"]
-            assert isinstance(values, list)
-            assert len(values) > 0
+        assert "times" in data
+        assert "variables" in data
+        assert "Humidity" in data["variables"]
+        values = data["values"]["Humidity"]
+        assert isinstance(values, list)
+        assert len(values) == 2  # 2 probe points
+        assert all(
+            isinstance(v, list) and len(v) == N_TIMES for v in values
+        )  # 5 time steps in the dataset
+
+    def test_probes_multiple_points_geojson(self, client: TestClient):
+        """Probe multiple points with GeoJSON FeatureCollection body."""
+        payload = {
+            "type": "FeatureCollection",
+            "features": [
+                {
+                    "type": "Feature",
+                    "geometry": {"type": "Point", "coordinates": [2.352, 48.856]},
+                },
+                {
+                    "type": "Feature",
+                    "geometry": {"type": "Point", "coordinates": [5.369, 43.296]},
+                },
+            ],
+        }
+        response = client.post(
+            f"/datasets/{DATASET_NAME}/probes?variables=Humidity", json=payload
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "times" in data
+        assert "variables" in data
+        assert "Humidity" in data["variables"]
+        values = data["values"]["Humidity"]
+        assert isinstance(values, list)
+        assert len(values) == 2
+        assert all(
+            isinstance(v, list) and len(v) == N_TIMES for v in values
+        )
 
     def test_probe_time_at_station(self, client: TestClient):
         """Probe at a specific time returns a single value."""

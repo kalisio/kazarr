@@ -196,6 +196,22 @@ class TestRegularGrid3D:
         )
         assert response.status_code in (400, 404, 422)
 
+    def test_extract_cells_data_mapping(self, client: TestClient):
+        """Extract endpoint with mesh_data_mapping=cells returns a list of cell values."""
+        response = client.get(
+            f"/datasets/{DATASET_REGULAR}/extract"
+            f"?variable=Value&time=2026-01-01&is_3d=true&mesh_data_mapping=cells"
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "values" in data
+        assert "Value" in data["values"]
+        assert isinstance(data["values"]["Value"], list)
+        assert len(data["values"]["Value"]) > 0
+        assert all(isinstance(v, (int, float)) for v in data["values"]["Value"])
+        assert len(data["longitudes"]) == (LONS + 1) * (LATS + 1) * (LEVELS + 1)
+
     # ------------------------------------------------------------------
     # Extract — GeoJSON 3D
     # ------------------------------------------------------------------
@@ -670,16 +686,68 @@ class TestDataset3DMultiLevel:
         )
         assert response.status_code == 400
 
+    def test_probe_multilevel_geojson(self, client: TestClient):
+        response = client.post(
+            f"/datasets/{DATASET_MULTILEVEL}/probes?time=2026-01-01&variables=temperature&variables=wind",
+            json={
+                "type": "FeatureCollection",
+                "features": [
+                    {
+                        "type": "Feature",
+                        "geometry": {
+                            "type": "Point",
+                            "coordinates": [LON_START, LAT_START],
+                        },
+                    }
+                ],
+            },
+        )
+        assert response.status_code == 400
+
     def test_probe(self, client: TestClient):
         response = client.post(
             f"/datasets/{DATASET_MULTILEVEL}/probes?time=2026-01-01&variables=temperature&isobaricInhPa=100",
             json={"points": [{"lon": LON_START, "lat": LAT_START}]},
         )
-        data = response.json()
         assert response.status_code == 200
-        assert len(data) == 1
-        assert "variables" in data[0]
-        assert "temperature" in data[0]["variables"]
+        data = response.json()
+        assert "times" in data
+        assert "variables" in data
+        assert "temperature" in data["variables"]
+        values = data["values"]["temperature"]
+        assert isinstance(values, list)
+        assert len(values) == 1  # 1 probe points
+        assert all(
+            isinstance(v, list) and len(v) == 1 for v in values
+        )  # 1 time steps requested
+
+    def test_probe_geojson(self, client: TestClient):
+        response = client.post(
+            f"/datasets/{DATASET_MULTILEVEL}/probes?time=2026-01-01&variables=temperature&isobaricInhPa=100",
+            json={
+                "type": "FeatureCollection",
+                "features": [
+                    {
+                        "type": "Feature",
+                        "geometry": {
+                            "type": "Point",
+                            "coordinates": [LON_START, LAT_START],
+                        },
+                    }
+                ],
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert "times" in data
+        assert "variables" in data
+        assert "temperature" in data["variables"]
+        values = data["values"]["temperature"]
+        assert isinstance(values, list)
+        assert len(values) == 1  # 1 probe points
+        assert all(
+            isinstance(v, list) and len(v) == 1 for v in values
+        )  # 1 time steps requested
 
     # ------------------------------------------------------------------
     # Extract
