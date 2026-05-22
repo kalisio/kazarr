@@ -1,4 +1,5 @@
 import numpy as np
+from loguru import logger as log
 
 import src.exceptions as exceptions
 
@@ -205,8 +206,9 @@ def sel(
                     "akima",
                     "makima",
                 ]:
-                    print(
-                        f"[Kazarr - Warning] Unsupported interpolation method: {interp_method}. Falling back to linear."
+                    log.warning(
+                        "[Kazarr] Unsupported interpolation method: {interp_method}. Falling back to linear.",
+                        interp_method=interp_method,
                     )
                     interp_method = "linear"
                 data = data.interp(

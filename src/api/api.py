@@ -4,6 +4,8 @@ import sys
 # import time
 
 from fastapi import FastAPI, Request
+
+from loguru import logger as log
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -91,7 +93,7 @@ async def user_input_exception_handler(
 
 @app.exception_handler(exceptions.RequestCancelled)
 async def request_cancelled_handler(request: Request, exc: exceptions.RequestCancelled):
-    print("[KAZARR] Request cancelled by client:", str(exc))
+    log.info("[KAZARR] Request cancelled by client: {message}", message=str(exc))
     return JSONResponse(status_code=499, content={"detail": str(exc)})
 
 

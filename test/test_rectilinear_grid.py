@@ -206,6 +206,7 @@ class TestRectilinearGrid:
         feature = data["features"][0]
         assert "Precipitation" in feature["properties"]
         assert isinstance(feature["properties"]["Precipitation"], (int, float))
+
     def test_extract_cells_data_mapping(self, client: TestClient):
         """Extract endpoint with mesh_data_mapping=cells returns a list of cell values."""
         response = client.get(

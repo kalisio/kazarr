@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 import logging
 import time
@@ -7,7 +8,23 @@ from src import exceptions
 
 from loguru import logger as log
 
-log.add("logs/app_fastapi.log", rotation="10 MB", compression="zip", level="INFO")
+
+def configure_logging(debug=False, log_level="INFO"):
+    log.remove()
+    log.add(
+        "logs/app_fastapi.log",
+        rotation="10 MB",
+        compression="zip",
+    )
+    log.add(
+        sys.stderr,
+        level=log_level.upper(),
+    )
+    if debug:
+        os.environ["DEBUG"] = "1"
+        enable_s3fs_debug_logging()
+    else:
+        os.environ.pop("DEBUG", None)
 
 
 class KazarrLoggerHandler(logging.Handler):
@@ -19,8 +36,10 @@ class KazarrLoggerHandler(logging.Handler):
         if formatted_record.startswith("CALL: get_object"):
             try:
                 data = json.loads(formatted_record.split(" - ")[-1].replace("'", '"'))
-                print(
-                    f"[Kazarr - S3FS] Try downloading {data.get('Bucket')}/{data.get('Key')}"
+                log.debug(
+                    "[Kazarr - S3FS] Try downloading {bucket}/{key}",
+                    bucket=data.get("Bucket"),
+                    key=data.get("Key"),
                 )
             except Exception:
                 pass
@@ -58,9 +77,6 @@ class StepDurationLogger:
             current_step["end_time"] = time.perf_counter()
 
     def log(self):
-        if os.getenv("DEBUG") != "1":
-            return
-
         total_end_time = time.perf_counter()
         total_duration = total_end_time - self.start_time
 
@@ -71,7 +87,6 @@ class StepDurationLogger:
                 log_message += f" | Step {step['name']}: {step_duration:.4f}s"
             else:
                 log_message += f" | Step '{step['name']}': not ended"
-
         log.info(log_message.strip())
 
     def end(self):

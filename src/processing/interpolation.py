@@ -6,6 +6,7 @@ from scipy.interpolate import (
     RBFInterpolator,
 )
 
+from loguru import logger as log
 
 from src import exceptions
 from src.processing.contexts import BBoxContext
@@ -317,15 +318,14 @@ def apply_spatial_interpolation_irregular_grid_3d(
     )
 
     if method == "cubic":
-        print(
-            "[Kazarr - Warning] 'cubic' is not supported for 3D interpolation. "
-            "Falling back to 'linear'."
+        log.warning(
+            "[Kazarr] 'cubic' is not supported for 3D interpolation. Falling back to 'linear'."
         )
         method = "linear"
     if method not in ["nearest", "linear", "idw", "rbf"]:
-        print(
-            f"[Kazarr - Warning] Unsupported 3D interpolation method: {method}. "
-            "Falling back to 'linear'."
+        log.warning(
+            "[Kazarr] Unsupported 3D interpolation method: {method}. Falling back to 'linear'.",
+            method=method,
         )
         method = "linear"
 
@@ -388,8 +388,9 @@ def apply_spatial_interpolation_irregular_grid(
     pts_target = np.column_stack((target_lon_mesh.ravel(), target_lat_mesh.ravel()))
 
     if method not in ["nearest", "linear", "cubic", "idw", "rbf"]:
-        print(
-            f"[Kazarr - Warning] Unsupported interpolation method: {method}. Falling back to linear."
+        log.warning(
+            "[Kazarr] Unsupported interpolation method: {method}. Falling back to linear.",
+            method=method,
         )
         method = "linear"
 

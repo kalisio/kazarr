@@ -11,6 +11,7 @@ from botocore.exceptions import NoCredentialsError
 from zarr.abc.store import Store
 from zarr.core.buffer import Buffer, BufferPrototype
 
+from loguru import logger as log
 import src.exceptions as exceptions
 
 
@@ -107,7 +108,7 @@ def find_datasets(path="/"):
         full_path = (
             os.path.join(get_datasets_path().rstrip("/"), path.lstrip("/")) or "."
         )
-        print("[KAZARR] Searching datasets in path:", full_path)
+        log.info("[KAZARR] Searching datasets in path: {path}", path=full_path)
         for root, dirs, _ in os.walk(full_path):
             for dirname in dirs:
                 if dirname.endswith(".zarr"):
@@ -196,10 +197,10 @@ def enforce_cache_limit(cache_dir, max_size="512MB"):
     if total_size < max_size_bytes:
         return
 
-    if os.getenv("DEBUG") == "1":
-        print(
-            f"[Kazarr - Cache] Cache exceeding max size of {max_size_bytes / 1e6:.2f} MB. Starting cleanup..."
-        )
+    log.debug(
+        "[Kazarr - Cache] Cache exceeding max size of {max_size_mb:.2f} MB. Starting cleanup...",
+        max_size_mb=max_size_bytes / 1e6,
+    )
 
     # 2. Retrieve all files with their modification date
     files = []

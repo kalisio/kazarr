@@ -4,6 +4,8 @@ import numpy as np
 from scipy.spatial import cKDTree
 from typing import Dict, Tuple, Optional
 
+from loguru import logger as log
+
 _spatial_index_cache: Dict[Tuple, cKDTree] = {}
 MAX_CACHE_SIZE = os.getenv("KDTREE_MAX_CACHE_SIZE", 10)
 
@@ -44,21 +46,21 @@ def get_cached_ckdtree(
         cache_key = (data_hash,)
 
     if cache_key in _spatial_index_cache:
-        print(
-            "[KAZARR] Using cached spatial index (cKDTree) for points with shape",
-            points.shape,
+        log.info(
+            "[KAZARR] Using cached spatial index (cKDTree) for points with shape {shape}",
+            shape=points.shape,
         )
         return _spatial_index_cache[cache_key]
 
-    print(
-        "[KAZARR] Building new spatial index (cKDTree) for points with shape",
-        points.shape,
+    log.info(
+        "[KAZARR] Building new spatial index (cKDTree) for points with shape {shape}",
+        shape=points.shape,
     )
     tree = cKDTree(points)
 
     # Manage cache size
     if len(_spatial_index_cache) >= MAX_CACHE_SIZE:
-        print("[KAZARR] Cache size limit reached, evicting oldest entry")
+        log.warning("[KAZARR] Cache size limit reached, evicting oldest entry")
         # Simple FIFO-ish eviction: remove a random entry or the first one
         _spatial_index_cache.pop(next(iter(_spatial_index_cache)))
 
