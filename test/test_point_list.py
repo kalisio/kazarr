@@ -377,10 +377,10 @@ class TestPointList:
         assert "Humidity" in data["variables"]
         values = data["values"]["Humidity"]
         assert isinstance(values, list)
-        assert len(values) == 2  # 2 probe points
+        assert len(values) == N_TIMES  # 5 time steps
         assert all(
-            isinstance(v, list) and len(v) == N_TIMES for v in values
-        )  # 5 time steps in the dataset
+            isinstance(v, list) and len(v) == 2 for v in values
+        )  # 2 points
 
     def test_probes_multiple_points_geojson(self, client: TestClient):
         """Probe multiple points with GeoJSON FeatureCollection body."""
@@ -408,9 +408,9 @@ class TestPointList:
         assert "Humidity" in data["variables"]
         values = data["values"]["Humidity"]
         assert isinstance(values, list)
-        assert len(values) == 2
+        assert len(values) == N_TIMES
         assert all(
-            isinstance(v, list) and len(v) == N_TIMES for v in values
+            isinstance(v, list) and len(v) == 2 for v in values
         )
 
     def test_probe_time_at_station(self, client: TestClient):

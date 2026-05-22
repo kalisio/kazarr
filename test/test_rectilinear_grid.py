@@ -392,10 +392,10 @@ class TestRectilinearGrid:
         assert "Precipitation" in data["variables"]
         values = data["values"]["Precipitation"]
         assert isinstance(values, list)
-        assert len(values) == 2  # 2 probe points
+        assert len(values) == 5  # 5 time steps
         assert all(
-            isinstance(v, list) and len(v) == 5 for v in values
-        )  # 5 time steps
+            isinstance(v, list) and len(v) == 2 for v in values
+        )  # 2 probe points
 
     def test_probes_multiple_points_geojson(self, client: TestClient):
         """Probe multiple points with GeoJSON FeatureCollection body."""
@@ -423,9 +423,9 @@ class TestRectilinearGrid:
         assert "Precipitation" in data["variables"]
         values = data["values"]["Precipitation"]
         assert isinstance(values, list)
-        assert len(values) == 2
+        assert len(values) == 5
         assert all(
-            isinstance(v, list) and len(v) == 5 for v in values
+            isinstance(v, list) and len(v) == 2 for v in values
         )
 
     # ------------------------------------------------------------------

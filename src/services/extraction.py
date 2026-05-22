@@ -759,10 +759,13 @@ def multi_probe(
         if var_props is None:
             var_props = {var: result["variables"][var] for var in variables}
     vals = [vals[var] for var in variables]
+    # As probe returns values with dims (points, times) and output formatter will expect (times, points), we need to transpose the first two dimensions here
+    # Here, dim 0 is the variable dimension
+    vals = np.array(vals).transpose(0, 2, 1)
     if format == "raw":
         out = output.prepare_raw_output(
             variables,
-            np.asarray(vals),
+            vals,
             np.asarray(lons),
             np.asarray(lats),
             zs=np.asarray(zs) if zs and any(zs) else None,
@@ -772,7 +775,7 @@ def multi_probe(
     elif format == "geojson":
         out = output.prepare_geojson_output(
             variables,
-            np.asarray(vals),
+            vals,
             np.asarray(lons),
             np.asarray(lats),
             zs=np.asarray(zs) if zs and any(zs) else None,
@@ -828,7 +831,13 @@ def free_selection(
     )
 
     step_logger.step_start("Extract variable values for free selection")
-    data = sel(dataset, variable, fixed_coords, fixed_dims, interp_vars).values.tolist()
+    data = sel(dataset, variable, fixed_coords, fixed_dims, interp_vars)
+
+    data_values = data.values if hasattr(data, "values") else np.asarray(data)
+    if np.issubdtype(data_values.dtype, np.number):
+        data = np.where(np.isnan(data_values), None, data_values).tolist()
+    else:
+        data = data_values.tolist()
 
     step_logger.end()
     return {"data": data}

@@ -369,10 +369,10 @@ class TestRegularGrid:
         assert "Value" in data["variables"]
         values = data["values"]["Value"]
         assert isinstance(values, list)
-        assert len(values) == 2  # 2 probe points
+        assert len(values) == TIMES  # 5 time steps in the dataset
         assert all(
-            isinstance(v, list) and len(v) == TIMES for v in values
-        )  # 5 time steps in the dataset
+            isinstance(v, list) and len(v) == 2 for v in values
+        )  # 2 points
 
     def test_probes_multiple_points_geojson(self, client: TestClient):
         """Probe multiple points with GeoJSON FeatureCollection body."""
@@ -400,9 +400,9 @@ class TestRegularGrid:
         assert "Value" in data["variables"]
         values = data["values"]["Value"]
         assert isinstance(values, list)
-        assert len(values) == 2
+        assert len(values) == TIMES
         assert all(
-            isinstance(v, list) and len(v) == TIMES for v in values
+            isinstance(v, list) and len(v) == 2 for v in values
         )
 
     # ------------------------------------------------------------------

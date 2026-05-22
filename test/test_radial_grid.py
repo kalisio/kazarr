@@ -298,8 +298,8 @@ class TestRadialGrid:
         assert "WindSpeed" in data["variables"]
         values = data["values"]["WindSpeed"]
         assert isinstance(values, list)
-        assert len(values) == 2 # 2 probe points
-        assert all(isinstance(v, list) and len(v) == 5 for v in values) # 5 time steps in the dataset
+        assert len(values) == 5 # 5 time steps
+        assert all(isinstance(v, list) and len(v) == 2 for v in values) # 2 points
 
     def test_probes_multiple_points_geojson(self, client: TestClient):
         """Probe multiple points with GeoJSON FeatureCollection body."""
@@ -327,8 +327,36 @@ class TestRadialGrid:
         assert "WindSpeed" in data["variables"]
         values = data["values"]["WindSpeed"]
         assert isinstance(values, list)
-        assert len(values) == 2
-        assert all(isinstance(v, list) and len(v) == 5 for v in values) # 5 time steps in the dataset
+        assert len(values) == 5 # 5 time steps in the dataset
+        assert all(isinstance(v, list) and len(v) == 2 for v in values) # 2 points
+
+    def test_probes_multiple_points_geojson_output(self, client: TestClient):
+        """Probe multiple points with GeoJSON output returns time series per feature."""
+        payload = {
+            "type": "FeatureCollection",
+            "features": [
+                {
+                    "type": "Feature",
+                    "geometry": {"type": "Point", "coordinates": [2.3, 43.3]},
+                },
+                {
+                    "type": "Feature",
+                    "geometry": {"type": "Point", "coordinates": [2.4, 43.4]},
+                },
+            ],
+        }
+        response = client.post(
+            f"/datasets/{DATASET_NAME}/probes?variables=WindSpeed&format=geojson",
+            json=payload,
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["type"] == "FeatureCollection"
+        assert "features" in data
+        assert len(data["features"]) == 2
+        feature_values = [f["properties"]["WindSpeed"] for f in data["features"]]
+        assert all(isinstance(v, list) and len(v) == 5 for v in feature_values)
 
     # ------------------------------------------------------------------
     # Mesh endpoint
