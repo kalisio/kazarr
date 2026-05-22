@@ -260,3 +260,23 @@ def timestamp_to_datetime(timestamp):
         divisor = 1e9  # Nanoseconds
 
     return datetime.fromtimestamp(ts / divisor)
+
+
+def check_store_as_secondary(dataset, new_dataset, config):
+    store_as_secondary = get_ci(config, "store_as_secondary", default=False)
+    secondary_tag = get_ci(config, "secondary_tag")
+
+    if store_as_secondary:
+        if "secondary_datasets" not in config:
+            config["secondary_datasets"] = {}
+        if secondary_tag and secondary_tag in config["secondary_datasets"]:
+            print(
+                f"[KAZARR] Warning: Secondary dataset tag '{secondary_tag}' already exists in config. Overwriting it with the newly loaded dataset."
+            )
+        elif not secondary_tag:
+            secondary_tag = f"secondary_{len(config.get('secondary_datasets', {})) + 1}"
+
+        config["secondary_datasets"][secondary_tag] = new_dataset
+    else:
+        dataset = new_dataset
+    return dataset, config

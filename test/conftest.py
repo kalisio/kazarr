@@ -27,7 +27,7 @@ _tool_dir = _root_dir / "conversion_tool"
 TEST_TMP_FOLDER = "test/tests_tmp"
 os.environ.setdefault("TEST_TMP_FOLDER", TEST_TMP_FOLDER)
 # Remove BUCKET_NAME to avoid kazarr to search for S3 credentials during testing, as we want to test with local files and not S3.
-del os.environ["BUCKET_NAME"]
+os.environ.pop("BUCKET_NAME", None)
 # Set the DATASETS_PATH to the test temporary folder as kazarr needs to reach test datasets during testing
 os.environ["DATASETS_PATH"] = TEST_TMP_FOLDER
 os.makedirs(TEST_TMP_FOLDER, exist_ok=True)

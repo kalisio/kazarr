@@ -56,6 +56,7 @@ def load_from_netcdf(dataset, config):
         message="Missing 'load_path' or 'path' config parameters for load_from_netcdf process.",
     )
 
+    new_dataset = None
     if path.startswith("s3://"):
         bucket = os.getenv("BUCKET_NAME")
         if bucket is None:
@@ -66,12 +67,11 @@ def load_from_netcdf(dataset, config):
         # Check if path is folder or file
         fs = get_s3_filesystem(config, path)
         if fs.isfile(path):
-            dataset = xr.open_dataset(
+            new_dataset = xr.open_dataset(
                 fs.open(path, mode="rb", cache_type="bytes"),
                 engine="h5netcdf",
                 chunks="auto",
             )
-            return dataset, config
         elif fs.isdir(path):
             concat_dim = get_ci(
                 config,
@@ -85,7 +85,7 @@ def load_from_netcdf(dataset, config):
 
             print(f"Loading {total_count} NetCDF files from S3 folder {path}...")
 
-            dataset = xr.open_mfdataset(
+            new_dataset = xr.open_mfdataset(
                 s3_files,
                 engine="h5netcdf",
                 combine="nested",
@@ -99,7 +99,7 @@ def load_from_netcdf(dataset, config):
             )
     else:
         if os.path.isfile(path):
-            dataset = xr.open_dataset(path, chunks="auto", engine="h5netcdf")
+            new_dataset = xr.open_dataset(path, chunks="auto", engine="h5netcdf")
         elif os.path.isdir(path):
             concat_dim = get_ci(
                 config,
@@ -112,7 +112,7 @@ def load_from_netcdf(dataset, config):
             files = sorted(files)
             total_count = len(files)
 
-            dataset = xr.open_mfdataset(
+            new_dataset = xr.open_mfdataset(
                 files,
                 engine="h5netcdf",
                 combine="nested",
@@ -125,9 +125,9 @@ def load_from_netcdf(dataset, config):
                 preprocess=progress_callback,
             )
 
-    if dataset is None:
+    if new_dataset is None:
         raise ValueError(f"Unable to load NetCDF dataset from path: {path}")
-    return dataset, config
+    return check_store_as_secondary(dataset, new_dataset, config)
 
 
 def load_from_grib(dataset, config):
@@ -151,7 +151,7 @@ def load_from_grib(dataset, config):
     file_pattern = get_ci(config, "file_regex", "*.grib2")
     backend_kwargs = get_ci(config, "backend_kwargs", default={})
 
-    dataset = None
+    new_dataset = None
     if path.startswith("s3://"):
         bucket = os.getenv("BUCKET_NAME")
         if bucket is None:
@@ -166,7 +166,7 @@ def load_from_grib(dataset, config):
             os.makedirs(target_tmp_dir, exist_ok=True)
             if not os.path.exists(os.path.join(target_tmp_dir, os.path.basename(path))):
                 fs.get(path, os.path.join(target_tmp_dir, os.path.basename(path)))
-            dataset = xr.open_dataset(
+            new_dataset = xr.open_dataset(
                 os.path.join(target_tmp_dir, os.path.basename(path)),
                 engine="cfgrib",
                 chunks="auto",
@@ -193,7 +193,7 @@ def load_from_grib(dataset, config):
             s3_files = [fs.open(f) for f in files]
             total_count = len(s3_files)
 
-            dataset = xr.open_mfdataset(
+            new_dataset = xr.open_mfdataset(
                 s3_files,
                 engine="cfgrib",
                 combine="nested",
@@ -210,7 +210,7 @@ def load_from_grib(dataset, config):
         if os.path.isfile(path):
             backend_kwargs["errors"] = "raise"
             try:
-                dataset = xr.open_dataset(
+                new_dataset = xr.open_dataset(
                     path, engine="cfgrib", chunks="auto", backend_kwargs=backend_kwargs
                 )
             except cfgrib.dataset.DatasetBuildError:
@@ -224,7 +224,7 @@ def load_from_grib(dataset, config):
                     full_variables.update(ds.data_vars)
                     full_variables.update(ds.coords)
                 if len(datasets) == 1:
-                    dataset = datasets[0].chunk("auto")
+                    new_dataset = datasets[0].chunk("auto")
                 else:
                     try:
                         print(
@@ -233,9 +233,9 @@ def load_from_grib(dataset, config):
                         # Use chunk("auto") on each dataset to enable Dask parallelism during merge, which can help reduce memory usage and speed up the process
                         for i, ds in enumerate(datasets):
                             datasets[i] = ds.chunk("auto")
-                        dataset = xr.merge(datasets, compat="minimal", join="outer")
-                        final_variables.update(dataset.data_vars)
-                        final_variables.update(dataset.coords)
+                        new_dataset = xr.merge(datasets, compat="minimal", join="outer")
+                        final_variables.update(new_dataset.data_vars)
+                        final_variables.update(new_dataset.coords)
                         removed_variables = full_variables - final_variables
                         if removed_variables:
                             print(
@@ -264,7 +264,7 @@ def load_from_grib(dataset, config):
             files = sorted(files)
             total_count = len(files)
 
-            dataset = xr.open_mfdataset(
+            new_dataset = xr.open_mfdataset(
                 files,
                 engine="cfgrib",
                 combine="nested",
@@ -277,9 +277,9 @@ def load_from_grib(dataset, config):
                 preprocess=progress_callback,
                 **backend_kwargs,
             )
-    if dataset is None:
+    if new_dataset is None:
         raise ValueError(f"Unable to load GRIB dataset from path: {path}")
-    return dataset, config
+    return check_store_as_secondary(dataset, new_dataset, config)
 
 
 def load_from_zarr(dataset, config):
@@ -301,10 +301,10 @@ def load_from_zarr(dataset, config):
         s3_store = s3fs.S3Map(
             root=path, s3=get_s3_filesystem(config, path), check=False
         )
-        dataset = xr.open_zarr(s3_store, chunks="auto")
+        new_dataset = xr.open_zarr(s3_store, chunks="auto")
     else:
-        dataset = xr.open_zarr(path, chunks="auto")
-    return dataset, config
+        new_dataset = xr.open_zarr(path, chunks="auto")
+    return check_store_as_secondary(dataset, new_dataset, config)
 
 
 def load_and_merge_from_grib(dataset, config):
@@ -362,18 +362,86 @@ def load_and_merge_from_grib(dataset, config):
 
     if sub_datasets:
         merged_dataset = xr.merge(sub_datasets)
-        dataset = rechunk_if_needed(
+        new_dataset = rechunk_if_needed(
             merged_dataset
         )  # Re-chunk usually needed after merge
     else:
-        dataset = None
+        new_dataset = None
 
-    if dataset is None:
+    if new_dataset is None:
         raise ValueError(
             f"Unable to find any files matching discriminators {discriminators} in path: {path} for load_and_merge_from_grib process."
         )
 
-    return dataset, config
+    return check_store_as_secondary(dataset, new_dataset, config)
+
+
+def combine_at_time(dataset, config):
+    """Combine the main dataset with another dataset along the time dimension."""
+    combine_time = get_ci(
+        config,
+        "combine_time",
+        message="Missing 'combine_time' config parameter for combine_at_time process.",
+    )
+    combine_dataset_tag = get_ci(config, "combine_dataset_tag", default="secondary_1")
+    time_var = get_ci(
+        config,
+        "variables.time",
+        message="Missing 'variables.time' config parameter for combine_at_time process.",
+    )
+
+    if (
+        "secondary_datasets" not in config
+        or combine_dataset_tag not in config["secondary_datasets"]
+    ):
+        raise ValueError(
+            f"Dataset with tag '{combine_dataset_tag}' not found in config 'secondary_datasets' for combine_at_time process."
+        )
+
+    combine_dataset = config["secondary_datasets"][combine_dataset_tag]
+
+    if time_var not in dataset:
+        raise ValueError(
+            f"Time variable '{time_var}' not found in the main dataset for combine_at_time process."
+        )
+    if time_var not in combine_dataset:
+        raise ValueError(
+            f"Time variable '{time_var}' not found in the secondary dataset '{combine_dataset_tag}' for combine_at_time process."
+        )
+
+    def normalize_combine_time(value):
+        if isinstance(value, np.datetime64):
+            return value
+        if isinstance(value, datetime):
+            return np.datetime64(value)
+        if isinstance(value, str):
+            try:
+                return np.datetime64(value)
+            except ValueError:
+                return np.datetime64(timestamp_to_datetime(value))
+        if isinstance(value, (int, float)):
+            return np.datetime64(timestamp_to_datetime(value))
+        return value
+
+    if np.issubdtype(dataset[time_var].dtype, np.datetime64) or np.issubdtype(
+        combine_dataset[time_var].dtype, np.datetime64
+    ):
+        combine_time = normalize_combine_time(combine_time)
+
+    primary_before = dataset.sel({time_var: dataset[time_var] <= combine_time})
+    secondary_after = combine_dataset.sel(
+        {time_var: combine_dataset[time_var] > combine_time}
+    )
+
+    if len(primary_before[time_var]) == 0:
+        combined_dataset = secondary_after
+    elif len(secondary_after[time_var]) == 0:
+        combined_dataset = primary_before
+    else:
+        combined_dataset = xr.concat([primary_before, secondary_after], dim=time_var)
+
+    combined_dataset = combined_dataset.sortby(time_var)
+    return combined_dataset, config
 
 
 def assign_coords(dataset, config):

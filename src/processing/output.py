@@ -99,21 +99,34 @@ def prepare_output(
     no_data = True
     out_vars_props = {}
     for i, var_name in enumerate(var_names):
-        var_vals = vals[i].flatten()
-        valid_vals = var_vals[~np.isnan(var_vals)]
-        if valid_vals.size == 0:
-            continue
-        no_data = False
-        var_vals = np.where(np.isnan(var_vals), None, var_vals)
+        var_vals = np.asarray(vals[i]).flatten()
+        if np.issubdtype(var_vals.dtype, np.number):
+            valid_vals = var_vals[~np.isnan(var_vals)]
+            if valid_vals.size == 0:
+                continue
+            no_data = False
+            var_vals = np.where(np.isnan(var_vals), None, var_vals)
+            bounds = {"min": float(valid_vals.min()), "max": float(valid_vals.max())}
+        else:
+            if var_vals.size == 0:
+                continue
+
+            cleaned = [
+                None if isinstance(v, float) and np.isnan(v) else v for v in var_vals
+            ]
+            var_vals = np.array(cleaned, dtype=object)
+            if all(v is None for v in cleaned):
+                continue
+
+            no_data = False
+            bounds = None
         var_vals = (
             var_vals.reshape(vals[0].shape[0], -1) if has_time_dimension else var_vals
         )
         vals_dict[var_name] = var_vals.tolist()
-        out_vars_props[var_name] = var_props.get(var_name, {})
-        out_vars_props[var_name]["bounds"] = {
-            "min": float(valid_vals.min()),
-            "max": float(valid_vals.max()),
-        }
+        out_vars_props[var_name] = var_props.get(var_name, {}).copy()
+        if bounds is not None:
+            out_vars_props[var_name]["bounds"] = bounds
     if no_data:
         raise exceptions.NoDataInSelection()
 
