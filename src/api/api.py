@@ -9,6 +9,7 @@ from loguru import logger as log
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 
 import src.exceptions as exceptions
 from src.api.routers import dataset, extract, probe, isoline, mesh, select
@@ -38,6 +39,10 @@ app.add_middleware(
     allow_credentials=False,  # Cannot be True when allow_origins is ["*"]
     allow_methods=["*"],
     allow_headers=["*"],
+)
+app.add_middleware(
+    GZipMiddleware,
+    minimum_size=1024 # Starting from 1KB
 )
 
 
