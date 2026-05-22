@@ -107,6 +107,36 @@ This lets you avoid repeating parameters for datasets with the same structure.
 
 To use a template, reference keys in `templates.json` (or your custom templates file) using the `-t` or `--template` argument.
 
+### Tips to create a template file
+
+The best way to write a template is to first inspect your raw data using Python and xarray. This allows you to see the dataset structure exactly as the Kazarr conversion tool will see it, making it easier to choose which processes to apply.
+
+```python
+import xarray as xr
+
+# Open the dataset (use engine="cfgrib" for GRIB or "h5netcdf" for NetCDF)
+dataset = xr.open_dataset("path/to/dataset", engine="cfgrib", chunks="auto")
+
+# 1. Check Dimensions and Coordinates
+dataset.dims   # Identify dimensions (useful for 'concat_dim' in load processes)
+dataset.coords # If some variables act as coordinates but are listed as data_vars, you will need the `assign_coords` process.
+
+# 2. List Variables
+dataset.data_vars.keys() # Use these names to configure `keep_variables`, `exclude_variables`, or `rename_variables`.
+
+# 3. Inspect Attributes
+dataset.attrs                # Global metadata
+dataset["myVariable"].attrs  # Variable metadata. Check 'units' here to see if you need the `delta_time_to_datetime` process (e.g., "hours since...").
+
+# 4. Check Data Types and Chunks
+dataset["myVariable"].dtype  # If float64, you might want to enable `float64_to_float32` in the `save` process to reduce file size.
+```
+
+By exploring the dataset, you can quickly deduce your pipeline needs:
+  - Time offset? If the time is an integer with a unit like "hours since 1970-01-01", add delta_time_to_datetime.
+  - Local projection? If X/Y coordinates are in a specific CRS (like Lambert 93), note their exact names to configure reproject_coordinates.
+  - Cluttered data? If dataset.data_vars shows 50 variables but you only need 3, use keep_variables.
+
 ## Processes
 
 These are the processes you can use in your pipelines.
