@@ -72,19 +72,19 @@ class TestCombineRadialGrid:
             },
             "lat": {
                 "type": "load",
-                "sample": "radial_grid.nc",
+                "sample": "radial_mesh_resize1.nc",
                 "variable": "CoordY0",
                 "dimensions": ["DimK", "DimJ", "DimI"],
             },
             "lon": {
                 "type": "load",
-                "sample": "radial_grid.nc",
+                "sample": "radial_mesh_resize1.nc",
                 "variable": "CoordX0",
                 "dimensions": ["DimK", "DimJ", "DimI"],
             },
             "height": {
                 "type": "load",
-                "sample": "radial_grid.nc",
+                "sample": "radial_mesh_resize1.nc",
                 "variable": "CoordZ0",
                 "dimensions": ["DimK", "DimJ", "DimI"],
             },
@@ -159,19 +159,19 @@ class TestCombineRadialGrid:
             },
             "lat": {
                 "type": "load",
-                "sample": "radial_grid.nc",
+                "sample": "radial_mesh_resize2.nc",
                 "variable": "CoordY0",
                 "dimensions": ["DimK", "DimJ", "DimI"],
             },
             "lon": {
                 "type": "load",
-                "sample": "radial_grid.nc",
+                "sample": "radial_mesh_resize2.nc",
                 "variable": "CoordX0",
                 "dimensions": ["DimK", "DimJ", "DimI"],
             },
             "height": {
                 "type": "load",
-                "sample": "radial_grid.nc",
+                "sample": "radial_mesh_resize2.nc",
                 "variable": "CoordZ0",
                 "dimensions": ["DimK", "DimJ", "DimI"],
             },
@@ -250,13 +250,18 @@ class TestCombineRadialGrid:
 
     def test_combined_dataset_variables(self, client: TestClient):
         """Check that the combined dataset contains the expected variables and data."""
-        response = client.get(
-            f"/datasets/{DATASET_NAME_RADIAL}_combined/metadata"
-        )
+        response = client.get(f"/datasets/{DATASET_NAME_RADIAL}_combined/metadata")
 
         assert response.status_code == 200
         metadata = response.json()
-        expected_variables = {"lon", "lat", "height", "WindSpeed", "Precipitation", "Temperature"}
+        expected_variables = {
+            "lon",
+            "lat",
+            "height",
+            "WindSpeed",
+            "Precipitation",
+            "Temperature",
+        }
         assert set(metadata["variables"].keys()) == expected_variables
 
     def test_combined_dataset_common_variable(self, client: TestClient):
@@ -269,7 +274,12 @@ class TestCombineRadialGrid:
         data = response.json()
         np_arr = np.array(data["data"])
         first_part = np_arr[:3]  # First 2 time steps should be from dataset v1 (0-150)
-        second_part = np_arr[3:]  # Last 3 time steps should be from
+        second_part = np_arr[
+            3:
+        ]  # Last 3 time steps should be from dataset v2 (150-300)
+        # Get values without None values
+        first_part = first_part[~np.equal(first_part, None)]
+        second_part = second_part[~np.equal(second_part, None)]
         assert first_part.max() <= 150
         assert second_part.min() >= 150
 
@@ -284,9 +294,13 @@ class TestCombineRadialGrid:
         np_arr = np.array(data["data"])
         first_part = np_arr[:3]  # First 2 time steps should be from dataset v1 (0-150)
         second_part = np_arr[3:]  # Last 3 time steps should be from
+        first_part = first_part[~np.equal(first_part, None)]
+        second_part = second_part[~np.equal(second_part, None)]
         assert first_part.min() >= -20
         assert first_part.max() <= 40
-        assert np.equal(second_part, None).all() # Should be filled with None since Temperature is missing in dataset v2
+        assert np.equal(
+            second_part, None
+        ).all()  # Should be filled with None since Temperature is missing in dataset v2
 
     def test_combined_dataset_added_variable(self, client: TestClient):
 
@@ -299,12 +313,11 @@ class TestCombineRadialGrid:
         np_arr = np.array(data["data"])
         first_part = np_arr[:3]  # First 2 time steps should be from dataset v1 (0-150)
         second_part = np_arr[3:]  # Last 3 time steps should be from
-        assert np.equal(
-            first_part, None
-        ).all()  # Should be filled with None since Precipitation is missing in dataset v1
+        assert (
+            np.equal(first_part, None).all()
+        )  # Should be filled with None since Precipitation is missing in dataset v1
         assert second_part.min() >= 50
         assert second_part.max() <= 80
-
 
 
 DATASET_NAME_POINT_LIST = "point_list_combine"
@@ -403,7 +416,9 @@ class TestPointList:
         dataset = utils.DatasetGenerator(description=description).generate()
         dataset.save(f"{DATASET_NAME_POINT_LIST}_v1", to_netcdf=True)
 
-        assert os.path.exists(os.path.join(TMP_FOLDER, f"{DATASET_NAME_POINT_LIST}_v1.nc"))
+        assert os.path.exists(
+            os.path.join(TMP_FOLDER, f"{DATASET_NAME_POINT_LIST}_v1.nc")
+        )
 
     def test_convert_dataset_v1(self, convert):
         """Convert the NetCDF to Zarr format."""
@@ -453,22 +468,22 @@ class TestPointList:
             },
             "lat": {
                 "type": "array",
-                "values": STATION_LATS[N_REDUCED_AMOUNT:],
+                "values": STATION_LATS[N_REDUCED_AMOUNT + 1 :],
                 "dimensions": ["DimN"],
             },
             "lon": {
                 "type": "array",
-                "values": STATION_LONS[N_REDUCED_AMOUNT:],
+                "values": STATION_LONS[N_REDUCED_AMOUNT + 1 :],
                 "dimensions": ["DimN"],
             },
             "height": {
                 "type": "array",
-                "values": [0.0] * (N_STATIONS - N_REDUCED_AMOUNT),
+                "values": [0.0] * (N_STATIONS - N_REDUCED_AMOUNT - 1),
                 "dimensions": ["DimN"],
             },
             "name": {
                 "type": "array",
-                "values": STATION_NAMES[N_REDUCED_AMOUNT:],
+                "values": STATION_NAMES[N_REDUCED_AMOUNT + 1 :],
                 "dimensions": ["DimN"],
             },
         }
@@ -509,7 +524,9 @@ class TestPointList:
 
     def test_combine_datasets(self, convert):
         """Combine the two Zarr datasets into one."""
-        output_path = os.path.join(TMP_FOLDER, f"{DATASET_NAME_POINT_LIST}_combined.zarr")
+        output_path = os.path.join(
+            TMP_FOLDER, f"{DATASET_NAME_POINT_LIST}_combined.zarr"
+        )
         convert(
             input_path=os.path.join(TMP_FOLDER, f"{DATASET_NAME_POINT_LIST}_v1.zarr"),
             output_path=output_path,
@@ -552,16 +569,42 @@ class TestPointList:
     def test_combined_dataset_points(self, client: TestClient):
         """Check that the combined dataset contains the expected points."""
         response = client.get(
+            f"/datasets/{DATASET_NAME_POINT_LIST}_combined/select?variable=Humidity"
+        )
+
+        stations = client.get(
             f"/datasets/{DATASET_NAME_POINT_LIST}_combined/select?variable=name"
         )
 
         assert response.status_code == 200
+        assert stations.status_code == 200
         data = response.json()
+        stations = stations.json()
+
         assert "data" in data
         assert len(data["data"]) == N_TIMES
+
+        assert "data" in stations
+        assert len(stations["data"]) == N_STATIONS
+        stations_list = stations["data"]
+
         first_part = data["data"][:-N_REDUCED_AMOUNT]
-        second_part = data["data"][N_REDUCED_AMOUNT:]
-        first_part_stations = [name.decode() for name in STATION_NAMES[:-N_REDUCED_AMOUNT]]
-        second_part_stations = [name.decode() for name in STATION_NAMES[N_REDUCED_AMOUNT:]]
-        assert np.equal(first_part, first_part_stations).all()
-        assert np.equal(second_part, second_part_stations).all()
+        second_part = data["data"][N_REDUCED_AMOUNT + 1 :]
+        first_part_stations = [
+            name.decode() for name in STATION_NAMES[:-N_REDUCED_AMOUNT]
+        ]
+        second_part_stations = [
+            name.decode() for name in STATION_NAMES[N_REDUCED_AMOUNT + 1 :]
+        ]
+        for step in first_part:
+            for i, value in enumerate(step):
+                if value is not None:
+                    assert stations_list[i] in first_part_stations
+                else:
+                    assert stations_list[i] not in first_part_stations
+        for step in second_part:
+            for i, value in enumerate(step):
+                if value is not None:
+                    assert stations_list[i] in second_part_stations
+                else:
+                    assert stations_list[i] not in second_part_stations

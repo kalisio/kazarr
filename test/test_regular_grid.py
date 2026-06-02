@@ -129,6 +129,36 @@ class TestRegularGrid:
         assert len(data["values"]["Value"]) == TIMES
         assert len(data["values"]["Value"][0]) == LATS * LONS
 
+    def test_extract_time_range(self, client: TestClient):
+        """Extraction with a time range returns multiple timesteps."""
+        response = client.get(
+            f"/datasets/{DATASET_NAME}/extract?variable=Value&time=2026-01-02/2026-01-04"
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "times" in data
+        assert len(data["times"]) == 3
+        assert "values" in data
+        assert len(data["values"]["Value"]) == 3
+        assert len(data["values"]["Value"][0]) == LATS * LONS
+
+    def test_extract_invalid_time(self, client: TestClient):
+        """Extraction with an invalid time format returns a 400 error."""
+        response = client.get(
+            f"/datasets/{DATASET_NAME}/extract?variable=Value&time=invalid-date"
+        )
+        assert response.status_code == 400
+        assert "INVALID_DATETIME_FORMAT" in response.text
+
+    def test_extract_invalid_time_range(self, client: TestClient):
+        """Extraction with an invalid time range syntax returns a 400 error."""
+        response = client.get(
+            f"/datasets/{DATASET_NAME}/extract?variable=Value&time=2026-01-01/2026-01-02/2026-01-03"
+        )
+        assert response.status_code == 400
+        assert "INVALID_TIME_RANGE" in response.text
+
     def test_extract_time_interpolation(self, client: TestClient):
         """Time interpolation between two steps returns midpoint values."""
         response = client.get(
@@ -350,6 +380,24 @@ class TestRegularGrid:
 
         assert v_interp == pytest.approx((v1 + v2) / 2)
 
+    def test_probe_time_range(self, client: TestClient):
+        """Probe with a time range returns a time series over the requested interval."""
+        lon = LON_START
+        lat = LAT_START
+        response = client.get(
+            f"/datasets/{DATASET_NAME}/probe?variables=Value&lon={lon}&lat={lat}&time=2026-01-02/2026-01-04"
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "times" in data
+        assert len(data["times"]) == 3
+        assert "values" in data
+        assert len(data["values"]["Value"]) == 3
+        assert data["values"]["Value"][0] == 150
+        assert data["values"]["Value"][2] == 450
+
+
     def test_probes_multiple_points(self, client: TestClient):
         """Probe multiple points returns a list of probe results."""
         payload = {
@@ -373,6 +421,29 @@ class TestRegularGrid:
         assert all(
             isinstance(v, list) and len(v) == 2 for v in values
         )  # 2 points
+
+    def test_probes_multiple_points_time_range(self, client: TestClient):
+        """Batch probe with a time range returns a matrix of values for each timestep and point."""
+        payload = {
+            "points": [
+                {"lon": LON_START, "lat": LAT_START},
+                {"lon": LON_START + LON_STEP, "lat": LAT_START + LAT_STEP},
+            ]
+        }
+        response = client.post(
+            f"/datasets/{DATASET_NAME}/probes?variables=Value&time=2026-01-02/2026-01-04",
+            json=payload,
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "times" in data
+        assert len(data["times"]) == 3
+        assert "values" in data
+        assert len(data["values"]["Value"]) == 3
+        assert len(data["values"]["Value"][0]) == 2
+        assert data["values"]["Value"][0][0] == 150
+        assert data["values"]["Value"][2][1] == 466
 
     def test_probes_multiple_points_geojson(self, client: TestClient):
         """Probe multiple points with GeoJSON FeatureCollection body."""
