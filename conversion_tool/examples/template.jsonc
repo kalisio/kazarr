@@ -7,11 +7,11 @@
       /*
       This section is used to specify the names of the variables in the input dataset that should be used for specific purposes.
       As kazarr is designed to work with spatial data, lon and lat variables are required, but their names can be specified here.
-      lon, lat, height and time are the only keys currently supported.
+      lon, lat, level and time are the only keys currently supported.
       */
       "lon": "MyLongitudeVar",
       "lat": "MyLatitudeVar",
-      "height": "MyHeightVar",
+      "level": "MyLevelVar",
       "time": "MyTimeVar"
     },
     "dimensions": {

@@ -78,7 +78,7 @@ The `probe` endpoint accepts the following query parameters:
 | `variables`             | The list of variables to probe.                                                                           |    ✗     |               |
 | `lon`                   | The longitude coordinate to probe.                                                                        |    ✗     |               |
 | `lat`                   | The latitude coordinate to probe.                                                                         |    ✗     |               |
-| `height`                | The height coordinate to probe (if 3D data).                                                              |    ✓     | `None`        |
+| `level`                 | The level coordinate to probe (if 3D data).                                                               |    ✓     | `None`        |
 | `time`                  | The time value/slice to probe.                                                                            |    ✓     | `None`        |
 | `interp_time`           | Whether to interpolate values on time dimension                                                           |    ✓     | `False`       |
 | `interp_spatial_method` | The method to use for spatial interpolation. (Supported: `nearest`, `linear`, `cubic`, `idw`, `rbf`)      |    ✓     | `nearest`     |
@@ -114,9 +114,9 @@ The `probes` endpoint accepts the following query parameters:
 
 The `probes` endpoint accepts the following body structure:
 
-`{ "points": [{"lat": {"lon": 5.35964198232827, "lat": 45.01486461788593, "height": 100.0}, {"lon": 7.79425497419718, "lat": 48.45134263206789, "height": 50.0}}, ...] }`
+`{ "points": [{"lat": {"lon": 5.35964198232827, "lat": 45.01486461788593, "level": 100.0}, {"lon": 7.79425497419718, "lat": 48.45134263206789, "level": 50.0}}, ...] }`
 
-For each point, the `height` property is optional.
+For each point, the `level` property is optional.
 
 ### /datasets/{dataset}/isoline (GET)
 
@@ -154,13 +154,13 @@ The `select` endpoint accepts the following query parameters:
 Get only the support mesh of the dataset
 
 The `mesh` endpoint accepts the following query parameters:
-| Name                | Description                                                                                                                                                                                             | Optional | Default    |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :------: | ---------- |
-| `format`            | The format of the extracted data (Currently supported: 'mesh', 'geojson'. Default to `mesh`)                                                                                                            |    ✓     | `mesh`     |
-| `mesh_data_mapping` | Whether the data of the mesh is on cells or on vertices. This will override the dataset configuration. (Supported values: 'vertices', 'cells')                                                          |    ✓     | `vertices` |
-| `is_3d`             | If True, generates a 3D volumetric mesh using the vertical coordinate defined in the dataset configuration if the dataset use a unique one, otherwise, see 'variable' and 'height_variable' parameters. | `False`  |
-| `variable`          | The variable to base the mesh geometry on. Not mandatory if the dataset use a unique vertical coordinate.                                                                                               |  `None`  |
-| `height_variable`   | The variable to use as height coordinate for the mesh geometry. This will override the dataset configuration and the 'variable' parameter.                                                              |  `None`  |
+| Name                | Description                                                                                                                                                                                            | Optional | Default    |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | :------: | ---------- |
+| `format`            | The format of the extracted data (Currently supported: 'mesh', 'geojson'. Default to `mesh`)                                                                                                           |    ✓     | `mesh`     |
+| `mesh_data_mapping` | Whether the data of the mesh is on cells or on vertices. This will override the dataset configuration. (Supported values: 'vertices', 'cells')                                                         |    ✓     | `vertices` |
+| `is_3d`             | If True, generates a 3D volumetric mesh using the vertical coordinate defined in the dataset configuration if the dataset use a unique one, otherwise, see 'variable' and 'level_variable' parameters. | `False`  |
+| `variable`          | The variable to base the mesh geometry on. Not mandatory if the dataset use a unique vertical coordinate.                                                                                              |  `None`  |
+| `level_variable`    | The variable to use as level coordinate for the mesh geometry. This will override the dataset configuration and the 'variable' parameter.                                                              |  `None`  |
 
 ## Interpolation Overview
 

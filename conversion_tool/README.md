@@ -296,13 +296,13 @@ Perform reprojection on geographic coordinates (e.g., Lambert 93 to WGS84).
 
 **Parameters:**
 
-| Name                      | Type   | Description                                           |
-| ------------------------- | ------ | ----------------------------------------------------- |
-| `reprojection.from_crs`   | String | Source CRS (e.g., "EPSG:2154")                        |
-| `reprojection.to_crs`     | String | Target CRS (e.g., "EPSG:4326")                        |
-| `variables.lon`           | String | Name of the longitude variable                        |
-| `variables.lat`           | String | Name of the latitude variable                         |
-| `variables.height`        | String | Name of the height variable (Optional)                |
+| Name                    | Type   | Description                           |
+| ----------------------- | ------ | ------------------------------------- |
+| `reprojection.from_crs` | String | Source CRS (e.g., "EPSG:2154")        |
+| `reprojection.to_crs`   | String | Target CRS (e.g., "EPSG:4326")        |
+| `variables.lon`         | String | Name of the longitude variable        |
+| `variables.lat`         | String | Name of the latitude variable         |
+| `variables.level`       | String | Name of the level variable (Optional) |
 
 ### `save`
 
