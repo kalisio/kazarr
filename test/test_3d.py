@@ -170,29 +170,29 @@ class TestRegularGrid3D:
         data = response.json()
         assert len(data["levels"]) == len(data["values"]["Value"])
 
-    def test_extract_3d_z_bbox(self, client: TestClient):
-        """3D extraction with z_min/z_max returns only levels inside the range."""
-        z_min = LEVEL_START
-        z_max = LEVEL_START + LEVEL_STEP  # only first 2 levels
+    def test_extract_3d_level_bbox(self, client: TestClient):
+        """3D extraction with level_min/level_max returns only levels inside the range."""
+        level_min = LEVEL_START
+        level_max = LEVEL_START + LEVEL_STEP  # only first 2 levels
 
         response = client.get(
             f"/datasets/{DATASET_REGULAR}/extract"
             f"?variable=Value&time=2026-01-01&is_3d=true"
-            f"&z_min={z_min}&z_max={z_max}"
+            f"&level_min={level_min}&level_max={level_max}"
         )
         assert response.status_code == 200
         data = response.json()
         levels = data["levels"]
-        assert all(z_min <= level <= z_max for level in levels)
+        assert all(level_min <= level <= level_max for level in levels)
         # 2 levels × LATS × LONS
         assert len(data["values"]["Value"]) == 2 * LATS * LONS
 
-    def test_extract_3d_z_bbox_out_of_range(self, client: TestClient):
-        """Z bounding box outside dataset extent should return an error."""
+    def test_extract_3d_level_bbox_out_of_range(self, client: TestClient):
+        """Level bounding box outside dataset extent should return an error."""
         response = client.get(
             f"/datasets/{DATASET_REGULAR}/extract"
             f"?variable=Value&time=2026-01-01&is_3d=true"
-            f"&z_min=9999&z_max=99999"
+            f"&level_min=9999&level_max=99999"
         )
         assert response.status_code in (400, 404, 422)
 
@@ -439,14 +439,14 @@ class TestNonRegularGrid3D:
         data = response.json()
         assert len(data["levels"]) == len(data["values"]["Value"])
 
-    def test_extract_3d_z_bbox(self, client: TestClient):
-        """3D extraction with z_min/z_max returns only levels inside the range."""
-        z = 100  # only one level
+    def test_extract_3d_level_bbox(self, client: TestClient):
+        """3D extraction with level_min/level_max returns only levels inside the range."""
+        z = 100
 
         response = client.get(
             f"/datasets/{DATASET_NON_REGULAR}/extract"
             f"?variable=Value&time=2026-01-01&is_3d=true"
-            f"&z_min={z}&z_max={z}"
+            f"&level_min={z}&level_max={z}"
         )
         assert response.status_code == 200
         data = response.json()
@@ -455,12 +455,12 @@ class TestNonRegularGrid3D:
         # 1 level × LATS × LONS
         assert len(data["values"]["Value"]) == 1 * NR_LATS * NR_LONS
 
-    def test_extract_3d_z_bbox_out_of_range(self, client: TestClient):
-        """Z bounding box outside dataset extent should return an error."""
+    def test_extract_3d_level_bbox_out_of_range(self, client: TestClient):
+        """Level bounding box outside dataset extent should return an error."""
         response = client.get(
             f"/datasets/{DATASET_NON_REGULAR}/extract"
             f"?variable=Value&time=2026-01-01&is_3d=true"
-            f"&z_min=9999&z_max=99999"
+            f"&level_min=9999&level_max=99999"
         )
         assert response.status_code in (400, 404, 422)
 

@@ -83,7 +83,7 @@ def get_mesh(
         lats_points = lats.values
         levels_points = levels_da.values
         if bounding_box.has_bb_level:
-            level_mask = apply_level_bounding_box_irregular_grid(levels_points, bounding_box)
+            apply_level_bounding_box_irregular_grid(levels_points, bounding_box)
     elif is_regular_grid:
         lons_vals = lons.values
         lats_vals = lats.values
