@@ -9,8 +9,8 @@ from src.schemas.config import ExtractionConfig
 from src.utils.data import (
     dget,
     dgets,
-    get_height_var,
-    get_dataset_height_vars,
+    get_level_var,
+    get_dataset_level_vars,
     sel,
     get_required_dims_and_coords,
     get_bounded_time,
@@ -45,7 +45,7 @@ def extract(
     has_bb = bounding_box.has_bb
     has_bb_lon = bounding_box.has_bb_lon
     has_bb_lat = bounding_box.has_bb_lat
-    has_bb_z = bounding_box.has_bb_z
+    has_bb_level = bounding_box.has_bb_level
 
     step_logger.step_start("Load dataset and config")
     dataset, dataset_config = load_dataset(dataset_id)
@@ -58,7 +58,7 @@ def extract(
         raise exceptions.VariableNotFound([variable])
 
     lon_var, lat_var = dgets(dataset_config, ["variables.lon", "variables.lat"])
-    height_var = get_height_var(dataset, dataset_config, variable)
+    level_var = get_level_var(dataset, dataset_config, variable)
     missing_vars = []
     if has_bb_lon and lon_var is None:
         raise exceptions.MissingConfigurationElement("variables.lon")
@@ -105,20 +105,20 @@ def extract(
     if not has_bb:
         index_padding, spatial_padding = 0, 0.0
 
-    heights_da = (
-        dataset[height_var]
-        if height_var is not None and height_var in dataset
+    levels_da = (
+        dataset[level_var]
+        if level_var is not None and level_var in dataset
         else None
     )
 
-    is_3d_grid = config.is_3d and heights_da is not None
+    is_3d_grid = config.is_3d and levels_da is not None
 
     if is_3d_grid:
         # In 3D mode, the vertical dimension is not required to be fixed — we want all levels
-        optional_coords = [lon_var, lat_var, height_var]
-        coords_keep_dims = [lon_var, lat_var, height_var]
+        optional_coords = [lon_var, lat_var, level_var]
+        coords_keep_dims = [lon_var, lat_var, level_var]
     else:
-        # In 2D mode, height_var is NOT optional: the user must provide a vertical coordinate
+        # In 2D mode, level_var is NOT optional: the user must provide a vertical coordinate
         optional_coords = [lon_var, lat_var]
         coords_keep_dims = [lon_var, lat_var]
 
@@ -152,10 +152,10 @@ def extract(
     levels_1d = None
     level_min, level_max, step_level = 0, 0, 1
     if is_3d_grid and is_regular_grid:
-        # Regular 3D: height is a 1-D coordinate vector
-        levels_1d = heights_da.values
-        if has_bb_z:
-            level_min, level_max, levels_1d = bbox.apply_levels_bounding_box(
+        # Regular 3D: level is a 1-D coordinate vector
+        levels_1d = levels_da.values
+        if has_bb_level:
+            level_min, level_max, levels_1d = bbox.apply_level_bounding_box_regular_grid(
                 levels_1d, bounding_box
             )
         else:
@@ -183,7 +183,7 @@ def extract(
         step_logger.step_start("Irregular 3D grid: apply bounding box")
         lons_2d_slice = lons_vals_in[0]
         lats_2d_slice = lats_vals_in[0]
-        lons_vals, lats_vals, indices = bbox.apply_unstructured_bounding_box(
+        lons_vals, lats_vals, indices = bbox.apply_irregular_bounding_box(
             lons_2d_slice,
             lats_2d_slice,
             bounding_box,
@@ -196,7 +196,7 @@ def extract(
         width_raw, height_raw = indices.width_raw, indices.height_raw
     else:
         step_logger.step_start("Unstructured grid: apply bounding box")
-        lons_vals, lats_vals, indices = bbox.apply_unstructured_bounding_box(
+        lons_vals, lats_vals, indices = bbox.apply_irregular_bounding_box(
             lons_vals_in,
             lats_vals_in,
             bounding_box,
@@ -265,9 +265,9 @@ def extract(
         vals = vals_da[
             ..., row_min : row_max + 1 : step_row, col_min : col_max + 1 : step_col
         ].values
-        # Squeeze out a trailing size-1 level when doing 2D extraction from a dataset that has height
+        # Squeeze out a trailing size-1 level when doing 2D extraction from a dataset that has levels
         if (
-            heights_da is not None
+            levels_da is not None
             and not config.is_3d
             and vals.ndim >= 3
             and vals.shape[-3] == 1
@@ -281,12 +281,12 @@ def extract(
 
     step_logger.step_start("Crop latitude and longitude")
     lons_1d, lats_1d = None, None
-    heights = None
+    levels = None
     if is_point_list:
         lons = lons_vals_in[point_indices]
         lats = lats_vals_in[point_indices]
     elif is_3d_grid and not is_regular_grid:
-        # Crop the full 3D coordinate arrays along spatial axes; keep all heights
+        # Crop the full 3D coordinate arrays along spatial axes; keep all levels
         lons = lons_vals_in[
             :,
             row_min : row_max + 1 : step_row,
@@ -297,7 +297,7 @@ def extract(
             row_min : row_max + 1 : step_row,
             col_min : col_max + 1 : step_col,
         ]
-        heights = heights_da.values[
+        levels = levels_da.values[
             :,
             row_min : row_max + 1 : step_row,
             col_min : col_max + 1 : step_col,
@@ -306,7 +306,7 @@ def extract(
         lons_1d = lons_vals_in[col_min : col_max + 1 : step_col]
         lats_1d = lats_vals_in[row_min : row_max + 1 : step_row]
         if config.is_3d and levels_1d is not None:
-            lons, lats, heights = np.meshgrid(
+            lons, lats, levels = np.meshgrid(
                 lons_1d, lats_1d, levels_1d, indexing="ij"
             )
         else:
@@ -337,17 +337,17 @@ def extract(
                 bounding_box.lat_max if bounding_box.lat_max is not None else np.inf
             )
             mask_cropped &= (lats >= bb_lat_min) & (lats <= bb_lat_max)
-        if is_3d_grid and not is_regular_grid and has_bb_z and heights is not None:
-            mask_cropped &= bbox.apply_z_bounding_box(heights, bounding_box)
+        if is_3d_grid and not is_regular_grid and has_bb_level and levels is not None:
+            mask_cropped &= bbox.apply_level_bounding_box_irregular_grid(levels, bounding_box)
 
         if format != "mesh":
             if is_multi_time:
                 vals[:, ~mask_cropped] = np.nan
             else:
                 vals[~mask_cropped] = np.nan
-    elif is_3d_grid and not is_regular_grid and has_bb_z and heights is not None:
+    elif is_3d_grid and not is_regular_grid and has_bb_level and levels is not None:
         # No spatial bbox but a Z bbox is present
-        mask_cropped = bbox.apply_z_bounding_box(heights, bounding_box)
+        mask_cropped = bbox.apply_level_bounding_box_irregular_grid(levels, bounding_box)
         if is_multi_time:
             vals[:, ~mask_cropped] = np.nan
         else:
@@ -361,11 +361,11 @@ def extract(
     )
     if cell_data and not is_point_list:
         step_logger.step_start("Cell to point data conversion")
-        lons, lats, heights, vals, lons_1d, lats_1d, levels_1d = (
+        lons, lats, levels, vals, lons_1d, lats_1d, levels_1d = (
             interpolation.cell_to_point_conversion(
                 lons,
                 lats,
-                heights,
+                levels,
                 vals,
                 variable,
                 mesh_type,
@@ -379,15 +379,15 @@ def extract(
         target_h, target_w = mesh_tile_shape
         if is_3d_grid and is_regular_grid and levels_1d is not None:
             target_d = levels_1d.shape[0]
-        elif is_3d_grid and not is_regular_grid and heights is not None:
-            target_d = heights.shape[0]
+        elif is_3d_grid and not is_regular_grid and levels is not None:
+            target_d = levels.shape[0]
         else:
             target_d = 1
-        lons, lats, heights, vals, mask_cropped = (
+        lons, lats, levels, vals, mask_cropped = (
             interpolation.generate_meshgrid_and_interpolate(
                 lons,
                 lats,
-                heights,
+                levels,
                 vals,
                 lons_1d,
                 lats_1d,
@@ -406,7 +406,7 @@ def extract(
 
     # Crop irregular grids to the bounding box after interpolation to avoid returning huge arrays with mostly NaNs when a tight bbox is applied on a sparse grid (e.g. Z-bounding box on an irregular grid with few vertical levels)
     if not is_regular_grid and mask_cropped is not None:
-        # As vals can have been squeezed to 2D if height was only a single level
+        # As vals can have been squeezed to 2D if "level" was only a single level
         # we need to do the same with lons and lats
         lons = lons.squeeze()
         lats = lats.squeeze()
@@ -415,16 +415,16 @@ def extract(
 
         lons_cropped = lons[mask_cropped]
         lats_cropped = lats[mask_cropped]
-        heights_cropped = heights[mask_cropped] if heights is not None else None
+        levels_cropped = levels[mask_cropped] if levels is not None else None
         if is_multi_time and vals.ndim > 1:
             vals_cropped = vals[:, mask_cropped]
         else:
             vals_cropped = vals[mask_cropped]
     else:
-        lons_cropped, lats_cropped, heights_cropped, vals_cropped = (
+        lons_cropped, lats_cropped, levels_cropped, vals_cropped = (
             lons,
             lats,
-            heights,
+            levels,
             vals,
         )
 
@@ -435,7 +435,7 @@ def extract(
     if format == "mesh":
         step_logger.step_start("Prepare output (mesh)")
         out = output.prepare_mesh_output(
-            lons, lats, heights, vals, variable, mask_cropped, step_row, step_col
+            lons, lats, levels, vals, variable, mask_cropped, step_row, step_col
         )
     elif format == "raw":
         step_logger.step_start("Prepare output (raw)")
@@ -444,7 +444,7 @@ def extract(
             [vals_cropped],
             lons_cropped,
             lats_cropped,
-            zs=heights_cropped,
+            levels=levels_cropped,
             global_props=global_props,
             var_props={variable: dataset[variable].attrs},
             has_time_dimension=is_multi_time
@@ -457,7 +457,7 @@ def extract(
             [vals_cropped],
             lons_cropped,
             lats_cropped,
-            zs=heights_cropped,
+            levels=levels_cropped,
             collection_props=global_props,
             var_props={variable: dataset[variable].attrs},
             has_time_dimension=is_multi_time
@@ -475,7 +475,7 @@ def probe(
     variables: Union[str, List[str]],
     lon: float,
     lat: float,
-    height: Optional[float] = None,
+    level: Optional[float] = None,
     time_range: Optional[str] = None,
     format: str = "raw",
     config: Union[Dict[str, Any], ExtractionConfig, None] = None,
@@ -485,13 +485,13 @@ def probe(
         config = ExtractionConfig.model_validate(config or {})
     step_logger = StepLoggerAndAborter(
         "probe",
-        parameters=(dataset_id, variables, lon, lat, height, time_range, format, config),
+        parameters=(dataset_id, variables, lon, lat, level, time_range, format, config),
         cancel_event=cancel_event,
     )
     step_logger.step_start("Load dataset and config")
     variables = variables if isinstance(variables, list) else [variables]
     dataset, dataset_config = load_dataset(dataset_id)
-    with_height = height is not None
+    with_level = level is not None
     fixed_coords, fixed_dims = dgets(
         dataset_config, ["variables.fixed", "dimensions.fixed"], {}
     )
@@ -502,16 +502,16 @@ def probe(
     )
     time_dim = dget(dataset_config, "dimensions.time")
     time_range = TimeRange.from_string(time_range)
-    height_vars = get_dataset_height_vars(dataset, dataset_config)
-    height_var = None
-    if height_vars is None or isinstance(height_vars, str):
-        height_var = height_vars
+    level_vars = get_dataset_level_vars(dataset, dataset_config)
+    level_var = None
+    if level_vars is None or isinstance(level_vars, str):
+        level_var = level_vars
     else:
-        for hv in height_vars:
-            if all([var in height_vars[hv] for var in variables]):
-                height_var = hv
+        for hv in level_vars:
+            if all([var in level_vars[hv] for var in variables]):
+                level_var = hv
                 break
-        if height_var is None:
+        if level_var is None:
             raise exceptions.DifferentTypesOfLevel()
 
     not_found_vars = []
@@ -526,8 +526,8 @@ def probe(
         missing_vars.append(f"lon ({lon_var})")
     if lat_var is None or lat_var not in dataset:
         missing_vars.append(f"lat ({lat_var})")
-    if with_height and (height_var is None or height_var not in dataset):
-        missing_vars.append(f"height ({height_var})")
+    if with_level and (level_var is None or level_var not in dataset):
+        missing_vars.append(f"level ({level_var})")
     if time_range.has_time() and (time_var is None or time_var not in dataset):
         missing_vars.append(f"time ({time_var})")
     if len(missing_vars) > 0:
@@ -557,12 +557,12 @@ def probe(
         if interp_spatial_method != "nearest":
             interp_vars.extend([lon_var, lat_var])
     else:
-        if with_height:
-            heights = dataset[height_var].values
+        if with_level:
+            levels = dataset[level_var].values
             points = np.column_stack(
-                (longitudes.values.ravel(), latitudes.values.ravel(), heights.ravel())
+                (longitudes.values.ravel(), latitudes.values.ravel(), levels.ravel())
             )
-            target_pt = np.array([lon, lat, height])
+            target_pt = np.array([lon, lat, level])
         else:
             points = np.column_stack(
                 (longitudes.values.ravel(), latitudes.values.ravel())
@@ -571,7 +571,7 @@ def probe(
 
         step_logger.step_start("Build or retrieve spatial index for probe")
         coord_vars = (
-            (lon_var, lat_var, height_var) if with_height else (lon_var, lat_var)
+            (lon_var, lat_var, level_var) if with_level else (lon_var, lat_var)
         )
         tree = get_cached_ckdtree(points, dataset_id=dataset_id, coord_vars=coord_vars)
 
@@ -699,7 +699,7 @@ def probe(
             data,
             np.atleast_1d(float(lon)),
             np.atleast_1d(float(lat)),
-            zs=np.atleast_1d(float(height)) if height is not None else None,
+            levels=np.atleast_1d(float(level)) if level is not None else None,
             global_props={"times": times} if times is not None else None,
             var_props=var_props,
         )
@@ -710,7 +710,7 @@ def probe(
             data,
             np.atleast_1d(float(lon)),
             np.atleast_1d(float(lat)),
-            zs=np.atleast_1d(float(height)) if height is not None else None,
+            levels=np.atleast_1d(float(level)) if level is not None else None,
             collection_props={"times": times},
             var_props=var_props,
         )
@@ -733,7 +733,7 @@ def multi_probe(
     variables = variables if isinstance(variables, list) else [variables]
 
 
-    lats, lons, zs, vals = [], [], [], {}
+    lats, lons, levels, vals = [], [], [], {}
     times, var_props = None, None
     for point in points:
         result = probe(
@@ -742,7 +742,7 @@ def multi_probe(
             variables,
             point.lon,
             point.lat,
-            point.height,
+            point.level,
             time_range,
             "raw",
             config,
@@ -750,7 +750,7 @@ def multi_probe(
         )
         lats.append(point.lat)
         lons.append(point.lon)
-        zs.append(point.height)
+        levels.append(point.level)
         for var in variables:
             if var not in vals:
                 vals[var] = []
@@ -769,7 +769,7 @@ def multi_probe(
             vals,
             np.asarray(lons),
             np.asarray(lats),
-            zs=np.asarray(zs) if zs and any(zs) else None,
+            levels=np.asarray(levels) if levels and any(levels) else None,
             global_props={"times": times} if times is not None else None,
             has_time_dimension=times is not None,
         )
@@ -779,7 +779,7 @@ def multi_probe(
             vals,
             np.asarray(lons),
             np.asarray(lats),
-            zs=np.asarray(zs) if zs and any(zs) else None,
+            levels=np.asarray(levels) if levels and any(levels) else None,
             collection_props={"times": times} if times is not None else None,
             var_props=var_props,
             has_time_dimension=times is not None,

@@ -520,9 +520,9 @@ class TestRegularGrid:
     # Edge cases
     # ------------------------------------------------------------------
 
-    def test_extract_height_interpolation(self):
-        """Height interpolation is not applicable to regular 2D grids."""
-        pytest.skip("Height interpolation not applicable to regular 2D grids")
+    def test_extract_level_interpolation(self):
+        """Level interpolation is not applicable to regular 2D grids."""
+        pytest.skip("Level interpolation not applicable to regular 2D grids")
 
 
 @pytest.mark.RegularGrid
@@ -608,7 +608,7 @@ class TestRegularGridComplex:
                         "freq": "D",
                     },
                     {
-                        "name": "level",
+                        "name": "height",
                         "type": "float",
                         "method": "linear",
                         "size": LEVELS,
@@ -670,7 +670,7 @@ class TestRegularGridComplex:
 
         response = client.get(
             f"/datasets/{DATASET_NAME_COMPLEX}/probe"
-            f"?variables=Value1&variables=Value2&variables=Value3&lon={lon}&lat={lat}&time={time}&level={level}"
+            f"?variables=Value1&variables=Value2&variables=Value3&lon={lon}&lat={lat}&time={time}&height={level}"
         )
 
         assert response.status_code == 200

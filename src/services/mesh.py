@@ -3,12 +3,12 @@ import pyvista as pv
 
 from src import exceptions
 from src.schemas.config import MeshExtractionConfig
-from src.utils.data import dget, dgets, get_dataset_height_vars, get_height_var
+from src.utils.data import dget, dgets, get_dataset_level_vars, get_level_var
 from src.utils.file import load_dataset
 from src.utils.logging import StepLoggerAndAborter
 from src.processing.interpolation import extrapolate_edges_from_cell_data
 from src.processing.contexts import BBoxContext
-from src.processing.bbox import apply_levels_bounding_box, apply_z_bounding_box
+from src.processing.bbox import apply_level_bounding_box_regular_grid, apply_level_bounding_box_irregular_grid
 
 from typing import Any, Dict, Union, Optional
 import threading
@@ -40,68 +40,68 @@ def get_mesh(
     if lat_var not in dataset:
         missing_vars.append(f"lat ({lat_var})")
 
-    height_vars = get_dataset_height_vars(dataset, dataset_config)
-    height_var = None
-    if isinstance(height_vars, str) or height_vars is None:
-        height_var = height_vars
+    level_vars = get_dataset_level_vars(dataset, dataset_config)
+    level_var = None
+    if isinstance(level_vars, str) or level_vars is None:
+        level_var = level_vars
     elif config.is_3d and config.variable is not None:
-        height_var = get_height_var(dataset, dataset_config, config.variable)
-    elif config.is_3d and config.height_variable is not None:
-        if config.height_variable not in dataset:
-            missing_vars.append(f"height ({config.height_variable})")
+        level_var = get_level_var(dataset, dataset_config, config.variable)
+    elif config.is_3d and config.level_variable is not None:
+        if config.level_variable not in dataset:
+            missing_vars.append(f"level ({config.level_variable})")
         else:
-            height_var = config.height_variable
+            level_var = config.level_variable
     if len(missing_vars) > 0:
         raise exceptions.BadConfigurationVariable(missing_vars)
 
-    if height_var is None and config.is_3d:
-        raise exceptions.CantFindHeightVariable()
+    if level_var is None and config.is_3d:
+        raise exceptions.CantFindLevelVariable()
 
     lons = dataset[lon_var]
     lats = dataset[lat_var]
 
-    heights_da = (
-        dataset[height_var]
-        if height_var is not None and height_var in dataset
+    levels_da = (
+        dataset[level_var]
+        if level_var is not None and level_var in dataset
         else None
     )
 
-    is_3d_grid = config.is_3d and heights_da is not None
+    is_3d_grid = config.is_3d and levels_da is not None
     is_regular_grid = lons.ndim == 1 and lats.ndim == 1 and lons.dims != lats.dims
     is_point_list = lons.ndim == 1 and lats.ndim == 1 and lons.dims == lats.dims
 
     levels_1d = None
     if is_3d_grid and is_regular_grid:
-        # Regular 3D: height is a 1-D coordinate vector
-        levels_1d = heights_da.values
-        if bounding_box.has_bb_z:
-            _, _, levels_1d = apply_levels_bounding_box(levels_1d, bounding_box)
+        # Regular 3D: level is a 1-D coordinate vector
+        levels_1d = levels_da.values
+        if bounding_box.has_bb_level:
+            _, _, levels_1d = apply_level_bounding_box_regular_grid(levels_1d, bounding_box)
 
     if is_3d_grid and not is_regular_grid:
-        # Irregular 3D: lat/lon/height are all (DimK, DimJ, DimI).
+        # Irregular 3D: lat/lon/level are all (DimK, DimJ, DimI).
         lons_points = lons.values
         lats_points = lats.values
-        height_points = heights_da.values
-        if bounding_box.has_bb_z:
-            apply_z_bounding_box(height_points, bounding_box)
+        levels_points = levels_da.values
+        if bounding_box.has_bb_level:
+            level_mask = apply_level_bounding_box_irregular_grid(levels_points, bounding_box)
     elif is_regular_grid:
         lons_vals = lons.values
         lats_vals = lats.values
         if config.is_3d and levels_1d is not None:
-            lons_points, lats_points, height_points = np.meshgrid(
+            lons_points, lats_points, levels_points = np.meshgrid(
                 lons_vals, lats_vals, levels_1d, indexing="ij"
             )
         else:
             lons_points, lats_points = np.meshgrid(lons_vals, lats_vals, indexing="ij")
-            height_points = np.zeros_like(lons_points)
+            levels_points = np.zeros_like(lons_points)
     else:
         lons_points = lons.values
         lats_points = lats.values
-        # Use heights_da only when it is a 1-D vector (regular 3D in 2D slice, point list)
-        if heights_da is not None and heights_da.ndim == 1:
-            height_points = heights_da.values
+        # Use levels_da only when it is a 1-D vector (regular 3D in 2D slice, point list)
+        if levels_da is not None and levels_da.ndim == 1:
+            levels_points = levels_da.values
         else:
-            height_points = np.zeros_like(lons_points)
+            levels_points = np.zeros_like(lons_points)
 
     cell_data = force_data_mapping != "vertices" and (
         force_data_mapping == "cells"
@@ -110,10 +110,10 @@ def get_mesh(
     if cell_data and not is_point_list:
         step_logger.step_start("Cell to point geometry conversion")
         mesh_type = dget(dataset_config, "mesh_type", "auto")
-        lons_points, lats_points, height_points = extrapolate_edges_from_cell_data(
+        lons_points, lats_points, levels_points = extrapolate_edges_from_cell_data(
             lons_points,
             lats_points,
-            height_points if is_3d_grid else None,
+            levels_points if is_3d_grid else None,
             "radial" if mesh_type == "radial" else "rectilinear",
         )
 
@@ -121,7 +121,7 @@ def get_mesh(
         step_logger.step_start("Prepare output (GeoJSON)")
         flat_lons = lons_points.flatten()
         flat_lats = lats_points.flatten()
-        flat_heights = height_points.flatten()
+        flat_levels = levels_points.flatten()
 
         features = []
         for index, _ in np.ndenumerate(lons_points):
@@ -135,7 +135,7 @@ def get_mesh(
                         "coordinates": [
                             float(flat_lons[flat_idx]),
                             float(flat_lats[flat_idx]),
-                            float(flat_heights[flat_idx]),
+                            float(flat_levels[flat_idx]),
                         ],
                     },
                     "properties": {"id": feature_id},
@@ -145,14 +145,14 @@ def get_mesh(
     else:
         step_logger.step_start("Prepare output (mesh)")
         if is_point_list:
-            points = np.column_stack((lons_points, lats_points, height_points))
+            points = np.column_stack((lons_points, lats_points, levels_points))
             cloud = pv.PolyData(points)
             tri_grid = cloud.delaunay_2d()
             cells = tri_grid.faces
             vertices = tri_grid.points.flatten()
             indices = cells.reshape((-1, 4))[:, 1:].flatten()
         elif config.is_3d and lons_points.ndim == 3:
-            grid = pv.StructuredGrid(lons_points, lats_points, height_points)
+            grid = pv.StructuredGrid(lons_points, lats_points, levels_points)
             tri_grid = grid.triangulate()
             tri_grid = tri_grid.clean()
             vertices = tri_grid.points.flatten()
@@ -173,12 +173,12 @@ def get_mesh(
                 if lats_points.ndim == 3 and 1 in lats_points.shape
                 else lats_points
             )
-            height_2d = (
-                height_points.squeeze()
-                if height_points.ndim == 3 and 1 in height_points.shape
-                else height_points
+            levels_2d = (
+                levels_points.squeeze()
+                if levels_points.ndim == 3 and 1 in levels_points.shape
+                else levels_points
             )
-            grid = pv.StructuredGrid(lons_2d, lats_2d, height_2d)
+            grid = pv.StructuredGrid(lons_2d, lats_2d, levels_2d)
             tri_grid = grid.triangulate()
             cells = tri_grid.cells
             vertices = tri_grid.points.flatten()

@@ -22,7 +22,7 @@ async def probe_data(
     base: models.MultipleVariablesParams = Depends(),
     lon: float = Query(..., description="The longitude coordinate to probe"),
     lat: float = Query(..., description="The latitude coordinate to probe"),
-    height: float | None = Query(None, description="The height coordinate to probe"),
+    level: float | None = Query(None, description="The level coordinate to probe"),
     time: models.TimeParams = Depends(),
     spatial_interp: models.SpatialInterpolationParams = Depends(),
 ):
@@ -70,7 +70,7 @@ async def probe_data(
             variables,
             lon,
             lat,
-            height=height,
+            level=level,
             time_range=time.time,
             format=base.format,
             config=config,

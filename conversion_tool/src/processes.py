@@ -398,7 +398,7 @@ def combine_at_time(dataset, config):
     # TODO: Those variables must be static and not ATTRS dependent (e.g. ATTRS.level_type)
     lon_var = get_ci(config, "variables.lon")
     lat_var = get_ci(config, "variables.lat")
-    height_var = get_ci(config, "variables.height")
+    level_var = get_ci(config, "variables.level")
 
     if (
         "secondary_datasets" not in config
@@ -509,7 +509,7 @@ def combine_at_time(dataset, config):
     else:
         # Get dimensions used with spatial variables
         spatial_dimensions = []
-        for var in [lon_var, lat_var, height_var]:
+        for var in [lon_var, lat_var, level_var]:
             if var and var in secondary_after:
                 for dim in secondary_after[var].dims:
                     if dim not in spatial_dimensions:

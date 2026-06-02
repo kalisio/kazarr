@@ -289,37 +289,37 @@ def dgets(d, keys, default=None):
     return tuple(values)
 
 
-def get_dataset_height_vars(dataset, config):
-    height_var = dget(config, "variables.height")
-    if height_var is not None and (
-        height_var.startswith("ATTRS.") or height_var.startswith("ATTRIBUTES.")
+def get_dataset_level_vars(dataset, config):
+    level_var = dget(config, "variables.level")
+    if level_var is not None and (
+        level_var.startswith("ATTRS.") or level_var.startswith("ATTRIBUTES.")
     ):
-        height_var_name = height_var.replace("ATTRS.", "").replace("ATTRIBUTES.", "")
-        height_vars = {}
+        level_var_name = level_var.replace("ATTRS.", "").replace("ATTRIBUTES.", "")
+        level_vars = {}
         for var in dataset.data_vars:
-            if height_var_name in dataset[var].attrs:
-                target_height_var = dataset[var].attrs[height_var_name]
-                if target_height_var not in height_vars:
-                    height_vars[target_height_var] = [var]
+            if level_var_name in dataset[var].attrs:
+                target_level_var = dataset[var].attrs[level_var_name]
+                if target_level_var not in level_vars:
+                    level_vars[target_level_var] = [var]
                 else:
-                    height_vars[target_height_var].append(var)
-        if len(height_vars) == 0:
+                    level_vars[target_level_var].append(var)
+        if len(level_vars) == 0:
             return None
-        elif len(height_vars) == 1:
-            return list(height_vars.keys())[0]
-        return height_vars
-    return height_var
+        elif len(level_vars) == 1:
+            return list(level_vars.keys())[0]
+        return level_vars
+    return level_var
 
 
-def get_height_var(dataset, config, variable):
-    height_var = dget(config, "variables.height")
-    if height_var is not None and (
-        height_var.startswith("ATTRS.") or height_var.startswith("ATTRIBUTES.")
+def get_level_var(dataset, config, variable):
+    level_var = dget(config, "variables.level")
+    if level_var is not None and (
+        level_var.startswith("ATTRS.") or level_var.startswith("ATTRIBUTES.")
     ):
-        height_var = dataset[variable].attrs.get(
-            height_var.replace("ATTRS.", "").replace("ATTRIBUTES.", ""), None
+        level_var = dataset[variable].attrs.get(
+            level_var.replace("ATTRS.", "").replace("ATTRIBUTES.", ""), None
         )
-    return height_var
+    return level_var
 
 
 def parse_query_dict(query_string):

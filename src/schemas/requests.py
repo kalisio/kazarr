@@ -72,11 +72,11 @@ class BBoxParams:
     lat_max: float | None = Query(
         None, description="Maximum latitude of the bounding box"
     )
-    z_min: float | None = Query(
+    level_min: float | None = Query(
         None,
         description="Minimum vertical coordinate (altitude/depth) of the bounding box",
     )
-    z_max: float | None = Query(
+    level_max: float | None = Query(
         None,
         description="Maximum vertical coordinate (altitude/depth) of the bounding box",
     )
@@ -121,7 +121,7 @@ class SpatialInterpolationParams:
 class ProbePoint(BaseModel):
     lon: float
     lat: float
-    height: Optional[float] = None
+    level: Optional[float] = None
 
 
 class GeoJSONPoint(BaseModel):
@@ -153,7 +153,7 @@ class MultiProbeBody(BaseModel):
                 ProbePoint(
                     lon=f.geometry.coordinates[0],
                     lat=f.geometry.coordinates[1],
-                    height=f.geometry.coordinates[2]
+                    level=f.geometry.coordinates[2]
                     if len(f.geometry.coordinates) > 2
                     else None,
                 )

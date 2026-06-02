@@ -6,18 +6,18 @@ from src import exceptions
 
 
 def prepare_mesh_output(
-    lons, lats, zs, vals, variable, mask_cropped, step_row, step_col
+    lons, lats, levels, vals, variable, mask_cropped, step_row, step_col
 ):
-    if zs is None:
-        zs = np.zeros_like(lons)
+    if levels is None:
+        levels = np.zeros_like(lons)
 
     lons_flat = np.ravel(lons, order="F")
     lats_flat = np.ravel(lats, order="F")
-    zs_flat = np.ravel(zs, order="F")
+    levels_flat = np.ravel(levels, order="F")
     vals_flat = np.ravel(vals, order="F")
 
     grid = pv.StructuredGrid()
-    grid.points = np.column_stack((lons_flat, lats_flat, zs_flat))
+    grid.points = np.column_stack((lons_flat, lats_flat, levels_flat))
 
     if lons.ndim == 2:
         grid.dimensions = [lons.shape[0], lons.shape[1], 1]
@@ -76,7 +76,7 @@ def prepare_mesh_output(
 
 
 def prepare_output(
-    var_names, vals, lons, lats, zs=None, global_props=None, var_props=None, has_time_dimension=False
+    var_names, vals, lons, lats, levels=None, global_props=None, var_props=None, has_time_dimension=False
 ):
     if global_props is None:
         global_props = {}
@@ -92,7 +92,7 @@ def prepare_output(
 
     flat_lons = lons.flatten().tolist()
     flat_lats = lats.flatten().tolist()
-    flat_zs = zs.flatten().tolist() if zs is not None else None
+    flat_levels = levels.flatten().tolist() if levels is not None else None
     vals_dict = {}
     has_one_point = lons.size == 1 and lats.size == 1
 
@@ -133,7 +133,7 @@ def prepare_output(
     return (
         flat_lons,
         flat_lats,
-        flat_zs,
+        flat_levels,
         vals_dict,
         global_props,
         out_vars_props,
@@ -142,15 +142,15 @@ def prepare_output(
 
 
 def prepare_raw_output(
-    var_names, vals, lons, lats, zs=None, global_props=None, var_props=None, has_time_dimension=False
+    var_names, vals, lons, lats, levels=None, global_props=None, var_props=None, has_time_dimension=False
 ):
-    flat_lons, flat_lats, flat_zs, vals_dict, collection_props, out_props, _ = (
+    flat_lons, flat_lats, flat_levels, vals_dict, collection_props, out_props, _ = (
         prepare_output(
             var_names,
             vals,
             lons,
             lats,
-            zs=zs,
+            levels=levels,
             global_props=global_props,
             var_props=var_props,
             has_time_dimension=has_time_dimension,
@@ -162,8 +162,8 @@ def prepare_raw_output(
         "latitudes": flat_lats,
         "values": {**vals_dict},
     }
-    if flat_zs is not None:
-        data["heights"] = flat_zs
+    if flat_levels is not None:
+        data["levels"] = flat_levels
 
     return {
         "shape": vals[0].shape,
@@ -174,12 +174,12 @@ def prepare_raw_output(
 
 
 def prepare_geojson_output(
-    var_names, vals, lons, lats, zs=None, collection_props=None, var_props=None, has_time_dimension=False
+    var_names, vals, lons, lats, levels=None, collection_props=None, var_props=None, has_time_dimension=False
 ):
     (
         flat_lons,
         flat_lats,
-        flat_zs,
+        flat_levels,
         vals_dict,
         collection_props,
         out_props,
@@ -189,7 +189,7 @@ def prepare_geojson_output(
         vals,
         lons,
         lats,
-        zs=zs,
+        levels=levels,
         global_props=collection_props,
         var_props=var_props,
         has_time_dimension=has_time_dimension,
@@ -210,8 +210,8 @@ def prepare_geojson_output(
                 out_vals[var_name] = var_vals[i]
 
         coordinates = [float(flat_lons[i]), float(flat_lats[i])]
-        if flat_zs is not None and flat_zs[i] is not None and not np.isnan(flat_zs[i]):
-            coordinates.append(float(flat_zs[i]))
+        if flat_levels is not None and flat_levels[i] is not None and not np.isnan(flat_levels[i]):
+            coordinates.append(float(flat_levels[i]))
         features.append(
             {
                 "type": "Feature",

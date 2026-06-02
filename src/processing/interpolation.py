@@ -14,33 +14,33 @@ from src.utils.spatial import get_cached_ckdtree
 
 
 def cell_to_point_conversion(
-    lons, lats, heights, vals, variable, mesh_type, is_regular_grid, is_3d=False
+    lons, lats, levels, vals, variable, mesh_type, is_regular_grid, is_3d=False
 ):
-    lons_points, lats_points, heights_points = extrapolate_edges_from_cell_data(
-        lons, lats, heights, "radial" if mesh_type == "radial" else "rectilinear"
+    lons_points, lats_points, levels_points = extrapolate_edges_from_cell_data(
+        lons, lats, levels, "radial" if mesh_type == "radial" else "rectilinear"
     )
-    temp_grid = pv.StructuredGrid(lons_points, lats_points, heights_points)
+    temp_grid = pv.StructuredGrid(lons_points, lats_points, levels_points)
     temp_grid.cell_data[variable] = vals.ravel(order="F")
     temp_point_grid = temp_grid.cell_data_to_point_data()
     new_shape = lons_points.shape
     vals = temp_point_grid.point_data[variable].reshape(new_shape, order="F")
-    lons, lats, heights = lons_points, lats_points, heights_points
+    lons, lats, levels = lons_points, lats_points, levels_points
     lons_1d, lats_1d, levels_1d = None, None, None
     if is_regular_grid:
         if is_3d and lons.ndim == 3:
             lons_1d = lons[0, 0, :]
             lats_1d = lats[0, :, 0]
-            levels_1d = heights[:, 0, 0]
+            levels_1d = levels[:, 0, 0]
         else:
             lons_1d = lons[0, :]
             lats_1d = lats[:, 0]
-    return lons, lats, heights, vals, lons_1d, lats_1d, levels_1d
+    return lons, lats, levels, vals, lons_1d, lats_1d, levels_1d
 
 
 def generate_meshgrid_and_interpolate(
     lons,
     lats,
-    heights,
+    levels,
     vals,
     lons_1d,
     lats_1d,
@@ -71,33 +71,33 @@ def generate_meshgrid_and_interpolate(
     xi = np.linspace(t_lon_min, t_lon_max, target_w)
     yi = np.linspace(t_lat_min, t_lat_max, target_h)
 
-    if is_3d and heights is not None:
+    if is_3d and levels is not None:
         # Determine Z target bounds.
         # For regular 3D: use the 1-D levels vector.
-        # For irregular 3D (levels_1d is None): use the height array.
+        # For irregular 3D (levels_1d is None): use the level array.
         if levels_1d is not None:
-            t_z_min = (
-                bbox.z_min
-                if bbox.has_bb_z and bbox.z_min is not None
+            t_level_min = (
+                bbox.level_min
+                if bbox.has_bb_level and bbox.level_min is not None
                 else levels_1d.min()
             )
-            t_z_max = (
-                bbox.z_max
-                if bbox.has_bb_z and bbox.z_max is not None
+            t_level_max = (
+                bbox.level_max
+                if bbox.has_bb_level and bbox.level_max is not None
                 else levels_1d.max()
             )
         else:
-            t_z_min = (
-                bbox.z_min
-                if bbox.has_bb_z and bbox.z_min is not None
-                else float(heights.min())
+            t_level_min = (
+                bbox.level_min
+                if bbox.has_bb_level and bbox.level_min is not None
+                else float(levels.min())
             )
-            t_z_max = (
-                bbox.z_max
-                if bbox.has_bb_z and bbox.z_max is not None
-                else float(heights.max())
+            t_level_max = (
+                bbox.level_max
+                if bbox.has_bb_level and bbox.level_max is not None
+                else float(levels.max())
             )
-        zi = np.linspace(t_z_min, t_z_max, max(target_d, 1))
+        zi = np.linspace(t_level_min, t_level_max, max(target_d, 1))
         xi_mesh, yi_mesh, zi_mesh = np.meshgrid(xi, yi, zi, indexing="ij")
 
         if is_regular_grid and not is_point_list and levels_1d is not None:
@@ -128,17 +128,17 @@ def generate_meshgrid_and_interpolate(
                     f"3D Interpolation failed: {str(e)}"
                 )
         elif levels_1d is None:
-            # Irregular 3D grid: lat/lon/height are all 3D arrays.
-            # Use true 3D scattered interpolation on (lon, lat, height) triplets.
+            # Irregular 3D grid: lat/lon/levels are all 3D arrays.
+            # Use true 3D scattered interpolation on (lon, lat, level) triplets.
             try:
                 interpolated_vals = apply_spatial_interpolation_irregular_grid_3d(
                     source_lons=lons.ravel(),
                     source_lats=lats.ravel(),
-                    source_heights=heights.ravel(),
+                    source_levels=levels.ravel(),
                     source_values=vals.ravel(),
                     target_lon_mesh=xi_mesh,
                     target_lat_mesh=yi_mesh,
-                    target_height_mesh=zi_mesh,
+                    target_levels_mesh=zi_mesh,
                     method=interp_spatial_method,
                     **interp_spatial_params,
                 )
@@ -209,7 +209,7 @@ def generate_meshgrid_and_interpolate(
 
 
 def extrapolate_edges_from_cell_data(
-    lons, lats, heights=None, mesh_type="rectilinear", periodic_axes=None
+    lons, lats, levels=None, mesh_type="rectilinear", periodic_axes=None
 ):  # mesh_type="regular"|"rectilinear"|"radial"
     if periodic_axes is None:
         periodic_axes = []
@@ -253,17 +253,17 @@ def extrapolate_edges_from_cell_data(
 
     x_cells = lons
     y_cells = lats
-    z_cells = heights
+    z_cells = levels
 
     x_bounds = expand_axis(x_cells, 0)
     y_bounds = expand_axis(y_cells, 0)
-    if heights is not None:
+    if levels is not None:
         z_bounds = expand_axis(z_cells, 0)
     else:
         z_bounds = np.zeros_like(x_bounds)
 
     if mesh_type != "regular":
-        if heights is not None:
+        if levels is not None:
             x_bounds = expand_axis(x_bounds, 2)
             y_bounds = expand_axis(y_bounds, 2)
             z_bounds = expand_axis(z_bounds, 2)
@@ -278,17 +278,17 @@ def extrapolate_edges_from_cell_data(
 def apply_spatial_interpolation_irregular_grid_3d(
     source_lons,
     source_lats,
-    source_heights,
+    source_levels,
     source_values,
     target_lon_mesh,
     target_lat_mesh,
-    target_height_mesh,
+    target_levels_mesh,
     method="linear",
     **kwargs,
 ):
     """
-    Scattered 3D interpolation for irregular grids where lat, lon, and height
-    are all 3D arrays. Source points are (lon, lat, height) triplets.
+    Scattered 3D interpolation for irregular grids where lat, lon, and levels
+    are all 3D arrays. Source points are (lon, lat, levels) triplets.
 
     Supports 'nearest' and 'linear' via scipy griddata, 'idw', and 'rbf'.
     Note: scipy griddata does not support 'cubic' in 3D — falls back to 'linear'.
@@ -297,7 +297,7 @@ def apply_spatial_interpolation_irregular_grid_3d(
         (
             source_lons.ravel(),
             source_lats.ravel(),
-            source_heights.ravel(),
+            source_levels.ravel(),
         )
     )
     values = source_values.ravel()
@@ -313,7 +313,7 @@ def apply_spatial_interpolation_irregular_grid_3d(
         (
             target_lon_mesh.ravel(),
             target_lat_mesh.ravel(),
-            target_height_mesh.ravel(),
+            target_levels_mesh.ravel(),
         )
     )
 

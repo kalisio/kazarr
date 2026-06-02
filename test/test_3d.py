@@ -8,10 +8,10 @@ Tests cover:
 - 2D slice extraction from a 3D dataset (providing a level coordinate)
 - Full 3D volume extraction (is_3d=true)
 - 3D extraction with a vertical bounding box (z_min / z_max)
-- 3D GeoJSON output including height coordinates
+- 3D GeoJSON output including 'level' coordinates
 - 2D mesh from a 3D dataset (slice at a given level)
 - 3D volumetric mesh generation
-- Probe on a 3D dataset with height
+- Probe on a 3D dataset with levels
 - Error cases: missing level on 2D request, z bbox out of range
 """
 
@@ -45,7 +45,7 @@ class TestRegularGrid3D:
     @pytest.fixture(scope="class", autouse=True)
     def cleanup(self):
         yield
-        utils.cleanup_test_files()
+        #utils.cleanup_test_files()
 
     # ------------------------------------------------------------------
     # Setup
@@ -106,7 +106,7 @@ class TestRegularGrid3D:
                     "lon": "lon",
                     "lat": "lat",
                     "time": "time",
-                    "height": "level",
+                    "level": "level",
                 },
                 "pipelines": {
                     "preprocess": ["load_from_netcdf", "unify_chunks", "save"]
@@ -131,7 +131,7 @@ class TestRegularGrid3D:
         assert "values" in data
         assert "longitudes" in data
         assert "latitudes" in data
-        assert "heights" not in data  # 2D slice: no height in output
+        assert "levels" not in data  # 2D slice: no level in output
         assert len(data["values"]["Value"]) == LATS * LONS
 
     def test_extract_2d_missing_level_fails(self, client: TestClient):
@@ -157,18 +157,18 @@ class TestRegularGrid3D:
         assert "values" in data
         assert "longitudes" in data
         assert "latitudes" in data
-        assert "heights" in data
+        assert "levels" in data
         assert len(data["values"]["Value"]) == LONS * LATS * LEVELS
 
-    def test_extract_3d_heights_present(self, client: TestClient):
-        """Heights array in 3D output must have the same length as values."""
+    def test_extract_3d_levels_present(self, client: TestClient):
+        """Levels array in 3D output must have the same length as values."""
         response = client.get(
             f"/datasets/{DATASET_REGULAR}/extract"
             f"?variable=Value&time=2026-01-01&is_3d=true"
         )
         assert response.status_code == 200
         data = response.json()
-        assert len(data["heights"]) == len(data["values"]["Value"])
+        assert len(data["levels"]) == len(data["values"]["Value"])
 
     def test_extract_3d_z_bbox(self, client: TestClient):
         """3D extraction with z_min/z_max returns only levels inside the range."""
@@ -182,8 +182,8 @@ class TestRegularGrid3D:
         )
         assert response.status_code == 200
         data = response.json()
-        heights = data["heights"]
-        assert all(z_min <= h <= z_max for h in heights)
+        levels = data["levels"]
+        assert all(z_min <= level <= z_max for level in levels)
         # 2 levels × LATS × LONS
         assert len(data["values"]["Value"]) == 2 * LATS * LONS
 
@@ -217,7 +217,7 @@ class TestRegularGrid3D:
     # ------------------------------------------------------------------
 
     def test_extract_3d_geojson(self, client: TestClient):
-        """GeoJSON 3D output embeds height as the third coordinate."""
+        """GeoJSON 3D output embeds level as the third coordinate."""
         response = client.get(
             f"/datasets/{DATASET_REGULAR}/extract"
             f"?variable=Value&time=2026-01-01&is_3d=true&format=geojson"
@@ -227,7 +227,7 @@ class TestRegularGrid3D:
         assert data["type"] == "FeatureCollection"
         features = data["features"]
         assert len(features) > 0
-        # Each feature must have a 3-element coordinate array [lon, lat, height]
+        # Each feature must have a 3-element coordinate array [lon, lat, level]
         first_coords = features[0]["geometry"]["coordinates"]
         assert len(first_coords) == 3
 
@@ -358,7 +358,7 @@ class TestNonRegularGrid3D:
         assert os.path.exists(os.path.join(TMP_FOLDER, f"{DATASET_NON_REGULAR}.nc"))
 
     def test_convert_dataset(self, convert):
-        """Convert the 3D NetCDF to Zarr with lon/lat/height/time variable mappings."""
+        """Convert the 3D NetCDF to Zarr with lon/lat/level/time variable mappings."""
         output_path = os.path.join(TMP_FOLDER, f"{DATASET_NON_REGULAR}.zarr")
         convert(
             input_path=os.path.join(TMP_FOLDER, f"{DATASET_NON_REGULAR}.nc"),
@@ -368,7 +368,7 @@ class TestNonRegularGrid3D:
                     "lon": "lon",
                     "lat": "lat",
                     "time": "time",
-                    "height": "level",
+                    "level": "level",
                 },
                 "reprojection": {"fromCrs": "EPSG:32631", "toCrs": "EPSG:4326"},
                 "pipelines": {
@@ -399,7 +399,7 @@ class TestNonRegularGrid3D:
         assert "values" in data
         assert "longitudes" in data
         assert "latitudes" in data
-        assert "heights" not in data  # 2D slice: no height in output
+        assert "levels" not in data  # 2D slice: no level in output
         assert len(data["values"]["Value"]) == NR_LONS * NR_LATS
 
     def test_extract_2d_missing_level_fails(self, client: TestClient):
@@ -408,7 +408,7 @@ class TestNonRegularGrid3D:
             f"/datasets/{DATASET_NON_REGULAR}/extract?variable=Value&time=2026-01-01"
         )
         pytest.skip(
-            "With irregular grids, extract allow latitude and longitude coordinates not to be fixed, and so their dimensions are not fixed either. But, as height share the same dimensions as lat/lon, it is currently not possible to check if the level dimension is fixed or not. This test should be re-enabled once we have a better way to check if the level dimension is satisfied or not."
+            "With irregular grids, extract allow latitude and longitude coordinates not to be fixed, and so their dimensions are not fixed either. But, as level share the same dimensions as lat/lon, it is currently not possible to check if the level dimension is fixed or not. This test should be re-enabled once we have a better way to check if the level dimension is satisfied or not."
         )
 
     # ------------------------------------------------------------------
@@ -426,18 +426,18 @@ class TestNonRegularGrid3D:
         assert "values" in data
         assert "longitudes" in data
         assert "latitudes" in data
-        assert "heights" in data
+        assert "levels" in data
         assert len(data["values"]["Value"]) == NR_LEVELS * NR_LONS * NR_LATS
 
-    def test_extract_3d_heights_present(self, client: TestClient):
-        """Heights array in 3D output must have the same length as values."""
+    def test_extract_3d_levels_present(self, client: TestClient):
+        """Levels array in 3D output must have the same length as values."""
         response = client.get(
             f"/datasets/{DATASET_NON_REGULAR}/extract"
             f"?variable=Value&time=2026-01-01&is_3d=true"
         )
         assert response.status_code == 200
         data = response.json()
-        assert len(data["heights"]) == len(data["values"]["Value"])
+        assert len(data["levels"]) == len(data["values"]["Value"])
 
     def test_extract_3d_z_bbox(self, client: TestClient):
         """3D extraction with z_min/z_max returns only levels inside the range."""
@@ -450,8 +450,8 @@ class TestNonRegularGrid3D:
         )
         assert response.status_code == 200
         data = response.json()
-        heights = data["heights"]
-        assert all(z == h for h in heights)
+        levels = data["levels"]
+        assert all(z == level for level in levels)
         # 1 level × LATS × LONS
         assert len(data["values"]["Value"]) == 1 * NR_LATS * NR_LONS
 
@@ -469,7 +469,7 @@ class TestNonRegularGrid3D:
     # ------------------------------------------------------------------
 
     def test_extract_3d_geojson(self, client: TestClient):
-        """GeoJSON 3D output embeds height as the third coordinate."""
+        """GeoJSON 3D output embeds level as the third coordinate."""
         response = client.get(
             f"/datasets/{DATASET_NON_REGULAR}/extract"
             f"?variable=Value&time=2026-01-01&is_3d=true&format=geojson"
@@ -479,7 +479,7 @@ class TestNonRegularGrid3D:
         assert data["type"] == "FeatureCollection"
         features = data["features"]
         assert len(features) > 0
-        # Each feature must have a 3-element coordinate array [lon, lat, height]
+        # Each feature must have a 3-element coordinate array [lon, lat, level]
         first_coords = features[0]["geometry"]["coordinates"]
         assert len(first_coords) == 3
 
@@ -638,7 +638,7 @@ class TestDataset3DMultiLevel:
                     "lon": "lon",
                     "lat": "lat",
                     "time": "time",
-                    "height": "ATTRS.typeOfLevel",
+                    "level": "ATTRS.typeOfLevel",
                 },
                 "pipelines": {
                     "preprocess": ["load_from_netcdf", "unify_chunks", "save"]
@@ -663,12 +663,12 @@ class TestDataset3DMultiLevel:
 
     def test_mesh_3d_no_variable(self, client: TestClient):
         response = client.get(f"/datasets/{DATASET_MULTILEVEL}/mesh?is_3d=true")
-        # Should fail with NO_HEIGHT_VARIABLE because the dataset has multiple height types
+        # Should fail with NO_LEVEL_VARIABLE because the dataset has multiple level types
         assert response.status_code in (400, 422)
 
-    def test_mesh_3d_height_variable_specific(self, client: TestClient):
+    def test_mesh_3d_level_variable_specific(self, client: TestClient):
         response = client.get(
-            f"/datasets/{DATASET_MULTILEVEL}/mesh?is_3d=true&height_variable=heightAboveGround"
+            f"/datasets/{DATASET_MULTILEVEL}/mesh?is_3d=true&level_variable=heightAboveGround"
         )
         assert response.status_code == 200
         data = response.json()
@@ -762,7 +762,7 @@ class TestDataset3DMultiLevel:
         assert "values" in data
         assert "longitudes" in data
         assert "latitudes" in data
-        assert "heights" in data
+        assert "levels" in data
 
     def test_extract(self, client: TestClient):
         response = client.get(
@@ -773,7 +773,7 @@ class TestDataset3DMultiLevel:
         assert "values" in data
         assert "longitudes" in data
         assert "latitudes" in data
-        assert "heights" in data
+        assert "levels" in data
 
     # ------------------------------------------------------------------
     # Dataset metadata

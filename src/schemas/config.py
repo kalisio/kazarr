@@ -38,4 +38,4 @@ class ExtractionConfig(BaseModel):
 
 class MeshExtractionConfig(ExtractionConfig):
     variable: str | None = None
-    height_variable: str | None = None
+    level_variable: str | None = None

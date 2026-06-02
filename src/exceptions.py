@@ -150,10 +150,10 @@ class DifferentTypesOfLevel(UserInputBasedException):
         super().__init__("DIFFERENT_TYPES_OF_LEVEL", message)
 
 
-class CantFindHeightVariable(UserInputBasedException):
+class CantFindLevelVariable(UserInputBasedException):
     def __init__(self):
-        message = "Unable to determine height variable for 3D mesh generation."
-        super().__init__("CANT_FIND_HEIGHT_VARIABLE", message)
+        message = "Unable to determine 'level' variable for 3D mesh generation."
+        super().__init__("CANT_FIND_LEVEL_VARIABLE", message)
 
 
 class InvalidTimeRange(UserInputBasedException):

@@ -82,7 +82,7 @@ class TestCombineRadialGrid:
                 "variable": "CoordX0",
                 "dimensions": ["DimK", "DimJ", "DimI"],
             },
-            "height": {
+            "level": {
                 "type": "load",
                 "sample": "radial_mesh_resize1.nc",
                 "variable": "CoordZ0",
@@ -104,7 +104,7 @@ class TestCombineRadialGrid:
                 "variables": {
                     "lon": "lon",
                     "lat": "lat",
-                    "height": "height",
+                    "level": "level",
                     "time": "time",
                 },
                 "pipelines": {
@@ -169,7 +169,7 @@ class TestCombineRadialGrid:
                 "variable": "CoordX0",
                 "dimensions": ["DimK", "DimJ", "DimI"],
             },
-            "height": {
+            "level": {
                 "type": "load",
                 "sample": "radial_mesh_resize2.nc",
                 "variable": "CoordZ0",
@@ -191,7 +191,7 @@ class TestCombineRadialGrid:
                 "variables": {
                     "lon": "lon",
                     "lat": "lat",
-                    "height": "height",
+                    "level": "level",
                     "time": "time",
                 },
                 "pipelines": {
@@ -217,7 +217,7 @@ class TestCombineRadialGrid:
                 "variables": {
                     "lon": "lon",
                     "lat": "lat",
-                    "height": "height",
+                    "level": "level",
                     "time": "time",
                 },
                 "pipelines": {
@@ -257,7 +257,7 @@ class TestCombineRadialGrid:
         expected_variables = {
             "lon",
             "lat",
-            "height",
+            "level",
             "WindSpeed",
             "Precipitation",
             "Temperature",
@@ -402,7 +402,7 @@ class TestPointList:
                 "values": STATION_LONS[:-N_REDUCED_AMOUNT],
                 "dimensions": ["DimN"],
             },
-            "height": {
+            "level": {
                 "type": "array",
                 "values": [0.0] * (N_STATIONS - N_REDUCED_AMOUNT),
                 "dimensions": ["DimN"],
@@ -430,7 +430,7 @@ class TestPointList:
                 "variables": {
                     "lon": "lon",
                     "lat": "lat",
-                    "height": "height",
+                    "level": "level",
                     "time": "time",
                 },
                 "assignCoords": {"name": "DimN"},
@@ -476,7 +476,7 @@ class TestPointList:
                 "values": STATION_LONS[N_REDUCED_AMOUNT + 1 :],
                 "dimensions": ["DimN"],
             },
-            "height": {
+            "level": {
                 "type": "array",
                 "values": [0.0] * (N_STATIONS - N_REDUCED_AMOUNT - 1),
                 "dimensions": ["DimN"],
@@ -504,7 +504,7 @@ class TestPointList:
                 "variables": {
                     "lon": "lon",
                     "lat": "lat",
-                    "height": "height",
+                    "level": "level",
                     "time": "time",
                 },
                 "assignCoords": {"name": "DimN"},
@@ -534,7 +534,7 @@ class TestPointList:
                 "variables": {
                     "lon": "lon",
                     "lat": "lat",
-                    "height": "height",
+                    "level": "level",
                     "time": "time",
                 },
                 "assignCoords": {"name": "DimN"},

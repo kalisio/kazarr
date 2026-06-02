@@ -101,7 +101,7 @@ class TestPointList:
                 "values": STATION_LONS,
                 "dimensions": ["DimN"],
             },
-            "height": {
+            "level": {
                 "type": "array",
                 "values": [0.0] * N_STATIONS,
                 "dimensions": ["DimN"],
@@ -127,7 +127,7 @@ class TestPointList:
                 "variables": {
                     "lon": "lon",
                     "lat": "lat",
-                    "height": "height",
+                    "level": "level",
                     "time": "time",
                 },
                 "assignCoords": {"name": "DimN"},
@@ -427,10 +427,10 @@ class TestPointList:
             values, (int, float)
         )
 
-    def test_probe_with_height(self, client: TestClient):
-        """Probe with height dimension falls back to nearest station."""
+    def test_probe_with_level(self, client: TestClient):
+        """Probe with level dimension falls back to nearest station."""
         response = client.get(
-            f"/datasets/{DATASET_NAME}/probe?variables=Humidity&lat=48.856&lon=2.352&height=0.0"
+            f"/datasets/{DATASET_NAME}/probe?variables=Humidity&lat=48.856&lon=2.352&level=0.0"
         )
 
         assert response.status_code == 200

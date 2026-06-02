@@ -66,7 +66,7 @@ class TestRectilinearGrid:
                 "variable": "CoordX0",
                 "dimensions": ["DimK", "DimJ", "DimI"],
             },
-            "height": {
+            "level": {
                 "type": "load",
                 "sample": "rectilinear_grid.nc",
                 "variable": "CoordZ0",

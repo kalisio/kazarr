@@ -76,7 +76,7 @@ def apply_regular_grid_bounding_box(
     )
 
 
-def apply_unstructured_bounding_box(
+def apply_irregular_bounding_box(
     lons_vals, lats_vals, bbox: BBoxContext, is_regular_grid, spatial_padding, pad
 ) -> tuple[np.ndarray, np.ndarray, GridIndices]:
     if is_regular_grid:
@@ -151,21 +151,21 @@ def apply_resolution_limit(
     return step_row, step_col
 
 
-def apply_levels_bounding_box(levels_1d, bbox):
-    bb_z_min = bbox.z_min if bbox.z_min is not None else -np.inf
-    bb_z_max = bbox.z_max if bbox.z_max is not None else np.inf
-    z_mask = (levels_1d >= bb_z_min) & (levels_1d <= bb_z_max)
-    if not np.any(z_mask):
+def apply_level_bounding_box_regular_grid(levels_1d, bbox):
+    bb_level_min = bbox.level_min if bbox.level_min is not None else -np.inf
+    bb_level_max = bbox.level_max if bbox.level_max is not None else np.inf
+    level_mask = (levels_1d >= bb_level_min) & (levels_1d <= bb_level_max)
+    if not np.any(level_mask):
         raise exceptions.NoDataInSelection()
-    z_indices = np.where(z_mask)[0]
-    level_min, level_max = int(z_indices[0]), int(z_indices[-1])
+    level_indices = np.where(level_mask)[0]
+    level_min, level_max = int(level_indices[0]), int(level_indices[-1])
     return level_min, level_max, levels_1d[level_min : level_max + 1]
 
 
-def apply_z_bounding_box(heights, bbox):
-    bb_z_min = bbox.z_min if bbox.z_min is not None else -np.inf
-    bb_z_max = bbox.z_max if bbox.z_max is not None else np.inf
-    z_mask = (heights >= bb_z_min) & (heights <= bb_z_max)
-    if not np.any(z_mask):
+def apply_level_bounding_box_irregular_grid(levels, bbox):
+    bb_level_min = bbox.level_min if bbox.level_min is not None else -np.inf
+    bb_level_max = bbox.level_max if bbox.level_max is not None else np.inf
+    level_mask = (levels >= bb_level_min) & (levels <= bb_level_max)
+    if not np.any(level_mask):
         raise exceptions.NoDataInSelection()
-    return z_mask
+    return level_mask

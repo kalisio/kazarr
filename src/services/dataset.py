@@ -1,7 +1,7 @@
 import numpy as np
 from typing import Any, Dict, Optional
 
-from src.utils.data import dgets, dget, get_dataset_height_vars
+from src.utils.data import dgets, dget, get_dataset_level_vars
 from src.utils.file import load_datasets, load_dataset
 
 
@@ -45,17 +45,17 @@ def dataset_metadata(dataset_id: str) -> Dict[str, Any]:
             },
         }
     vertical_axis = {}
-    height_vars = get_dataset_height_vars(dataset, config)
-    if isinstance(height_vars, str):
-        height_vars = [height_vars]
-    elif height_vars is None:
-        height_vars = []
+    level_vars = get_dataset_level_vars(dataset, config)
+    if isinstance(level_vars, str):
+        level_vars = [level_vars]
+    elif level_vars is None:
+        level_vars = []
 
-    for height_var in height_vars:
-        if height_var in dataset:
-            vertical_axis[height_var] = {
-                "min": float(dataset[height_var].min()),
-                "max": float(dataset[height_var].max()),
+    for level_var in level_vars:
+        if level_var in dataset:
+            vertical_axis[level_var] = {
+                "min": float(dataset[level_var].min()),
+                "max": float(dataset[level_var].max()),
             }
 
     time_var = dget(config, "variables.time")

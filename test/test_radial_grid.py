@@ -63,7 +63,7 @@ class TestRadialGrid:
                 "variable": "CoordX0",
                 "dimensions": ["DimK", "DimJ", "DimI"],
             },
-            "height": {
+            "level": {
                 "type": "load",
                 "sample": "radial_grid.nc",
                 "variable": "CoordZ0",
@@ -82,7 +82,7 @@ class TestRadialGrid:
             input_path=os.path.join(TMP_FOLDER, f"{DATASET_NAME}.nc"),
             output_path=output_path,
             config={
-                "variables": {"lon": "lon", "lat": "lat", "height": "height", "time": "time"},
+                "variables": {"lon": "lon", "lat": "lat", "level": "level", "time": "time"},
                 "reprojection": {"fromCrs": "EPSG:32631", "toCrs": "EPSG:4326"},
                 "pipelines": {
                     "preprocess": [
