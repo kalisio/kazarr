@@ -390,6 +390,16 @@ def combine_at_time(dataset, config):
         message="Missing 'variables.time' config parameter for combine_at_time process.",
     )
 
+    # Those variables will be used to check if spatial dimensions have changed between the two datasets,
+    # and to pad the first dataset if needed to align dimensions before concatenation.
+    # They are not mandatory, as the process can still work without them,
+    # but if they are present in the secondary dataset they should be checked against the primary dataset
+    # to ensure proper alignment during concatenation.
+    # TODO: Those variables must be static and not ATTRS dependent (e.g. ATTRS.level_type)
+    lon_var = get_ci(config, "variables.lon")
+    lat_var = get_ci(config, "variables.lat")
+    height_var = get_ci(config, "variables.height")
+
     if (
         "secondary_datasets" not in config
         or combine_dataset_tag not in config["secondary_datasets"]
@@ -433,12 +443,94 @@ def combine_at_time(dataset, config):
         {time_var: combine_dataset[time_var] > combine_time}
     )
 
+    # For list point case, we need to find a variable to discriminate points, and set index of this variable
+    spatial_vars_defined = lon_var is not None and lat_var is not None
+    spatial_vars_in_dataset = (
+        spatial_vars_defined
+        and lon_var in primary_before
+        and lat_var in primary_before
+        and lon_var in secondary_after
+        and lat_var in secondary_after
+    )
+    lons, lats = None, None
+    if spatial_vars_in_dataset:
+        lons = secondary_after[lon_var]
+        lats = secondary_after[lat_var]
+    is_point_list = (
+        lons is not None
+        and lats is not None
+        and (
+            (lons.ndim == 1 and lats.ndim == 1 and lons.dims == lats.dims)
+            or (lons.ndim == 0 and lats.ndim == 0)
+        )
+    )
+    if is_point_list:
+        point_discriminator_var = get_ci(
+            config,
+            "combine_point_discriminator_var",
+        )
+
+        if point_discriminator_var is None:
+            spatial_variable_dims = lons.dims
+            corresponding_vars = []
+            for var in list(primary_before.data_vars) + list(primary_before.coords):
+                have_same_dims = primary_before[var].dims == spatial_variable_dims
+                is_string_type = primary_before[var].dtype.kind in ("U", "S", "O")
+                if have_same_dims and is_string_type:
+                    corresponding_vars.append(var)
+
+            if len(corresponding_vars) > 1:
+                raise ValueError(
+                    (
+                        "This dataset was detected as a point list. To combine two datasets"
+                        ", this process need a variable to discriminate points (names), "
+                        f"but {corresponding_vars} were found. Please specify 'combine_point_discriminator_var' "
+                        "config parameter to select which one to use."
+                    )
+                )
+
+            index_target_var = corresponding_vars[0]
+        else:
+            index_target_var = point_discriminator_var
+
+        if index_target_var not in secondary_after:
+            raise ValueError(
+                f"Variable '{index_target_var}' not found in the secondary dataset. Please specify a valid variable to discriminate points ('combine_point_discriminator_var' config parameter)."
+            )
+
+        index_dim_name = primary_before[index_target_var].dims[0]
+        primary_before = primary_before.set_index({index_dim_name: index_target_var})
+        secondary_after = secondary_after.set_index({index_dim_name: index_target_var})
+
     if len(primary_before[time_var]) == 0:
         combined_dataset = secondary_after
     elif len(secondary_after[time_var]) == 0:
         combined_dataset = primary_before
     else:
+        # Get dimensions used with spatial variables
+        spatial_dimensions = []
+        for var in [lon_var, lat_var, height_var]:
+            if var and var in secondary_after:
+                for dim in secondary_after[var].dims:
+                    if dim not in spatial_dimensions:
+                        spatial_dimensions.append(dim)
+
+        # Check if spatial dimensions have changed between the two datasets
+        for dim in spatial_dimensions:
+            if dim in primary_before.dims:
+                diff = secondary_after.sizes[dim] - primary_before.sizes[dim]
+                # If so, pad the first dataset to align dimensions
+                if diff > 0:
+                    primary_before = primary_before.pad(
+                        {dim: (0, diff)}, constant_values=np.nan
+                    )
+
         combined_dataset = xr.concat([primary_before, secondary_after], dim=time_var)
+
+    if is_point_list:
+        combined_dataset = combined_dataset.rename_vars(
+            {index_dim_name: index_target_var}
+        )
 
     combined_dataset = combined_dataset.sortby(time_var)
     return combined_dataset, config
@@ -672,9 +764,7 @@ def delta_time_to_datetime(dataset, config):
             time_ref, (int, float)
         ):
             time_ref = timestamp_to_datetime(time_ref)
-        elif not is_dt64 and not isinstance(
-            time_ref, datetime
-        ):
+        elif not is_dt64 and not isinstance(time_ref, datetime):
             time_ref = (
                 time_ref.decode("utf-8")
                 if isinstance(time_ref, bytes)
