@@ -154,3 +154,14 @@ class CantFindHeightVariable(UserInputBasedException):
     def __init__(self):
         message = "Unable to determine height variable for 3D mesh generation."
         super().__init__("CANT_FIND_HEIGHT_VARIABLE", message)
+
+
+class InvalidTimeRange(UserInputBasedException):
+    def __init__(self, message):
+        super().__init__("INVALID_TIME_RANGE", message)
+
+
+class InvalidDatetimeFormat(UserInputBasedException):
+    def __init__(self, datetime_str):
+        message = f"Invalid datetime format: '{datetime_str}'. Expected ISO 8601 format."
+        super().__init__("INVALID_DATETIME_FORMAT", message, datetime_str)

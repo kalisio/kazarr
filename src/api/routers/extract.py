@@ -79,7 +79,7 @@ async def extract_data(
             request,
             base.dataset,
             base.variable,
-            time=time.time,
+            time_range=time.time,
             format=base.format,
             config=config,
             cancel_event=cancel_event,

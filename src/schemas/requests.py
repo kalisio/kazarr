@@ -110,7 +110,7 @@ class MeshParams:
 class SpatialInterpolationParams:
     interp_spatial_method: Literal["nearest", "linear", "cubic", "idw", "rbf"] = Query(
         "nearest",
-        description="The method to use for spatial interpolation. Supported values are 'nearest', 'linear', 'cubic', 'idw' and 'rbf'. Default is 'linear'.",
+        description="The method to use for spatial interpolation. Supported values are 'nearest', 'linear', 'cubic', 'idw' and 'rbf'.",
     )
     interp_spatial_params: str = Query(
         "padding:1.0",

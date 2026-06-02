@@ -14,19 +14,20 @@ from src.utils.data import (
     sel,
     get_required_dims_and_coords,
     get_bounded_time,
+    get_times_in_range
 )
 from src.utils.file import load_dataset
 from src.utils.logging import StepLoggerAndAborter
 from src.utils.spatial import get_cached_ckdtree
 from src.processing import bbox, interpolation, output
-from src.processing.contexts import BBoxContext
+from src.processing.contexts import BBoxContext, TimeRange
 
 
 def extract(
     request: Request,
     dataset_id: str,
     variable: str,
-    time: Optional[str] = None,
+    time_range: Optional[str] = None,
     format: str = "raw",
     config: Union[Dict[str, Any], ExtractionConfig, None] = None,
     cancel_event: Optional[threading.Event] = None,
@@ -36,7 +37,7 @@ def extract(
 
     step_logger = StepLoggerAndAborter(
         "extract",
-        parameters=(dataset_id, variable, time, format, config),
+        parameters=(dataset_id, variable, time_range, format, config),
         cancel_event=cancel_event,
     )
 
@@ -69,26 +70,24 @@ def extract(
         missing_vars.append(f"lat ({lat_var})")
 
     time_var = dget(dataset_config, "variables.time")
-    if time is not None and time_var is not None:
+    time_range = TimeRange.from_string(time_range)
+    if time_range.has_time() and time_var is not None:
         if time_var not in dataset:
             missing_vars.append(f"time ({time_var})")
         else:
-            fixed_coords[time_var] = get_bounded_time(dataset, time_var, time)
-            if config.interpolation.vars.time and time_var not in interp_vars:
-                interp_vars.append(time_var)
-            # Remove "time" from request parameters to avoid confusion in later steps (case where time is a variable in the dataset)
-            request.query_params._dict.pop("time", None)
+            bounded_time_range = get_bounded_time(dataset, time_var, time_range)
+            time_range_indexer = bounded_time_range.get_indexer()
+            if time_range_indexer is not None:
+                fixed_coords[time_var] = bounded_time_range.get_indexer()
+                if config.interpolation.vars.time and time_var not in interp_vars:
+                    interp_vars.append(time_var)
+                # Remove "time" from request parameters to avoid confusion in later steps (case where time is a variable in the dataset)
+                request.query_params._dict.pop("time", None)
 
     # Detect multi-timestep mode: when time is not specified but time_var is defined,
     # we will return data for all timesteps.
-    is_multi_time = time is None and time_var is not None and time_var in dataset
-    time_values = None
-    if is_multi_time:
-        time_data = dataset[time_var].values
-        if np.issubdtype(time_data.dtype, np.datetime64):
-            time_values = [str(np.datetime_as_string(t)) for t in time_data]
-        else:
-            time_values = time_data.tolist()
+    time_values = get_times_in_range(dataset, time_var, time_range)
+    is_multi_time = len(time_values) > 1
 
     mesh_type = dget(dataset_config, "mesh_type", "auto")
     if len(missing_vars) > 0:
@@ -477,7 +476,7 @@ def probe(
     lon: float,
     lat: float,
     height: Optional[float] = None,
-    time: Optional[str] = None,
+    time_range: Optional[str] = None,
     format: str = "raw",
     config: Union[Dict[str, Any], ExtractionConfig, None] = None,
     cancel_event: Optional[threading.Event] = None,
@@ -486,7 +485,7 @@ def probe(
         config = ExtractionConfig.model_validate(config or {})
     step_logger = StepLoggerAndAborter(
         "probe",
-        parameters=(dataset_id, variables, lon, lat, height, time, format, config),
+        parameters=(dataset_id, variables, lon, lat, height, time_range, format, config),
         cancel_event=cancel_event,
     )
     step_logger.step_start("Load dataset and config")
@@ -502,6 +501,7 @@ def probe(
         ["variables.lon", "variables.lat", "variables.time"],
     )
     time_dim = dget(dataset_config, "dimensions.time")
+    time_range = TimeRange.from_string(time_range)
     height_vars = get_dataset_height_vars(dataset, dataset_config)
     height_var = None
     if height_vars is None or isinstance(height_vars, str):
@@ -528,13 +528,14 @@ def probe(
         missing_vars.append(f"lat ({lat_var})")
     if with_height and (height_var is None or height_var not in dataset):
         missing_vars.append(f"height ({height_var})")
-    if time is not None and (time_var is None or time_var not in dataset):
+    if time_range.has_time() and (time_var is None or time_var not in dataset):
         missing_vars.append(f"time ({time_var})")
     if len(missing_vars) > 0:
         raise exceptions.BadConfigurationVariable(missing_vars)
 
-    if time is not None and time_var is not None:
-        fixed_coords[time_var] = get_bounded_time(dataset, time_var, time)
+    if time_range.has_time() and time_var is not None:
+        bounded_time_range = get_bounded_time(dataset, time_var, time_range)
+        fixed_coords[time_var] = bounded_time_range.get_indexer()
         if config.interpolation.vars.time:
             interp_vars.append(time_var)
 
@@ -674,8 +675,8 @@ def probe(
     )
     times = None
     if time_var is not None:
-        if time is not None and interp_spatial_method != "nearest":
-            times = [time]
+        if time_range.has_time() and interp_spatial_method != "nearest":
+            times = get_times_in_range(dataset, time_var, time_range)
         elif time_var in dataset:
             times = sel(
                 dataset,
@@ -724,7 +725,7 @@ def multi_probe(
     dataset_id: str,
     variables: Union[str, List[str]],
     points: List[Dict[str, float]],
-    time: Optional[str] = None,
+    time_range: Optional[str] = None,
     format: str = "raw",
     config: Union[Dict[str, Any], ExtractionConfig, None] = None,
     cancel_event: Optional[threading.Event] = None, 
@@ -742,7 +743,7 @@ def multi_probe(
             point.lon,
             point.lat,
             point.height,
-            time,
+            time_range,
             "raw",
             config,
             cancel_event,

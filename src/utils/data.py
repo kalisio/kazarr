@@ -1,7 +1,9 @@
 import numpy as np
+import pandas as pd
 from loguru import logger as log
 
 import src.exceptions as exceptions
+from src.processing.contexts import TimeRange
 
 
 # Ensure xindex is set for a variable in the dataset
@@ -108,21 +110,61 @@ def get_required_dims_and_coords(
     return fixed_coords, fixed_dims
 
 
-def get_bounded_time(dataset, time_var, time):
+def get_bounded_time(dataset, time_var, time_range: TimeRange) -> TimeRange:
     if time_var not in dataset or not is_monotonic_var(dataset, time_var):
         raise exceptions.GenericInternalError(
             f"Time variable '{time_var}' not found or not monotonic in dataset."
         )
 
-    try:
+    time_data = dataset[time_var].values
+    min_time = time_data[0]
+    max_time = time_data[-1]
+
+    def bound_value(t_val: str | None) -> str | None:
+        if t_val is None:
+            return None
+
+        try:
+            t_arr = np.array(t_val, dtype=time_data.dtype)
+            clipped = np.clip(t_arr, min_time, max_time)
+
+            if np.issubdtype(time_data.dtype, np.datetime64):
+                return pd.Timestamp(clipped).isoformat()
+            else:
+                return str(clipped)
+
+        except Exception:
+            raise exceptions.GenericInternalError(
+                f"Unable to convert time value '{t_val}' to the correct type."
+            )
+
+    bounded_start = bound_value(time_range.start)
+    bounded_end = bound_value(time_range.end)
+
+    return TimeRange(
+        start=bounded_start, end=bounded_end, has_time_range=time_range.has_time_range
+    )
+
+
+def get_times_in_range(dataset, time_var, time_range: TimeRange):
+    if time_var not in dataset:
+        return []
+
+    if time_range.start is None and not time_range.has_time_range:
         time_data = dataset[time_var].values
-        # Try to cast time to the same dtype as time_data
-        time = np.array(time, dtype=time_data.dtype)
-        return np.clip(time, time_data[0], time_data[-1])
-    except Exception:
-        raise exceptions.GenericInternalError(
-            f"Unable to convert time value '{time}' to the correct type."
-        )
+    else:
+        try:
+            sliced_data = dataset[time_var].sel({time_var: time_range.get_indexer()})
+            time_data = sliced_data.values
+        except KeyError:
+            return []
+
+    time_data = np.atleast_1d(time_data)
+
+    if np.issubdtype(time_data.dtype, np.datetime64):
+        return [str(np.datetime_as_string(t)) for t in time_data]
+    else:
+        return time_data.tolist()
 
 
 # Smart selection on a dataset variable with coordinates and dimensions
@@ -152,18 +194,20 @@ def sel(
 
     # Convert coords values to target dtype
     for var, val in fixed_coords.items():
-        fixed_coords[var] = np.array(val, dtype=dataset[var].dtype)
+        # Avoid to convert slice
+        if not isinstance(val, slice):
+            fixed_coords[var] = np.array(val, dtype=dataset[var].dtype)
 
     # Only monotonic variables can be used with sel(method='nearest')
     monotonic_fixed_vars = {
         var: val
         for var, val in fixed_coords.items()
-        if is_monotonic_var(dataset, var) and var not in interp_vars
+        if is_monotonic_var(dataset, var) and var not in interp_vars and not isinstance(val, slice)
     }
     non_monotonic_fixed_vars = {
         var: val
         for var, val in fixed_coords.items()
-        if not is_monotonic_var(dataset, var) and var not in interp_vars
+        if (not is_monotonic_var(dataset, var) or isinstance(val, slice)) and var not in interp_vars
     }
 
     try:
