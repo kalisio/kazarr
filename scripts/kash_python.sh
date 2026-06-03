@@ -21,5 +21,6 @@ run_python_lib_tests() {
     echo "About to run tests for $LIB v$VERSION..."
 
     cd "$ROOT_DIR"
+    export PYTHONPATH="$ROOT_DIR${PYTHONPATH:+:$PYTHONPATH}"
     run_pytest
 }
