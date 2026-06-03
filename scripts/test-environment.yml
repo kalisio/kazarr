@@ -1,0 +1,27 @@
+name: kazarr
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - fastapi
+  - uvicorn
+  - xarray
+  - zarr
+  - numpy
+  - pyproj
+  - dask
+  - distributed
+  - s3fs
+  - matplotlib
+  - pyvista=0.47.1
+  - vtk-base=9.5.2
+  - scipy
+  - uvloop
+  - loguru
+  - python-dotenv
+  - cfgrib
+  - h5py
+  - h5netcdf
+  - pyinstaller
+  - ruff
+  - pytest

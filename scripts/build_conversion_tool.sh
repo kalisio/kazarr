@@ -14,7 +14,7 @@ PROJECT_DIR="$ROOT_DIR/conversion_tool"
 ##
 
 PUBLISH=false
-CI_STEP_NAME="Build service"
+CI_STEP_NAME="Build conversion tool"
 while getopts "pr:" option; do
     case $option in
         p) # publish app
@@ -35,6 +35,7 @@ done
 
 NAME=$(get_toml_value "$PROJECT_DIR/pyproject.toml" 'project.name')
 VERSION=$(get_toml_value "$PROJECT_DIR/pyproject.toml" 'project.version')
+GIT_TAG=$(get_git_tag "$ROOT_DIR")
 
 echo "About to build $NAME v$VERSION ..."
 
@@ -46,6 +47,10 @@ load_value_files "$WORKSPACE_DIR/development/common/KALISIO_DOCKERHUB_PASSWORD.e
 
 IMAGE_NAME="$KALISIO_DOCKERHUB_URL/kalisio/$NAME"
 IMAGE_TAG=latest
+
+if [[ -n "$GIT_TAG" ]]; then
+    IMAGE_TAG=$VERSION
+fi
 
 begin_group "Building container $IMAGE_NAME:$IMAGE_TAG ..."
 
