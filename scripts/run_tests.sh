@@ -36,6 +36,11 @@ done
 
 . "$WORKSPACE_DIR/development/workspaces/services/services.sh" kazarr
 
+## Setup micromamba env
+##
+
+setup_micromamba_env "kazarr-test" "$ROOT_DIR/test-environment.yml" true
+
 ## Run tests
 ##
 

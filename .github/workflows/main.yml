@@ -38,11 +38,6 @@ jobs:
         env:
           KALISIO_GITHUB_URL: ${{ secrets.KALISIO_GITHUB_URL }}
         run: bash ./scripts/setup_workspace.sh
-      - name: Setup micromamba
-        uses: mamba-org/setup-micromamba@v1
-        with:
-          environment-file: scripts/test-environment.yml
-          cache-environment: true
       - name: Run tests
         shell: micromamba-shell {0}
         env:

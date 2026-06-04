@@ -8,6 +8,9 @@ markers = [
   "General: General tests for the API",
   "RegularGrid: Tests for regular grid datasets",
   "RectilinearGrid: Tests for rectilinear grid datasets",
+  "CompareRegularVsRectilinear: Tests comparing regular and rectilinear grid datasets",
   "RadialGrid: Tests for radial grid datasets",
-  "PointList: Tests for point list datasets"
+  "PointList: Tests for point list datasets",
+  "Dataset3D: Tests for 3D datasets",
+  "CombineDatasets: Tests for combining datasets",
 ]
