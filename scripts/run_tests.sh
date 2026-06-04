@@ -44,4 +44,4 @@ setup_micromamba_env "kazarr-test" "$THIS_DIR/test-environment.yml" true
 ## Run tests
 ##
 
-run_python_lib_tests "$ROOT_DIR"
+run_python_lib_tests "$ROOT_DIR" "$RUN_SONAR"
