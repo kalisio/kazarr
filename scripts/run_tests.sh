@@ -39,7 +39,7 @@ done
 ## Setup micromamba env
 ##
 
-setup_micromamba_env "kazarr-test" "$ROOT_DIR/test-environment.yml" true
+setup_micromamba_env "kazarr-test" "$THIS_DIR/test-environment.yml" true
 
 ## Run tests
 ##

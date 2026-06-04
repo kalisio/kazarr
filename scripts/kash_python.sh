@@ -65,6 +65,7 @@ run_pytest() {
 
 run_python_lib_tests() {
     local ROOT_DIR="$1"
+    local CODE_COVERAGE="${2:-false}"
     local WORKSPACE_DIR
     WORKSPACE_DIR="$(dirname "$ROOT_DIR")"
 
