@@ -39,6 +39,7 @@ setup_micromamba_env() {
     
     if [ "$auto_activate" = "true" ] || [ "$auto_activate" = "1" ]; then
       echo "Automatic activation of the environment '$env_name'..."
+      eval "$(micromamba shell hook --shell bash)"
       micromamba activate "$env_name"
     fi
   else
