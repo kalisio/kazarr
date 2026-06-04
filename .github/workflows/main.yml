@@ -39,7 +39,6 @@ jobs:
           KALISIO_GITHUB_URL: ${{ secrets.KALISIO_GITHUB_URL }}
         run: bash ./scripts/setup_workspace.sh
       - name: Run tests
-        shell: micromamba-shell {0}
         env:
           SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
         run: bash ./scripts/run_tests.sh -r ${{ github.job }}
