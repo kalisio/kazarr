@@ -2,6 +2,8 @@ MICROMAMBA_VERSION="latest"
 
 install_micromamba() {
   export PREFIX_LOCATION="${PREFIX_LOCATION:-${HOME}/micromamba}"
+  # Mandatory for micromamba to work post installation
+  export MAMBA_ROOT_PREFIX="$PREFIX_LOCATION"
   export BIN_FOLDER="${BIN_FOLDER:-${HOME}/.local/bin}"
   export INIT_YES="no" 
   export CONDA_FORGE_YES="yes"
