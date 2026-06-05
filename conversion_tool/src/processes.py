@@ -575,29 +575,11 @@ def assign_coords(dataset, config):
                 expanded_coords[var_name] = dim_name
         else:
             expanded_coords[var] = dim
-        # if isinstance(dim, dict) and 'variables' in dim:
-        #   var_ranges = dim['variables']
-        #   dim_template = dim['dim']
-        #   for n_key, n_range in var_ranges.items():
-        #     n_min = n_range.get('min', 0)
-        #     n_max = n_range.get('max', 0)
-        #     for n in range(n_min, n_max + 1):
-        #       var_name = var.replace(f"{{{n_key}}}", str(n))
-        #       dim_name = dim_template.replace(f"{{{n_key}}}", str(n))
-        #       expanded_coords[var_name] = dim_name
-        # else:
-        #   expanded_coords[var] = dim
 
     assign_dict = {}
     for var, dim in expanded_coords.items():
-        if var not in dataset:
-            print(
-                f"Warning: Variable '{var}' not found in dataset for assign_coords process. Skipping."
-            )
-        elif dim not in dataset.dims:
-            print(
-                f"Warning: Dimension '{dim}' not found in dataset for assign_coords process. Skipping."
-            )
+        if var not in dataset or dim not in dataset.dims:
+            continue
         elif var not in dataset.coords:
             values = dataset[var].values
             # Decode binary strings if needed
