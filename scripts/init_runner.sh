@@ -13,7 +13,7 @@ THIS_DIR=$(dirname "$THIS_FILE")
 ### Github Actions
 
 init_github_run_tests() {
-    install_reqs age sops micromamba
+    install_reqs age sops sonar_scanner_cli micromamba
 }
 
 init_github_build_service() {
