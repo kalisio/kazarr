@@ -499,6 +499,7 @@ def probe(
         dataset_config, ["variables.fixed", "dimensions.fixed"], {}
     )
     interp_vars = config.interpolation.vars.items
+    spatial_interp_vars = []
     lon_var, lat_var, time_var = dgets(
         dataset_config,
         ["variables.lon", "variables.lat", "variables.time"],
@@ -557,8 +558,12 @@ def probe(
     if is_regular_grid:
         fixed_coords[lon_var] = lon
         fixed_coords[lat_var] = lat
+        if with_level:
+            fixed_coords[level_var] = level
         if interp_spatial_method != "nearest":
-            interp_vars.extend([lon_var, lat_var])
+            spatial_interp_vars.extend([lon_var, lat_var])
+            if with_level:
+                spatial_interp_vars.append(level_var)
     else:
         if with_level:
             levels = dataset[level_var].values
@@ -661,6 +666,14 @@ def probe(
             )
             var_data = interpolated_values.tolist()
         else:
+            interp_methods = None
+            if is_regular_grid and interp_spatial_method != "nearest":
+                # Force to linear interpolation as IDW (only other method supported for probe) doesn't make sense on a regular grid
+                interp_spatial_method = "linear"
+                interp_vars = list(dict.fromkeys(spatial_interp_vars + interp_vars))
+                interp_methods = {
+                    var_name: interp_spatial_method for var_name in spatial_interp_vars
+                }
             var_data = sel(
                 dataset,
                 var,
@@ -668,6 +681,7 @@ def probe(
                 fixed_dims,
                 interp_vars=interp_vars,
                 interp_method=interp_vars_method,
+                interp_methods=interp_methods,
                 interp_config=interp_vars_params,
             ).values.tolist()
         data.append(np.atleast_1d(var_data))

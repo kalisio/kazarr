@@ -249,32 +249,41 @@ def sel(
         }
         if len(interpolated_vars) > 0:
             try:
-                if interp_method not in [
-                    "linear",
-                    "nearest",
-                    "zero",
-                    "slinear",
-                    "quadratic",
-                    "cubic",
-                    "quintic",
-                    "polynomial",
-                    "pchip",
-                    "barycentric",
-                    "krogh",
-                    "akima",
-                    "makima",
-                ]:
-                    log.warning(
-                        "[Kazarr] Unsupported interpolation method: {interp_method}. Falling back to linear.",
-                        interp_method=interp_method,
+                if interp_methods is not None:
+                    method_groups = {}
+                    for var, coord in interpolated_vars.items():
+                        method = interp_methods.get(var, interp_method)
+                        method_groups.setdefault(method, {})[var] = coord
+                else:
+                    method_groups = {interp_method: interpolated_vars}
+
+                for method, vars_to_interp in method_groups.items():
+                    if method not in [
+                        "linear",
+                        "nearest",
+                        "zero",
+                        "slinear",
+                        "quadratic",
+                        "cubic",
+                        "quintic",
+                        "polynomial",
+                        "pchip",
+                        "barycentric",
+                        "krogh",
+                        "akima",
+                        "makima",
+                    ]:
+                        log.warning(
+                            "[Kazarr] Unsupported interpolation method: {interp_method}. Falling back to linear.",
+                            interp_method=method,
+                        )
+                        method = "linear"
+                    data = data.interp(
+                        vars_to_interp,
+                        method=method,
+                        assume_sorted=True,
+                        **interp_config,
                     )
-                    interp_method = "linear"
-                data = data.interp(
-                    interpolated_vars,
-                    method=interp_method,
-                    assume_sorted=True,
-                    **interp_config,
-                )
             except ValueError:
                 raise exceptions.BadSelection(
                     "Data interpolation failed. Please check your query parameters and dataset configuration."
