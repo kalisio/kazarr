@@ -66,12 +66,6 @@ class TestRectilinearGrid:
                 "variable": "CoordX0",
                 "dimensions": ["DimK", "DimJ", "DimI"],
             },
-            "level": {
-                "type": "load",
-                "sample": "rectilinear_grid.nc",
-                "variable": "CoordZ0",
-                "dimensions": ["DimK", "DimJ", "DimI"],
-            },
         }
         dataset = utils.DatasetGenerator(description=description).generate()
         dataset.save(DATASET_NAME, to_netcdf=True)
@@ -93,8 +87,8 @@ class TestRectilinearGrid:
                 "pipelines": {
                     "preprocess": [
                         "load_from_netcdf",
-                        "unify_chunks",
                         "delta_time_to_datetime",
+                        "unify_chunks",
                         "save",
                     ]
                 },

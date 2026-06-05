@@ -330,7 +330,7 @@ class TestPointList:
         """Nearest-neighbor probe at a station location returns its Humidity value."""
         # Probe very close to Paris
         response = client.get(
-            f"/datasets/{DATASET_NAME}/probe?variables=Humidity&lat=48.856&lon=2.352&DimN=0"
+            f"/datasets/{DATASET_NAME}/probe?variables=Humidity&lat=48.856&lon=2.352"
         )
 
         assert response.status_code == 200

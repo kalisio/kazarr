@@ -397,7 +397,6 @@ class TestRegularGrid:
         assert data["values"]["Value"][0] == 150
         assert data["values"]["Value"][2] == 450
 
-
     def test_probes_multiple_points(self, client: TestClient):
         """Probe multiple points returns a list of probe results."""
         payload = {

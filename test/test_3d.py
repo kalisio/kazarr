@@ -67,7 +67,7 @@ class TestRegularGrid3D:
                         "freq": "D",
                     },
                     {
-                        "name": "level",
+                        "name": "height",
                         "type": "float",
                         "size": LEVELS,
                         "start": LEVEL_START,
@@ -106,7 +106,7 @@ class TestRegularGrid3D:
                     "lon": "lon",
                     "lat": "lat",
                     "time": "time",
-                    "level": "level",
+                    "level": "height",
                 },
                 "pipelines": {
                     "preprocess": ["load_from_netcdf", "unify_chunks", "save"]
@@ -141,6 +141,21 @@ class TestRegularGrid3D:
         )
         # Should return 400 or 422 because the level dimension is unsatisfied
         assert response.status_code in (400, 422)
+
+    def test_extract_2d_slice_interpolated(self, client: TestClient):
+        """Extracting a 2D slice at a non-existing level returns interpolated values."""
+        level_mid = LEVEL_START + LEVEL_STEP / 2  # Midway between first two levels
+        response = client.get(
+            f"/datasets/{DATASET_REGULAR}/extract"
+            f"?variable=Value&time=2026-01-01&level={level_mid}&interp_spatial_method=linear"
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert "values" in data
+        assert "longitudes" in data
+        assert "latitudes" in data
+        assert "levels" not in data
+        assert len(data["values"]["Value"]) == LATS * LONS
 
     # ------------------------------------------------------------------
     # Extract — full 3D volume
@@ -232,6 +247,77 @@ class TestRegularGrid3D:
         assert len(first_coords) == 3
 
     # ------------------------------------------------------------------
+    # Probe
+    # ------------------------------------------------------------------
+
+    def test_probe_with_level(self, client: TestClient):
+        """Probe at a 3D point with an explicit level coordinate."""
+        response = client.post(
+            f"/datasets/{DATASET_REGULAR}/probes?variables=Value&time=2026-01-01",
+            json={"points": [{"lon": LON_START, "lat": LAT_START, "level": LEVEL_START}]},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert "times" in data
+        assert "variables" in data
+        assert "Value" in data["variables"]
+        values = data["values"]["Value"]
+        assert isinstance(values, list)
+        assert len(values) == 1
+        assert all(isinstance(v, list) for v in values)
+
+    def test_probe_with_level_geojson(self, client: TestClient):
+        """Probe with an explicit level coordinate using GeoJSON input."""
+        response = client.post(
+            f"/datasets/{DATASET_REGULAR}/probes?variables=Value&time=2026-01-01",
+            json={
+                "type": "FeatureCollection",
+                "features": [
+                    {
+                        "type": "Feature",
+                        "geometry": {
+                            "type": "Point",
+                            "coordinates": [LON_START, LAT_START, LEVEL_START],
+                        },
+                    }
+                ],
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert "times" in data
+        assert "variables" in data
+        assert "Value" in data["variables"]
+        values = data["values"]["Value"]
+        assert isinstance(values, list)
+        assert len(values) == 1
+        assert all(isinstance(v, list) for v in values)
+
+    def test_probe_with_level_interpolation(self, client: TestClient):
+        """Probe at a 3D point with interpolation between levels."""
+        level_mid = LEVEL_START + LEVEL_STEP / 2  # Midway between first two levels
+        point1 = client.get(
+            f"/datasets/{DATASET_REGULAR}/probe?variables=Value&time=2026-01-01&lon={LON_START}&lat={LAT_START}&level={LEVEL_START}",
+        )
+        point2 = client.get(
+            f"/datasets/{DATASET_REGULAR}/probe?variables=Value&time=2026-01-01&lon={LON_START}&lat={LAT_START}&level={LEVEL_START + LEVEL_STEP}",
+        )
+        point_interp = client.get(
+            f"/datasets/{DATASET_REGULAR}/probe?variables=Value&time=2026-01-01&lon={LON_START}&lat={LAT_START}&level={level_mid}&interp_spatial_method=idw",
+        )
+        assert point1.status_code == 200
+        assert point2.status_code == 200
+        assert point_interp.status_code == 200
+        data1 = point1.json()
+        data2 = point2.json()
+        data_interp = point_interp.json()
+        val1 = data1["values"]["Value"][0]
+        val2 = data2["values"]["Value"][0]
+        val_interp = data_interp["values"]["Value"][0]
+        assert val_interp == pytest.approx((val1 + val2) / 2, rel=0.1)
+
+
+    # ------------------------------------------------------------------
     # Mesh — 2D slice
     # ------------------------------------------------------------------
 
@@ -286,10 +372,10 @@ class TestRegularGrid3D:
         data = response.json()
         assert data["id"] == DATASET_REGULAR
         assert "vertical_axis" in data
-        assert "level" in data["vertical_axis"]
-        assert data["vertical_axis"]["level"]["min"] == LEVEL_START
+        assert "height" in data["vertical_axis"]
+        assert data["vertical_axis"]["height"]["min"] == LEVEL_START
         assert (
-            data["vertical_axis"]["level"]["max"]
+            data["vertical_axis"]["height"]["max"]
             == LEVEL_START + (LEVELS - 1) * LEVEL_STEP
         )
 
@@ -411,6 +497,18 @@ class TestNonRegularGrid3D:
             "With irregular grids, extract allow latitude and longitude coordinates not to be fixed, and so their dimensions are not fixed either. But, as level share the same dimensions as lat/lon, it is currently not possible to check if the level dimension is fixed or not. This test should be re-enabled once we have a better way to check if the level dimension is satisfied or not."
         )
 
+    def test_extract_2d_slice_with_level(self, client: TestClient):
+        """Extracting a 2D slice from an irregular 3D dataset using level parameter."""
+        response = client.get(
+            f"/datasets/{DATASET_NON_REGULAR}/extract"
+            f"?variable=Value&time=2026-01-01&level={NR_LEVEL_START}"
+        )
+        assert response.status_code == 500
+        assert (
+            response.json()["detail"]["error_code"]
+            == "VARIABLE_CANNOT_BE_USED_FOR_SELECTION"
+        )
+
     # ------------------------------------------------------------------
     # Extract — full 3D volume
     # ------------------------------------------------------------------
@@ -482,6 +580,76 @@ class TestNonRegularGrid3D:
         # Each feature must have a 3-element coordinate array [lon, lat, level]
         first_coords = features[0]["geometry"]["coordinates"]
         assert len(first_coords) == 3
+
+    # ------------------------------------------------------------------
+    # Probe
+    # ------------------------------------------------------------------
+
+    def test_probe_with_level(self, client: TestClient):
+        """Probe at a 3D point on irregular grid with explicit level coordinate."""
+        response = client.get(
+            f"/datasets/{DATASET_NON_REGULAR}/probe?variable=Value&time=2026-01-01&lon=2.05&lat=51.02&level=100",
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert "times" in data
+        assert "variables" in data
+        assert "Value" in data["variables"]
+        values = data["values"]["Value"]
+        assert isinstance(values, list)
+        assert len(values) == 1
+
+    def test_probe_with_level_geojson(self, client: TestClient):
+        """Probe with explicit level coordinate on irregular grid using GeoJSON input."""
+        response = client.post(
+            f"/datasets/{DATASET_NON_REGULAR}/probes?variables=Value&time=2026-01-01&level=100",
+            json={
+                "type": "FeatureCollection",
+                "features": [
+                    {
+                        "type": "Feature",
+                        "geometry": {
+                            "type": "Point",
+                            "coordinates": [2.05, 51.02],
+                        },
+                    }
+                ],
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert "times" in data
+        assert "variables" in data
+        assert "Value" in data["variables"]
+        values = data["values"]["Value"]
+        assert isinstance(values, list)
+        assert len(values) == 1
+        assert all(isinstance(v, list) for v in values)
+
+    def test_probe_with_level_interpolation(self, client: TestClient):
+        """Probe at a 3D point with level interpolation on irregular grid."""
+        probe_lon = 2.06440
+        probe_lat = 50.97832
+        point1 = client.get(
+            f"/datasets/{DATASET_NON_REGULAR}/probe?variables=Value&time=2026-01-01&lon={probe_lon}&lat={probe_lat}&level=100",
+        )
+        point2 = client.get(
+            f"/datasets/{DATASET_NON_REGULAR}/probe?variables=Value&time=2026-01-01&lon={probe_lon}&lat={probe_lat}&level=200",
+        )
+        interp_point = client.get(
+            f"/datasets/{DATASET_NON_REGULAR}/probe?variables=Value&time=2026-01-01&lon={probe_lon}&lat={probe_lat}&level=150&interp_spatial_method=idw&interp_spatial_params=radius:200",
+        )
+
+        assert point1.status_code == 200
+        assert point2.status_code == 200
+        assert interp_point.status_code == 200
+        data1 = point1.json()
+        data2 = point2.json()
+        data_interp = interp_point.json()
+        val1 = data1["values"]["Value"][0]
+        val2 = data2["values"]["Value"][0]
+        val_interp = data_interp["values"]["Value"][0]
+        assert val1 < val_interp < val2
 
     # ------------------------------------------------------------------
     # Mesh — 2D slice
