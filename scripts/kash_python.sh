@@ -69,7 +69,7 @@ run_pytest() {
 
 run_python_lib_tests() {
     local ROOT_DIR="$1"
-    local CODE_COVERAGE="${2:-false}"
+    local RUN_SONAR="${2:-false}"
     local WORKSPACE_DIR
     WORKSPACE_DIR="$(dirname "$ROOT_DIR")"
 
@@ -90,7 +90,7 @@ run_python_lib_tests() {
     ## Publish code coverage
     ##
 
-    if [ "$CODE_COVERAGE" = true ]; then
-        send_coverage_to_cc "$CC_TEST_REPORTER_ID"
+    if [ "$RUN_SONAR" = true ]; then
+        cd "$ROOT_DIR" && sonar-scanner
     fi
 }
