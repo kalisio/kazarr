@@ -8,8 +8,13 @@ from src.processing.contexts import TimeRange
 
 # Ensure xindex is set for a variable in the dataset
 def set_xindex(dataset, var_name):
-    if var_name not in dataset.xindexes and dataset[var_name].ndim > 0:
-        dataset = dataset.set_xindex(var_name)
+    if var_name not in dataset.xindexes:
+        if dataset[var_name].ndim == 1:
+            dataset = dataset.set_xindex(var_name)
+        else:
+            raise exceptions.BadConfigurationVariable(
+                f"Variable '{var_name}' has more than 1 dimension, cannot set xindex."
+            )
     return dataset
 
 
@@ -103,9 +108,14 @@ def get_required_dims_and_coords(
     # Convert coords_keep_dims coordinates to list if they are in fixed_coords, so that they are not squeezed during selection
     # This allows to keep the dimension of these coordinates even if only one value is selected
     # example: longitude or latitude value is fixed for an extract => we want to keep the longitude and latitude dimensions in the output, even if only one value is selected for each of them
+    dims_to_keep = set()
     for coord in coords_keep_dims:
+        dims_to_keep.update(dataset[coord].dims)
         if coord in fixed_coords:
             fixed_coords[coord] = [fixed_coords[coord]]
+    for dim in dims_to_keep:
+        if dim in fixed_dims:
+            fixed_dims[dim] = [fixed_dims[dim]]
 
     return fixed_coords, fixed_dims
 
@@ -175,6 +185,7 @@ def sel(
     fixed_dims,
     interp_vars=None,
     interp_method="linear",
+    interp_methods=None, # Use when different interpolation methods are needed for different variables
     interp_config=None,
 ):
     if interp_vars is None:
@@ -190,7 +201,10 @@ def sel(
 
     # Ensure xindexes are set for all fixed coords
     for coord in fixed_coords:
-        dataset = set_xindex(dataset, coord)
+        try:
+            dataset = set_xindex(dataset, coord)
+        except exceptions.BadConfigurationVariable:
+            raise exceptions.VariableCannotBeUsedForSelection(coord)
 
     # Convert coords values to target dtype
     for var, val in fixed_coords.items():

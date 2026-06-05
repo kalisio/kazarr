@@ -16,9 +16,23 @@ class BaseParams:
         [],
         description="List of variables to interpolate",
     )
-    interp_vars_method: Literal["nearest", "linear", "cubic", "idw", "rbf"] = Query(
+    interp_vars_method: Literal[
+        "linear",
         "nearest",
-        description="The method to use for interpolation of variables. Supported values are 'linear', 'nearest', 'zero', 'slinear', 'quadratic', 'cubic', 'quintic', 'polynomial', 'pchip', 'barycentric', 'krogh', 'akima', 'makima'. Default is 'nearest'.",
+        "zero",
+        "slinear",
+        "quadratic",
+        "cubic",
+        "quintic",
+        "polynomial",
+        "pchip",
+        "barycentric",
+        "krogh",
+        "akima",
+        "makima",
+    ] = Query(
+        "nearest",
+        description="The method to use for interpolation of variables.",
     )
     interp_vars_params: str | None = Query(
         None,
@@ -110,7 +124,7 @@ class MeshParams:
 class SpatialInterpolationParams:
     interp_spatial_method: Literal["nearest", "linear", "cubic", "idw", "rbf"] = Query(
         "nearest",
-        description="The method to use for spatial interpolation. Supported values are 'nearest', 'linear', 'cubic', 'idw' and 'rbf'.",
+        description="The method to use for spatial interpolation.",
     )
     interp_spatial_params: str = Query(
         "padding:1.0",

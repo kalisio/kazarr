@@ -74,6 +74,19 @@ class BadConfigurationVariable(ConfigurationBasedException):
         super().__init__("CONFIG_VARIABLE_NOT_FOUND", message, variable_name)
 
 
+class TooManyDimensions(ConfigurationBasedException):
+    def __init__(self, number_of_dimensions):
+        super().__init__("TOO_MANY_DIMENSIONS", f"Latitude and longitude are {number_of_dimensions}D, but this dataset is configured as 2D.", number_of_dimensions)
+
+
+class VariableCannotBeUsedForSelection(ConfigurationBasedException):
+    def __init__(self, variable_name):
+        super().__init__(
+            "VARIABLE_CANNOT_BE_USED_FOR_SELECTION",
+            f"Variable '{variable_name}' cannot be used for selection because it does have more than 1 dimension.",
+            {"variable_name": variable_name},
+        )
+
 class DatasetNotFound(UserInputBasedException):
     def __init__(self, dataset_id):
         super().__init__(

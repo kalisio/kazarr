@@ -28,6 +28,7 @@ def extract(
     dataset_id: str,
     variable: str,
     time_range: Optional[str] = None,
+    level: Optional[float] = None,
     format: str = "raw",
     config: Union[Dict[str, Any], ExtractionConfig, None] = None,
     cancel_event: Optional[threading.Event] = None,
@@ -89,6 +90,9 @@ def extract(
     time_values = get_times_in_range(dataset, time_var, time_range)
     is_multi_time = len(time_values) > 1
 
+    if level is not None and level_var is not None:
+        fixed_coords[level_var] = level
+
     mesh_type = dget(dataset_config, "mesh_type", "auto")
     if len(missing_vars) > 0:
         raise exceptions.BadConfigurationVariable(missing_vars)
@@ -139,6 +143,9 @@ def extract(
 
     lons = sel(dataset, lon_var, fixed_coords, fixed_dims)
     lats = sel(dataset, lat_var, fixed_coords, fixed_dims)
+
+    if not is_3d_grid and ((is_multi_time and lons.ndim > 3 and lons.shape[-3] != 1) or (not is_multi_time and lons.ndim > 2 and lons.shape[-3] != 1)):
+        raise exceptions.TooManyDimensions(lons.ndim)
 
     is_regular_grid = lons.ndim == 1 and lats.ndim == 1 and lons.dims != lats.dims
     is_point_list = (lons.ndim == 1 and lats.ndim == 1 and lons.dims == lats.dims) or (
@@ -208,9 +215,6 @@ def extract(
         row_min, row_max = indices.row_min, indices.row_max
         width_raw, height_raw = indices.width_raw, indices.height_raw
 
-    if not is_point_list and (height_raw < 2 or width_raw < 2):
-        raise exceptions.TooFewPoints()
-
     resolution_limit = config.resolution_limit
     step_row, step_col = bbox.apply_resolution_limit(
         height_raw,
@@ -267,8 +271,7 @@ def extract(
         ].values
         # Squeeze out a trailing size-1 level when doing 2D extraction from a dataset that has levels
         if (
-            levels_da is not None
-            and not config.is_3d
+            not config.is_3d
             and vals.ndim >= 3
             and vals.shape[-3] == 1
         ):
@@ -507,9 +510,9 @@ def probe(
     if level_vars is None or isinstance(level_vars, str):
         level_var = level_vars
     else:
-        for hv in level_vars:
-            if all([var in level_vars[hv] for var in variables]):
-                level_var = hv
+        for lv in level_vars:
+            if all([var in level_vars[lv] for var in variables]):
+                level_var = lv
                 break
         if level_var is None:
             raise exceptions.DifferentTypesOfLevel()
@@ -720,6 +723,7 @@ def probe(
     step_logger.end()
     return out
 
+
 def multi_probe(
     request: Request,
     dataset_id: str,
@@ -728,7 +732,7 @@ def multi_probe(
     time_range: Optional[str] = None,
     format: str = "raw",
     config: Union[Dict[str, Any], ExtractionConfig, None] = None,
-    cancel_event: Optional[threading.Event] = None, 
+    cancel_event: Optional[threading.Event] = None,
 ):
     variables = variables if isinstance(variables, list) else [variables]
 
