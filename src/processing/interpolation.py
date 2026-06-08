@@ -275,6 +275,68 @@ def extrapolate_edges_from_cell_data(
     return x_bounds, y_bounds, z_bounds
 
 
+def interpolate_level_irregular_grid(
+    vals,
+    levels,
+    target_level,
+    method="linear",
+):
+    nk, nj, ni = vals.shape
+
+    valid = np.isfinite(levels) & np.isfinite(vals)
+    j_idx, i_idx = np.indices((nj, ni), dtype=int)
+
+    if method == "nearest":
+        dist = np.where(valid, np.abs(levels - target_level), np.inf)
+        k_nearest = np.argmin(dist, axis=0)
+        result = vals[k_nearest, j_idx, i_idx]
+        has_valid = valid.any(axis=0)
+        return np.where(has_valid, result, np.nan)
+
+    # Sample the centre column to detect the dominant direction.
+    j_mid, i_mid = nj // 2, ni // 2
+    center_col = levels[:, j_mid, i_mid]
+    valid_center = center_col[np.isfinite(center_col)]
+    if len(valid_center) >= 2 and valid_center[0] > valid_center[-1]:
+        # Levels are descending (e.g. pressure): flip k axis.
+        # np.flip creates a view — no memory copy.
+        levels = np.flip(levels, axis=0)
+        vals = np.flip(vals, axis=0)
+        valid = np.flip(valid, axis=0)
+
+    below_mask = (levels <= target_level) & valid
+    above_mask = (levels >= target_level) & valid 
+
+    has_below = below_mask.any(axis=0)
+    has_above = above_mask.any(axis=0)
+    can_interp = has_below & has_above
+
+    # k0 — index of the *last* level ≤ target_level:
+    #   cumsum of below_mask along k increases by 1 at each True entry.
+    #   argmax on the cumsum returns the first index where the cumsum reaches
+    #   its maximum, i.e. the position of the last True.
+    k0 = np.argmax(below_mask.cumsum(axis=0), axis=0)
+    # k1 — index of the *first* level ≥ target_level:
+    #   argmax on a boolean array returns the first True index.
+    k1 = np.argmax(above_mask, axis=0)
+
+    # Clamp to valid range for positions where can_interp is False
+    # (result will be masked out, but we must avoid index errors).
+    k0_safe = np.clip(k0, 0, nk - 1)
+    k1_safe = np.clip(k1, 0, nk - 1)
+
+    lev0 = levels[k0_safe, j_idx, i_idx]
+    lev1 = levels[k1_safe, j_idx, i_idx]
+    val0 = vals[k0_safe, j_idx, i_idx]
+    val1 = vals[k1_safe, j_idx, i_idx]
+
+    denom = lev1 - lev0
+    t = np.where(np.abs(denom) > 1e-12, (target_level - lev0) / denom, 0.0)
+    result = val0 + t * (val1 - val0)
+
+    return np.where(can_interp, result, np.nan)
+
+
 def apply_spatial_interpolation_irregular_grid_3d(
     source_lons,
     source_lats,
