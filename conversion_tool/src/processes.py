@@ -22,6 +22,7 @@ from src.utils import (
     get_s3_filesystem,
     timestamp_to_datetime,
     check_store_as_secondary,
+    get_redundant_dimensions,
 )
 
 
@@ -836,6 +837,51 @@ def reproject_coordinates(dataset, config):
     dataset[lon_var] = (dataset[lon_var].dims, output[0], dataset[lon_var].attrs)
     dataset[lat_var] = (dataset[lat_var].dims, output[1], dataset[lat_var].attrs)
 
+    return dataset, config
+
+
+def simplify_grid(dataset, config):
+    lon_var = get_ci(config, "variables.lon")
+    lat_var = get_ci(config, "variables.lat")
+    level_var = get_ci(config, "variables.level")
+
+    new_coords = {}
+    original_dims = set()
+    simplified_dims = set()
+    for var in [lon_var, lat_var, level_var]:
+        if var is None:
+            continue
+        original_dims.update(dataset[var].dims)
+        redundant_dims = get_redundant_dimensions(dataset, var)
+        if redundant_dims:
+            dataset[var] = dataset[var].isel({dim: 0 for dim in redundant_dims})
+            simplified_dims.update(dataset[var].dims)
+            if dataset[var].ndim == 1:
+                new_coords[var] = dataset[var].dims[0]
+
+    # Check now if any dim is not used anymore
+    # If so, we can safely remove it from the dataset and from the config dimensions fixed list if needed
+    unused_dims = original_dims - simplified_dims
+    if unused_dims:
+        for dim in unused_dims:
+            print(f"[KAZARR] Removing unused dimension '{dim}' after grid simplification.")
+            dataset = dataset.squeeze(dim)
+            if "dimensions" in config and "fixed" in config["dimensions"] and dim in config["dimensions"]["fixed"]:
+                del config["dimensions"]["fixed"][dim]
+
+    # Check if grid is now regular
+    is_regular = True
+    for var in [lon_var, lat_var, level_var]:
+        if var is None:
+            continue
+        if dataset[var].ndim != 1:
+            is_regular = False
+            break
+    if is_regular:
+        config["mesh_type"] = "regular"
+        print("[KAZARR] Grid simplified to regular grid. Mesh type set to 'regular' in config.")
+
+    dataset, _ = assign_coords(dataset, {"assign_coords": new_coords})
     return dataset, config
 
 

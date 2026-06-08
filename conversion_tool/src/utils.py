@@ -280,3 +280,19 @@ def check_store_as_secondary(dataset, new_dataset, config):
     else:
         dataset = new_dataset
     return dataset, config
+
+def get_redundant_dimensions(dataset, variable, tolerance=1e-6):
+    redundant_dims = []
+    if variable not in dataset:
+        return redundant_dims
+
+    for dim in dataset[variable].dims:
+        if dataset[variable].sizes[dim] == 1:
+            redundant_dims.append(dim)
+            continue
+
+        data_slice = dataset[variable].isel({dim: 0})
+        abs_diff = abs(dataset[variable] - data_slice)
+        if float(abs_diff.max(skipna=True)) <= tolerance:
+            redundant_dims.append(dim)
+    return redundant_dims
