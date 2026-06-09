@@ -508,6 +508,9 @@ def extract(
             vals,
         )
 
+    if levels_cropped is None and level is not None:
+        levels_cropped = level
+
     global_props = {"resolution_factor": {"row": step_row, "col": step_col}}
     if is_multi_time:
         global_props["times"] = time_values

@@ -92,6 +92,8 @@ def prepare_output(
 
     flat_lons = lons.flatten().tolist()
     flat_lats = lats.flatten().tolist()
+    if levels is not None and isinstance(levels, (int, float)):
+        levels = np.full_like(lons, levels)
     flat_levels = levels.flatten().tolist() if levels is not None else None
     vals_dict = {}
     has_one_point = lons.size == 1 and lats.size == 1
