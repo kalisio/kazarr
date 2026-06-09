@@ -185,7 +185,7 @@ def sel(
     fixed_dims,
     interp_vars=None,
     interp_method="linear",
-    interp_methods=None, # Use when different interpolation methods are needed for different variables
+    interp_methods=None,  # Use when different interpolation methods are needed for different variables
     interp_config=None,
 ):
     if interp_vars is None:
@@ -216,12 +216,15 @@ def sel(
     monotonic_fixed_vars = {
         var: val
         for var, val in fixed_coords.items()
-        if is_monotonic_var(dataset, var) and var not in interp_vars and not isinstance(val, slice)
+        if is_monotonic_var(dataset, var)
+        and var not in interp_vars
+        and not isinstance(val, slice)
     }
     non_monotonic_fixed_vars = {
         var: val
         for var, val in fixed_coords.items()
-        if (not is_monotonic_var(dataset, var) or isinstance(val, slice)) and var not in interp_vars
+        if (not is_monotonic_var(dataset, var) or isinstance(val, slice))
+        and var not in interp_vars
     }
 
     try:
@@ -251,9 +254,9 @@ def sel(
             try:
                 if interp_methods is not None:
                     method_groups = {}
-                    for var, coord in interpolated_vars.items():
+                    for var, value in interpolated_vars.items():
                         method = interp_methods.get(var, interp_method)
-                        method_groups.setdefault(method, {})[var] = coord
+                        method_groups.setdefault(method, {})[var] = value
                 else:
                     method_groups = {interp_method: interpolated_vars}
 

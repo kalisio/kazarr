@@ -60,15 +60,6 @@ def extract(
 
     lon_var, lat_var = dgets(dataset_config, ["variables.lon", "variables.lat"])
     level_var = get_level_var(dataset, dataset_config, variable)
-    # Irregular grids store levels as a 3D variable (DimK, DimJ, DimI), which
-    # cannot be used as an Xarray coordinate for interpolation. Detect this case
-    # upfront so we can route to the custom vertical interpolation path.
-    is_irregular_level = (
-        level is not None
-        and level_var is not None
-        and level_var in dataset
-        and dataset[level_var].ndim > 1
-    )
     missing_vars = []
     if has_bb_lon and lon_var is None:
         raise exceptions.MissingConfigurationElement("variables.lon")
@@ -94,20 +85,29 @@ def extract(
                 # Remove "time" from request parameters to avoid confusion in later steps (case where time is a variable in the dataset)
                 request.query_params._dict.pop("time", None)
 
+    if len(missing_vars) > 0:
+        raise exceptions.BadConfigurationVariable(missing_vars)
+
     # Detect multi-timestep mode: when time is not specified but time_var is defined,
     # we will return data for all timesteps.
     time_values = get_times_in_range(dataset, time_var, time_range)
     is_multi_time = len(time_values) > 1
 
+    # Irregular grids store levels as a 3D variable (DimK, DimJ, DimI), which
+    # cannot be used as an Xarray coordinate for interpolation. Detect this case
+    # upfront so we can route to the custom vertical interpolation path.
+    has_levels = level_var is not None and level_var in dataset
+    has_irregular_level = has_levels and dataset[level_var].ndim > 1
+    has_regular_level = has_levels and dataset[level_var].ndim == 1
     # For irregular grids the level variable is 3D and cannot be set as a
     # fixed coordinate — the custom vertical interpolation step handles it later.
-    if level is not None and level_var is not None and not is_irregular_level:
+    spatial_interp_vars = None
+    if level is not None and level_var is not None and has_regular_level:
         fixed_coords[level_var] = level
+        config.is_3d = False
+        spatial_interp_vars = [level_var] if level_var not in interp_vars else []
 
     mesh_type = dget(dataset_config, "mesh_type", "auto")
-    if len(missing_vars) > 0:
-        raise exceptions.BadConfigurationVariable(missing_vars)
-
     mesh_tile_shape = config.mesh.tile_shape
     force_data_mapping = config.mesh.data_mapping
 
@@ -120,13 +120,9 @@ def extract(
     if not has_bb:
         index_padding, spatial_padding = 0, 0.0
 
-    levels_da = (
-        dataset[level_var] if level_var is not None and level_var in dataset else None
-    )
-
     # Also treat as 3D when a specific level is requested on an irregular grid:
     # we need to load all levels so the custom interpolation can do its work.
-    is_3d_grid = (config.is_3d or is_irregular_level) and levels_da is not None
+    is_3d_grid = config.is_3d or has_irregular_level
 
     if is_3d_grid:
         # In 3D mode, the vertical dimension is not required to be fixed — we want all levels
@@ -154,6 +150,9 @@ def extract(
 
     lons = sel(dataset, lon_var, fixed_coords, fixed_dims)
     lats = sel(dataset, lat_var, fixed_coords, fixed_dims)
+    levels_da = (
+        sel(dataset, level_var, fixed_coords, fixed_dims) if has_levels else None
+    )
 
     if not is_3d_grid and (
         (is_multi_time and lons.ndim > 3 and lons.shape[-3] != 1)
@@ -172,7 +171,7 @@ def extract(
 
     levels_1d = None
     level_min, level_max, step_level = 0, 0, 1
-    if is_3d_grid and is_regular_grid:
+    if is_3d_grid and has_regular_level:
         # Regular 3D: level is a 1-D coordinate vector
         levels_1d = levels_da.values
         if has_bb_level:
@@ -202,8 +201,8 @@ def extract(
         width_raw, height_raw = indices.width_raw, indices.height_raw
     elif is_3d_grid and not is_regular_grid:
         step_logger.step_start("Irregular 3D grid: apply bounding box")
-        lons_2d_slice = lons_vals_in[0]
-        lats_2d_slice = lats_vals_in[0]
+        lons_2d_slice = lons_vals_in[0] if lons_vals_in.ndim == 3 else lons_vals_in
+        lats_2d_slice = lats_vals_in[0] if lats_vals_in.ndim == 3 else lats_vals_in
         lons_vals, lats_vals, indices = bbox.apply_irregular_bounding_box(
             lons_2d_slice,
             lats_2d_slice,
@@ -239,13 +238,19 @@ def extract(
     )
 
     step_logger.step_start("Load variable values")
+    methods = {}
+    for var in spatial_interp_vars if spatial_interp_vars is not None else []:
+        methods[var] = interp_spatial_method
+    for var in interp_vars:
+        methods[var] = interp_vars_method
     vals_da = sel(
         dataset,
         variable,
         fixed_coords,
         fixed_dims,
-        interp_vars=interp_vars,
-        interp_method=interp_vars_method,
+        interp_vars=interp_vars
+        + (spatial_interp_vars if spatial_interp_vars is not None else []),
+        interp_methods=methods,
         interp_config=interp_vars_params,
     )
     if is_point_list:
@@ -261,11 +266,20 @@ def extract(
         else:
             vals = vals[point_indices]
     elif is_3d_grid and not is_regular_grid:
-        vals = vals_da.values[
-            :,
-            row_min : row_max + 1 : step_row,
-            col_min : col_max + 1 : step_col,
-        ]
+        if has_regular_level:
+            vals = vals_da.values[
+                ...,
+                level_min : level_max + 1 : step_level,
+                row_min : row_max + 1 : step_row,
+                col_min : col_max + 1 : step_col,
+            ]
+        else:
+            vals = vals_da.values[
+                ...,
+                :,
+                row_min : row_max + 1 : step_row,
+                col_min : col_max + 1 : step_col,
+            ]
     elif is_3d_grid and is_regular_grid:
         if vals_da.ndim >= 3:
             vals = vals_da.values[
@@ -290,6 +304,7 @@ def extract(
             lats_vals_in = lats_vals_in.squeeze(axis=-3)
             lons_vals = lons_vals.squeeze(axis=-3)
             lats_vals = lats_vals.squeeze(axis=-3)
+            levels_da = levels_da.squeeze(axis=-3) if levels_da is not None else None
     vals = vals.astype(float)
 
     step_logger.step_start("Crop latitude and longitude")
@@ -301,20 +316,23 @@ def extract(
     elif is_3d_grid and not is_regular_grid:
         # Crop the full 3D coordinate arrays along spatial axes; keep all levels
         lons = lons_vals_in[
-            :,
+            ...,
             row_min : row_max + 1 : step_row,
             col_min : col_max + 1 : step_col,
         ]
         lats = lats_vals_in[
-            :,
+            ...,
             row_min : row_max + 1 : step_row,
             col_min : col_max + 1 : step_col,
         ]
-        levels = levels_da.values[
-            :,
-            row_min : row_max + 1 : step_row,
-            col_min : col_max + 1 : step_col,
-        ]
+        if has_regular_level:
+            levels = levels_1d
+        else:
+            levels = levels_da.values[
+                ...,
+                row_min : row_max + 1 : step_row,
+                col_min : col_max + 1 : step_col,
+            ]
     elif is_regular_grid:
         lons_1d = lons_vals_in[col_min : col_max + 1 : step_col]
         lats_1d = lats_vals_in[row_min : row_max + 1 : step_row]
@@ -330,7 +348,7 @@ def extract(
             ..., row_min : row_max + 1 : step_row, col_min : col_max + 1 : step_col
         ]
 
-    if has_bb:
+    if has_bb:  # Only lat/lon
         mask_cropped = np.ones(lons.shape, dtype=bool)
         if has_bb_lon:
             bb_lon_min = (
@@ -348,7 +366,15 @@ def extract(
                 bounding_box.lat_max if bounding_box.lat_max is not None else np.inf
             )
             mask_cropped &= (lats >= bb_lat_min) & (lats <= bb_lat_max)
-        if is_3d_grid and not is_regular_grid and has_bb_level and levels is not None:
+
+        # Apply level bounding box if provided
+        if (
+            is_3d_grid
+            and not is_regular_grid
+            and has_bb_level
+            and levels is not None
+            and has_irregular_level
+        ):
             mask_cropped &= bbox.apply_level_bounding_box_irregular_grid(
                 levels, bounding_box
             )
@@ -358,7 +384,13 @@ def extract(
                 vals[:, ~mask_cropped] = np.nan
             else:
                 vals[~mask_cropped] = np.nan
-    elif is_3d_grid and not is_regular_grid and has_bb_level and levels is not None:
+    elif (
+        is_3d_grid
+        and not is_regular_grid
+        and has_bb_level
+        and levels is not None
+        and has_irregular_level
+    ):
         # No spatial bbox but a Z bbox is present
         mask_cropped = bbox.apply_level_bounding_box_irregular_grid(
             levels, bounding_box
@@ -372,7 +404,7 @@ def extract(
 
     # For irregular grids the level variable is 3D and Xarray cannot interpolate
     # along it. So we need a custom interpolation step that handles this case
-    if is_irregular_level:
+    if has_irregular_level and level is not None:
         irregular_level_method = (
             "linear"
             if interp_spatial_method is not None and interp_spatial_method != "nearest"
@@ -439,6 +471,18 @@ def extract(
             )
         )
 
+    # For irregular grids with a regular vertical coordinate,
+    # we need to broadcast the 2D lon/lat arrays and 1D level array to 3D arrays
+    # so they can be used together in the output generation step
+    if not is_regular_grid and has_regular_level and levels is not None:
+        nk = len(levels)
+        nj, ni = lons.shape
+        lons = np.broadcast_to(lons[np.newaxis, :, :], (nk, nj, ni))
+        lats = np.broadcast_to(lats[np.newaxis, :, :], (nk, nj, ni))
+        levels = np.broadcast_to(levels[:, np.newaxis, np.newaxis], (nk, nj, ni))
+        if mask_cropped is not None:
+            mask_cropped = np.broadcast_to(mask_cropped[np.newaxis, :, :], (nk, nj, ni))
+
     # Crop irregular grids to the bounding box after interpolation to avoid returning huge arrays with mostly NaNs when a tight bbox is applied on a sparse grid (e.g. Z-bounding box on an irregular grid with few vertical levels)
     if not is_regular_grid and mask_cropped is not None:
         # As vals can have been squeezed to 2D if "level" was only a single level
@@ -446,6 +490,7 @@ def extract(
         lons = lons.squeeze()
         lats = lats.squeeze()
         vals = vals.squeeze()
+        levels = levels.squeeze() if levels is not None else None
         mask_cropped = mask_cropped.squeeze()
 
         lons_cropped = lons[mask_cropped]
@@ -587,17 +632,18 @@ def probe(
         and latitudes.ndim == 1
         and longitudes.dims != latitudes.dims
     )
+    has_regular_level = level_var is not None and dataset[level_var].ndim == 1
+    if with_level and has_regular_level:
+        fixed_coords[level_var] = level
+        if interp_spatial_method != "nearest":
+            spatial_interp_vars.append(level_var)
     if is_regular_grid:
         fixed_coords[lon_var] = lon
         fixed_coords[lat_var] = lat
-        if with_level:
-            fixed_coords[level_var] = level
         if interp_spatial_method != "nearest":
             spatial_interp_vars.extend([lon_var, lat_var])
-            if with_level:
-                spatial_interp_vars.append(level_var)
     else:
-        if with_level:
+        if with_level and not has_regular_level:
             levels = dataset[level_var].values
             points = np.column_stack(
                 (longitudes.values.ravel(), latitudes.values.ravel(), levels.ravel())

@@ -8,7 +8,10 @@ from src.utils.file import load_dataset
 from src.utils.logging import StepLoggerAndAborter
 from src.processing.interpolation import extrapolate_edges_from_cell_data
 from src.processing.contexts import BBoxContext
-from src.processing.bbox import apply_level_bounding_box_regular_grid, apply_level_bounding_box_irregular_grid
+from src.processing.bbox import (
+    apply_level_bounding_box_regular_grid,
+    apply_level_bounding_box_irregular_grid,
+)
 
 from typing import Any, Dict, Union, Optional
 import threading
@@ -61,29 +64,36 @@ def get_mesh(
     lats = dataset[lat_var]
 
     levels_da = (
-        dataset[level_var]
-        if level_var is not None and level_var in dataset
-        else None
+        dataset[level_var] if level_var is not None and level_var in dataset else None
     )
 
     is_3d_grid = config.is_3d and levels_da is not None
     is_regular_grid = lons.ndim == 1 and lats.ndim == 1 and lons.dims != lats.dims
     is_point_list = lons.ndim == 1 and lats.ndim == 1 and lons.dims == lats.dims
+    has_regular_level = (
+        level_var is not None and levels_da is not None and levels_da.ndim == 1
+    )
+    has_irregular_level = (
+        level_var is not None and levels_da is not None and levels_da.ndim != 1
+    )
 
     levels_1d = None
-    if is_3d_grid and is_regular_grid:
+    if is_3d_grid and has_regular_level:
         # Regular 3D: level is a 1-D coordinate vector
         levels_1d = levels_da.values
         if bounding_box.has_bb_level:
-            _, _, levels_1d = apply_level_bounding_box_regular_grid(levels_1d, bounding_box)
+            _, _, levels_1d = apply_level_bounding_box_regular_grid(
+                levels_1d, bounding_box
+            )
+    elif is_3d_grid and has_irregular_level:
+        levels_points = levels_da.values
+        if bounding_box.has_bb_level:
+            apply_level_bounding_box_irregular_grid(levels_points, bounding_box)
 
     if is_3d_grid and not is_regular_grid:
         # Irregular 3D: lat/lon/level are all (DimK, DimJ, DimI).
         lons_points = lons.values
         lats_points = lats.values
-        levels_points = levels_da.values
-        if bounding_box.has_bb_level:
-            apply_level_bounding_box_irregular_grid(levels_points, bounding_box)
     elif is_regular_grid:
         lons_vals = lons.values
         lats_vals = lats.values
@@ -93,15 +103,12 @@ def get_mesh(
             )
         else:
             lons_points, lats_points = np.meshgrid(lons_vals, lats_vals, indexing="ij")
-            levels_points = np.zeros_like(lons_points)
     else:
         lons_points = lons.values
         lats_points = lats.values
         # Use levels_da only when it is a 1-D vector (regular 3D in 2D slice, point list)
-        if levels_da is not None and levels_da.ndim == 1:
+        if levels_da is not None and has_regular_level:
             levels_points = levels_da.values
-        else:
-            levels_points = np.zeros_like(lons_points)
 
     cell_data = force_data_mapping != "vertices" and (
         force_data_mapping == "cells"
@@ -116,6 +123,20 @@ def get_mesh(
             levels_points if is_3d_grid else None,
             "radial" if mesh_type == "radial" else "rectilinear",
         )
+
+    # When the grid is irregular in lat/lon but regular in level,
+    # we need to broadcast lat/lon/level to the same shape for triangulation (3D)
+    if not is_regular_grid and levels_1d is not None and has_regular_level:
+        nk = len(levels_1d)
+        nj, ni = lons_points.shape
+        lons_points = np.broadcast_to(lons_points[np.newaxis, :, :], (nk, nj, ni))
+        lats_points = np.broadcast_to(lats_points[np.newaxis, :, :], (nk, nj, ni))
+        levels_points = np.broadcast_to(
+            levels_1d[:, np.newaxis, np.newaxis], (nk, nj, ni)
+        )
+
+    if not is_3d_grid:
+        levels_points = np.zeros_like(lons_points)
 
     if format == "geojson":
         step_logger.step_start("Prepare output (GeoJSON)")

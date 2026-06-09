@@ -305,7 +305,7 @@ def interpolate_level_irregular_grid(
         valid = np.flip(valid, axis=0)
 
     below_mask = (levels <= target_level) & valid
-    above_mask = (levels >= target_level) & valid 
+    above_mask = (levels >= target_level) & valid
 
     has_below = below_mask.any(axis=0)
     has_above = above_mask.any(axis=0)
@@ -331,7 +331,10 @@ def interpolate_level_irregular_grid(
     val1 = vals[k1_safe, j_idx, i_idx]
 
     denom = lev1 - lev0
-    t = np.where(np.abs(denom) > 1e-12, (target_level - lev0) / denom, 0.0)
+
+    t = np.zeros_like(denom)
+    valid_mask = np.abs(denom) > 1e-12
+    np.divide(target_level - lev0, denom, out=t, where=valid_mask)
     result = val0 + t * (val1 - val0)
 
     return np.where(can_interp, result, np.nan)
