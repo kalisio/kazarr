@@ -54,8 +54,8 @@ The `extract` endpoint accepts the following query parameters:
 | `mesh_tile_size`        | When `format=mesh`, resample data with a grid of `mesh_tile_size`x`mesh_tile_size`                                                             |    ✓     | `None`        |
 | `mesh_data_mapping`     | Whether the data of the mesh is on cells or on vertices. This will override the dataset configuration. (Supported values: 'vertices', 'cells') |    ✓     | `vertices`    |
 | `is_3d`                 | If True, performs a full 3D volume extraction. If False and the dataset is 3D, a vertical coordinate must be provided.                         |    ✓     | `False`       |
-| `z_min`                 | Minimum vertical coordinate (altitude/depth) of the bounding box                                                                               |    ✓     | `None`        |
-| `z_max`                 | Maximum vertical coordinate (altitude/depth) of the bounding box                                                                               |    ✓     | `None`        |
+| `level_min`             | Minimum vertical coordinate (altitude/depth) of the bounding box                                                                               |    ✓     | `None`        |
+| `level_max`             | Maximum vertical coordinate (altitude/depth) of the bounding box                                                                               |    ✓     | `None`        |
 | `interp_vars`           | Variables to interpolate during extraction                                                                                                     |    ✓     | `[]`          |
 | `interp_vars_method`    | Method for variable/time interpolation (e.g. `linear`, `cubic`, ...)                                                                           |    ✓     | `nearest`     |
 | `interp_vars_params`    | Parameters for variable interpolation (e.g. `method:linear`)                                                                                   |    ✓     | `None`        |
@@ -175,6 +175,9 @@ Interpolation is applied in four different scenarios:
 3. **Irregular Grid Mesh Extraction**: Triggered by the `extract` endpoint on irregular grid datasets using SciPy or custom methods.
    - *Supported methods*: `linear`, `nearest`, `cubic`, `RBF`, `IDW`.
    - *Parameters*: For RBF, see the [SciPy documentation](https://docs.scipy.org/doc/scipy/reference/generated/scipy.interpolate.RBFInterpolator.html).
+   - **Special Cases for Level Interpolation:**
+     - *1D Level Variables*: Falls back to Xarray interpolation. Ensure `interp_spatial_method` is among the supported methods listed in Scenario 1.
+     - *Multi-dimensional Level Variables*: Currently restricted to `linear` or `nearest` methods.
 4. **Point Probing**: Used by the `probe` endpoint to retrieve values over time.
    - *Supported methods*: Currently, only `IDW` (Inverse Distance Weighting) is supported.
    - *Parameters*: `radius` (Maximum search radius for neighbors) and `power` (Distance weighting power).

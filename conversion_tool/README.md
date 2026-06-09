@@ -304,6 +304,20 @@ Perform reprojection on geographic coordinates (e.g., Lambert 93 to WGS84).
 | `variables.lat`         | String | Name of the latitude variable         |
 | `variables.level`       | String | Name of the level variable (Optional) |
 
+
+### `simplify_grid`
+
+Attempts to convert an irregular grid (where `lat`, `lon`, and `level` are 2D or 3D arrays) into a regular one (1D arrays). 
+This process can result in a fully regular grid, a hybrid grid (e.g., 1D `level` with 2D `lat`/`lon`), or remain unchanged if simplification is not possible.
+
+**Parameters:**
+
+| Name                    | Type   | Description                           |
+| ----------------------- | ------ | ------------------------------------- |
+| `variables.lon`         | String | Name of the longitude variable        |
+| `variables.lat`         | String | Name of the latitude variable         |
+| `variables.level`       | String | Name of the level variable (Optional) |
+
 ### `save`
 
 Save the resulting Zarr dataset to local storage or S3.
