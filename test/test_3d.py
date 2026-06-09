@@ -45,7 +45,7 @@ class TestRegularGrid3D:
     @pytest.fixture(scope="class", autouse=True)
     def cleanup(self):
         yield
-        #utils.cleanup_test_files()
+        utils.cleanup_test_files()
 
     # ------------------------------------------------------------------
     # Setup
@@ -254,7 +254,9 @@ class TestRegularGrid3D:
         """Probe at a 3D point with an explicit level coordinate."""
         response = client.post(
             f"/datasets/{DATASET_REGULAR}/probes?variables=Value&time=2026-01-01",
-            json={"points": [{"lon": LON_START, "lat": LAT_START, "level": LEVEL_START}]},
+            json={
+                "points": [{"lon": LON_START, "lat": LAT_START, "level": LEVEL_START}]
+            },
         )
         assert response.status_code == 200
         data = response.json()
@@ -315,7 +317,6 @@ class TestRegularGrid3D:
         val2 = data2["values"]["Value"][0]
         val_interp = data_interp["values"]["Value"][0]
         assert val_interp == pytest.approx((val1 + val2) / 2, rel=0.1)
-
 
     # ------------------------------------------------------------------
     # Mesh — 2D slice
@@ -485,7 +486,9 @@ class TestNonRegularGrid3D:
         assert "values" in data
         assert "longitudes" in data
         assert "latitudes" in data
-        assert "levels" not in data  # 2D slice: no level in output
+        assert (
+            "levels" in data
+        )  # 2D slice but irregular grid => one value of level, but NR_LONS * NR_LATS values
         assert len(data["values"]["Value"]) == NR_LONS * NR_LATS
 
     def test_extract_2d_missing_level_fails(self, client: TestClient):
@@ -503,10 +506,43 @@ class TestNonRegularGrid3D:
             f"/datasets/{DATASET_NON_REGULAR}/extract"
             f"?variable=Value&time=2026-01-01&level={NR_LEVEL_START}"
         )
-        assert response.status_code == 500
-        assert (
-            response.json()["detail"]["error_code"]
-            == "VARIABLE_CANNOT_BE_USED_FOR_SELECTION"
+        assert response.status_code == 200
+        data = response.json()
+        assert "Value" in data["values"]
+        assert len(data["values"]["Value"]) == NR_LONS * NR_LATS
+        assert data["values"]["Value"][0] == 0
+        assert data["values"]["Value"][-1] == NR_LATS * NR_LONS - 1
+
+    def test_extract_2d_slice_interpolated(self, client: TestClient):
+        """Extracting a 2D slice at a non-existing level on an irregular grid returns interpolated values."""
+        level_mid = NR_LEVEL_START + NR_LEVEL_STEP / 2
+        slice1 = client.get(
+            f"/datasets/{DATASET_NON_REGULAR}/extract"
+            f"?variable=Value&time=2026-01-01&level={NR_LEVEL_START}"
+        )
+        slice2 = client.get(
+            f"/datasets/{DATASET_NON_REGULAR}/extract"
+            f"?variable=Value&time=2026-01-01&level={NR_LEVEL_START + NR_LEVEL_STEP}"
+        )
+        slice_interp = client.get(
+            f"/datasets/{DATASET_NON_REGULAR}/extract"
+            f"?variable=Value&time=2026-01-01&level={level_mid}&interp_spatial_method=linear"
+        )
+        assert slice1.status_code == 200
+        assert slice2.status_code == 200
+        assert slice_interp.status_code == 200
+        data1 = slice1.json()
+        data2 = slice2.json()
+        data_interp = slice_interp.json()
+        assert "Value" in data1["values"]
+        assert "Value" in data2["values"]
+        assert "Value" in data_interp["values"]
+        assert all(
+            data_interp["values"]["Value"][i]
+            == pytest.approx(
+                (data1["values"]["Value"][i] + data2["values"]["Value"][i]) / 2, rel=0.1
+            )
+            for i in range(len(data_interp["values"]["Value"]))
         )
 
     # ------------------------------------------------------------------
@@ -561,6 +597,47 @@ class TestNonRegularGrid3D:
             f"&level_min=9999&level_max=99999"
         )
         assert response.status_code in (400, 404, 422)
+
+    def test_extract_3d_full_bbox(self, client: TestClient):
+        """3D extraction with lon/lat/level bounding box returns only points inside the box."""
+        response = client.get(
+            f"/datasets/{DATASET_NON_REGULAR}/extract"
+            f"?variable=Value&time=2026-01-01&is_3d=true"
+            f"&lon_min=2.0&lon_max=2.1&lat_min=50.96&lat_max=51.0&level_min=100&level_max=200"
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert "values" in data
+        assert "longitudes" in data
+        assert "latitudes" in data
+        assert "levels" in data
+        assert len(data["values"]["Value"]) > 0
+
+    def test_extract_bbox_with_level_interpolated(self, client: TestClient):
+        """3D extraction with lon/lat/level bounding box returns only points inside the box."""
+        base_request = (
+            f"/datasets/{DATASET_NON_REGULAR}/extract"
+            f"?variable=Value&time=2026-01-01&is_3d=true"
+            f"&lon_min=2.0&lon_max=2.1&lat_min=50.96&lat_max=51.0&level="
+        )
+        slice1 = client.get(f"{base_request}100")
+        slice2 = client.get(f"{base_request}200")
+        slice_interp = client.get(f"{base_request}150&interp_spatial_method=linear")
+        assert slice1.status_code == 200
+        assert slice2.status_code == 200
+        assert slice_interp.status_code == 200
+        data1 = slice1.json()
+        data2 = slice2.json()
+        data_interp = slice_interp.json()
+        values = data_interp["values"]["Value"]
+        assert all(
+            values[i] is None
+            or values[i]
+            == pytest.approx(
+                (data1["values"]["Value"][i] + data2["values"]["Value"][i]) / 2, rel=0.1
+            )
+            for i in range(len(data_interp["values"]["Value"]))
+        )
 
     # ------------------------------------------------------------------
     # Extract — GeoJSON 3D
@@ -710,6 +787,325 @@ class TestNonRegularGrid3D:
         assert data["vertical_axis"]["level"]["min"] == NR_LEVEL_START
         assert (
             data["vertical_axis"]["level"]["max"]
+            == NR_LEVEL_START + (NR_LEVELS - 1) * NR_LEVEL_STEP
+        )
+
+
+DATASET_MIXED = "dataset_3d_irregular_spatial_regular_vertical"
+
+
+@pytest.mark.Dataset3D
+class TestSimplifyGrid3D:
+    @pytest.fixture(scope="class", autouse=True)
+    def cleanup(self):
+        yield
+        utils.cleanup_test_files()
+
+    # ------------------------------------------------------------------
+    # Setup
+    # ------------------------------------------------------------------
+
+    def test_generate_dataset(self):
+        """Generate a synthetic 3D dataset (time × level × lat × lon) and save as NetCDF."""
+        description = {
+            "Value": {
+                "type": "float",
+                "method": "linear",
+                "step": 1,
+                "dimensions": [
+                    {
+                        "name": "time",
+                        "type": "date",
+                        "size": TIMES,
+                        "start": "2026-01-01",
+                        "freq": "D",
+                    },
+                    {"name": "DimK", "size": "lat.DimK"},
+                    {"name": "DimJ", "size": "lat.DimJ"},
+                    {"name": "DimI", "size": "lat.DimI"},
+                ],
+            },
+            "lat": {
+                "type": "load",
+                "sample": "3d_grid.nc",
+                "variable": "CoordY0",
+                "dimensions": ["DimK", "DimJ", "DimI"],
+            },
+            "lon": {
+                "type": "load",
+                "sample": "3d_grid.nc",
+                "variable": "CoordX0",
+                "dimensions": ["DimK", "DimJ", "DimI"],
+            },
+            "height": {
+                "type": "load",
+                "sample": "3d_grid.nc",
+                "variable": "CoordZ0",
+                "dimensions": ["DimK", "DimJ", "DimI"],
+            },
+        }
+        dataset = utils.DatasetGenerator(description=description).generate()
+        dataset.save(DATASET_MIXED, to_netcdf=True)
+
+        assert os.path.exists(os.path.join(TMP_FOLDER, f"{DATASET_MIXED}.nc"))
+
+    def test_convert_dataset(self, convert):
+        """Convert the 3D NetCDF to Zarr with lon/lat/level/time variable mappings."""
+        output_path = os.path.join(TMP_FOLDER, f"{DATASET_MIXED}.zarr")
+        convert(
+            input_path=os.path.join(TMP_FOLDER, f"{DATASET_MIXED}.nc"),
+            output_path=output_path,
+            config={
+                "variables": {
+                    "lon": "lon",
+                    "lat": "lat",
+                    "time": "time",
+                    "level": "height",
+                },
+                "reprojection": {"fromCrs": "EPSG:32631", "toCrs": "EPSG:4326"},
+                "pipelines": {
+                    "preprocess": [
+                        "load_from_netcdf",
+                        "reproject_coordinates",
+                        "simplify_grid",
+                        "unify_chunks",
+                        "save",
+                    ]
+                },
+                "version": 2,
+            },
+        )
+        assert os.path.exists(output_path)
+
+    # ------------------------------------------------------------------
+    # Extract — 2D slice from 3D dataset
+    # ------------------------------------------------------------------
+
+    def test_extract_2d_slice(self, client: TestClient):
+        """Extracting a 2D slice by providing a level coordinate returns a flat grid."""
+        response = client.get(
+            f"/datasets/{DATASET_MIXED}/extract?variable=Value&time=2026-01-01&DimK=1"
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert "values" in data
+        assert "longitudes" in data
+        assert "latitudes" in data
+        assert "levels" not in data  # 2D slice: no level in output
+        assert len(data["values"]["Value"]) == NR_LONS * NR_LATS
+
+    def test_extract_2d_missing_level_fails(self, client: TestClient):
+        """Requesting 2D extraction (is_3d=false) without a level should fail."""
+        response = client.get(
+            f"/datasets/{DATASET_MIXED}/extract?variable=Value&time=2026-01-01"
+        )
+        assert response.status_code in (400, 422)
+
+    def test_extract_2d_slice_with_level(self, client: TestClient):
+        """Extracting a 2D slice from an irregular 3D dataset using level parameter."""
+        response = client.get(
+            f"/datasets/{DATASET_MIXED}/extract"
+            f"?variable=Value&time=2026-01-01&level={NR_LEVEL_START}"
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert "values" in data
+        assert "longitudes" in data
+        assert "latitudes" in data
+        assert "levels" not in data  # 2D slice: no level in output
+        assert len(data["values"]["Value"]) == NR_LONS * NR_LATS
+
+    # ------------------------------------------------------------------
+    # Extract — full 3D volume
+    # ------------------------------------------------------------------
+
+    def test_extract_3d_volume(self, client: TestClient):
+        """3D extraction returns all levels × lat × lon points."""
+        response = client.get(
+            f"/datasets/{DATASET_MIXED}/extract"
+            f"?variable=Value&time=2026-01-01&is_3d=true"
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert "values" in data
+        assert "longitudes" in data
+        assert "latitudes" in data
+        assert "levels" in data
+        assert len(data["values"]["Value"]) == NR_LEVELS * NR_LONS * NR_LATS
+
+    def test_extract_3d_level_bbox(self, client: TestClient):
+        """3D extraction with level_min/level_max returns only levels inside the range."""
+        z = 100
+
+        response = client.get(
+            f"/datasets/{DATASET_MIXED}/extract"
+            f"?variable=Value&time=2026-01-01&is_3d=true"
+            f"&level_min={z}&level_max={z}"
+        )
+        assert response.status_code == 200
+        data = response.json()
+        levels = data["levels"]
+        assert all(z == level for level in levels)
+        # 1 level × LATS × LONS
+        assert len(data["values"]["Value"]) == 1 * NR_LATS * NR_LONS
+
+    def test_extract_3d_level_bbox_out_of_range(self, client: TestClient):
+        """Level bounding box outside dataset extent should return an error."""
+        response = client.get(
+            f"/datasets/{DATASET_MIXED}/extract"
+            f"?variable=Value&time=2026-01-01&is_3d=true"
+            f"&level_min=9999&level_max=99999"
+        )
+        assert response.status_code in (400, 404, 422)
+
+    # ------------------------------------------------------------------
+    # Extract — GeoJSON 3D
+    # ------------------------------------------------------------------
+
+    def test_extract_3d_geojson(self, client: TestClient):
+        """GeoJSON 3D output embeds level as the third coordinate."""
+        response = client.get(
+            f"/datasets/{DATASET_MIXED}/extract"
+            f"?variable=Value&time=2026-01-01&is_3d=true&format=geojson"
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["type"] == "FeatureCollection"
+        features = data["features"]
+        assert len(features) > 0
+        # Each feature must have a 3-element coordinate array [lon, lat, level]
+        first_coords = features[0]["geometry"]["coordinates"]
+        assert len(first_coords) == 3
+
+    # ------------------------------------------------------------------
+    # Probe
+    # ------------------------------------------------------------------
+
+    def test_probe_with_level(self, client: TestClient):
+        """Probe at a 3D point on irregular grid with explicit level coordinate."""
+        response = client.get(
+            f"/datasets/{DATASET_MIXED}/probe?variable=Value&time=2026-01-01&lon=2.05&lat=51.02&level=100",
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert "times" in data
+        assert "variables" in data
+        assert "Value" in data["variables"]
+        values = data["values"]["Value"]
+        assert isinstance(values, list)
+        assert len(values) == 1
+
+    def test_probe_with_level_geojson(self, client: TestClient):
+        """Probe with explicit level coordinate on irregular grid using GeoJSON input."""
+        response = client.post(
+            f"/datasets/{DATASET_MIXED}/probes?variables=Value&time=2026-01-01",
+            json={
+                "type": "FeatureCollection",
+                "features": [
+                    {
+                        "type": "Feature",
+                        "geometry": {
+                            "type": "Point",
+                            "coordinates": [2.05, 51.02, 100],
+                        },
+                    }
+                ],
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert "times" in data
+        assert "variables" in data
+        assert "Value" in data["variables"]
+        values = data["values"]["Value"]
+        assert isinstance(values, list)
+        assert len(values) == 1
+        assert all(isinstance(v, list) for v in values)
+
+    def test_probe_with_level_interpolation(self, client: TestClient):
+        """Probe at a 3D point with level interpolation on irregular grid."""
+        probe_lon = 2.06440
+        probe_lat = 50.97832
+        point1 = client.get(
+            f"/datasets/{DATASET_MIXED}/probe?variables=Value&time=2026-01-01&lon={probe_lon}&lat={probe_lat}&level=100",
+        )
+        point2 = client.get(
+            f"/datasets/{DATASET_MIXED}/probe?variables=Value&time=2026-01-01&lon={probe_lon}&lat={probe_lat}&level=200",
+        )
+        interp_point = client.get(
+            f"/datasets/{DATASET_MIXED}/probe?variables=Value&time=2026-01-01&lon={probe_lon}&lat={probe_lat}&level=150&interp_spatial_method=idw&interp_spatial_params=radius:200",
+        )
+
+        assert point1.status_code == 200
+        assert point2.status_code == 200
+        assert interp_point.status_code == 200
+        data1 = point1.json()
+        data2 = point2.json()
+        data_interp = interp_point.json()
+        val1 = data1["values"]["Value"][0]
+        val2 = data2["values"]["Value"][0]
+        val_interp = data_interp["values"]["Value"][0]
+        assert val1 < val_interp < val2
+
+    # ------------------------------------------------------------------
+    # Mesh — 2D slice
+    # ------------------------------------------------------------------
+
+    def test_mesh_2d_slice(self, client: TestClient):
+        """Mesh endpoint on a 3D dataset without is_3d returns a 2D triangulated surface."""
+        response = client.get(f"/datasets/{DATASET_MIXED}/mesh")
+        assert response.status_code == 200
+        data = response.json()
+        assert "vertices" in data
+        assert "indices" in data
+        assert data["is_3d"] is False
+        assert len(data["vertices"]) > 0
+        assert len(data["indices"]) > 0
+
+    # ------------------------------------------------------------------
+    # Mesh — 3D volume
+    # ------------------------------------------------------------------
+
+    def test_mesh_3d_volume(self, client: TestClient):
+        """Mesh endpoint with is_3d=true returns a volumetric tetrahedral mesh."""
+        response = client.get(f"/datasets/{DATASET_MIXED}/mesh?is_3d=true")
+        assert response.status_code == 200
+        data = response.json()
+        assert "vertices" in data
+        assert "indices" in data
+        assert data["is_3d"] is True
+        assert len(data["vertices"]) > 0
+        assert len(data["indices"]) > 0
+
+    def test_mesh_3d_geojson(self, client: TestClient):
+        """Mesh endpoint with is_3d=true and format=geojson returns a FeatureCollection with 3D coords."""
+        response = client.get(
+            f"/datasets/{DATASET_MIXED}/mesh?is_3d=true&format=geojson"
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["type"] == "FeatureCollection"
+        features = data["features"]
+        assert len(features) > 0
+        first_coords = features[0]["geometry"]["coordinates"]
+        assert len(first_coords) == 3
+
+    # ------------------------------------------------------------------
+    # Dataset metadata
+    # ------------------------------------------------------------------
+
+    def test_dataset_metadata_vertical_axis(self, client: TestClient):
+        """Dataset metadata exposes Humidity variable and bounding box."""
+        response = client.get(f"/datasets/{DATASET_MIXED}/metadata")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["id"] == DATASET_MIXED
+        assert "vertical_axis" in data
+        assert "height" in data["vertical_axis"]
+        assert data["vertical_axis"]["height"]["min"] == NR_LEVEL_START
+        assert (
+            data["vertical_axis"]["height"]["max"]
             == NR_LEVEL_START + (NR_LEVELS - 1) * NR_LEVEL_STEP
         )
 

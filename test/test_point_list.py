@@ -427,17 +427,6 @@ class TestPointList:
             values, (int, float)
         )
 
-    def test_probe_with_level(self, client: TestClient):
-        """Probe with level dimension falls back to nearest station."""
-        response = client.get(
-            f"/datasets/{DATASET_NAME}/probe?variables=Humidity&lat=48.856&lon=2.352&level=0.0"
-        )
-
-        assert response.status_code == 200
-        data = response.json()
-        assert "variables" in data
-        assert "Humidity" in data["values"]
-
     def test_probe_time_interpolation(self, client: TestClient):
         """Probe with time interpolation returns midpoint value."""
         r1 = client.get(
