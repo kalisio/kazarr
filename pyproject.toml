@@ -14,3 +14,6 @@ markers = [
   "Dataset3D: Tests for 3D datasets",
   "CombineDatasets: Tests for combining datasets",
 ]
+
+[tool.coverage.run]
+patch = ["subprocess"]

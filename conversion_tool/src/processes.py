@@ -341,7 +341,7 @@ def load_and_merge_from_grib(dataset, config):
             if in_place:  # TODO use only glob or regex, not both
                 sub_dataset, _ = load_from_grib(
                     dataset,
-                    merge({"file_regex": f"^.*{discriminator}.*\.grib2$"}, config),
+                    merge({"file_regex": rf"^.*{discriminator}.*\.grib2$"}, config),
                 )
             else:
                 concat_filename = f"concatenated_{discriminator}_{index}.grib2"
