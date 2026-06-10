@@ -8,7 +8,6 @@ THIS_FILE=$(readlink -f "${BASH_SOURCE[0]}")
 THIS_DIR=$(dirname "$THIS_FILE")
 
 . "$THIS_DIR/kash/kash.sh"
-. "$THIS_DIR/kash_python.sh"
 
 ### Github Actions
 

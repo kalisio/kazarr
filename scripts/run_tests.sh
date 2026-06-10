@@ -8,7 +8,6 @@ ROOT_DIR=$(dirname "$THIS_DIR")
 WORKSPACE_DIR="$(dirname "$ROOT_DIR")"
 
 . "$THIS_DIR/kash/kash.sh"
-. "$THIS_DIR/kash_python.sh"
 
 ## Parse options
 ##
