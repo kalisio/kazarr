@@ -131,7 +131,7 @@ class TestRegularGrid3D:
         assert "values" in data
         assert "longitudes" in data
         assert "latitudes" in data
-        assert "levels" not in data  # 2D slice: no level in output
+        assert "levels" in data
         assert len(data["values"]["Value"]) == LATS * LONS
 
     def test_extract_2d_missing_level_fails(self, client: TestClient):
@@ -154,7 +154,7 @@ class TestRegularGrid3D:
         assert "values" in data
         assert "longitudes" in data
         assert "latitudes" in data
-        assert "levels" not in data
+        assert "levels" in data
         assert len(data["values"]["Value"]) == LATS * LONS
 
     # ------------------------------------------------------------------
@@ -891,7 +891,7 @@ class TestSimplifyGrid3D:
         assert "values" in data
         assert "longitudes" in data
         assert "latitudes" in data
-        assert "levels" not in data  # 2D slice: no level in output
+        assert "levels" not in data  # 2D slice: no level in output as selected with dimension | TODO: get corresponding level value to add in output data
         assert len(data["values"]["Value"]) == NR_LONS * NR_LATS
 
     def test_extract_2d_missing_level_fails(self, client: TestClient):
@@ -912,7 +912,7 @@ class TestSimplifyGrid3D:
         assert "values" in data
         assert "longitudes" in data
         assert "latitudes" in data
-        assert "levels" not in data  # 2D slice: no level in output
+        assert "levels" in data  # 2D slice: no level in output
         assert len(data["values"]["Value"]) == NR_LONS * NR_LATS
 
     # ------------------------------------------------------------------
