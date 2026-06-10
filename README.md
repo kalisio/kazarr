@@ -49,6 +49,7 @@ The `extract` endpoint accepts the following query parameters:
 | `lon_max`               | Maximum longitude of the bounding box.                                                                                                         |    ✓     | `None`        |
 | `lat_max`               | Maximum latitude of the bounding box.                                                                                                          |    ✓     | `None`        |
 | `time`                  | The time value/slice to extract.                                                                                                               |    ✓     | `None`        |
+| `level`                 | Value of the level to extract.                                                                                                                 |    ✓     | `None`        |
 | `resolution_limit`      | Limit the amount of data for lat/lon axis (decimate)                                                                                           |    ✓     | `None`        |
 | `format`                | Format of the extracted data (Supported: `raw`, `geojson`, `mesh`).                                                                            |    ✓     | `raw`         |
 | `mesh_tile_size`        | When `format=mesh`, resample data with a grid of `mesh_tile_size`x`mesh_tile_size`                                                             |    ✓     | `None`        |
