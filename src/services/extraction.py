@@ -23,6 +23,13 @@ from src.processing import bbox, interpolation, output
 from src.processing.contexts import BBoxContext, TimeRange
 
 
+FIXED_DIMENSIONS_KEY = "dimensions.fixed"
+FIXED_VARIABLES_KEY = "variables.fixed"
+LAT_VARIABLE_KEY = "variables.lat"
+LON_VARIABLE_KEY = "variables.lon"
+LEVEL_VARIABLE_KEY = "variables.level"
+
+
 def extract(
     request: Request,
     dataset_id: str,
@@ -51,22 +58,22 @@ def extract(
     step_logger.step_start("Load dataset and config")
     dataset, dataset_config = load_dataset(dataset_id)
     fixed_coords, fixed_dims = dgets(
-        dataset_config, ["variables.fixed", "dimensions.fixed"], {}
+        dataset_config, [FIXED_VARIABLES_KEY, FIXED_DIMENSIONS_KEY], {}
     )
     interp_vars = config.interpolation.vars.items
 
     if variable not in dataset:
         raise exceptions.VariableNotFound([variable])
 
-    lon_var, lat_var = dgets(dataset_config, ["variables.lon", "variables.lat"])
+    lon_var, lat_var = dgets(dataset_config, [LON_VARIABLE_KEY, LAT_VARIABLE_KEY])
     level_var = get_level_var(dataset, dataset_config, variable)
     missing_vars = []
     if has_bb_lon and lon_var is None:
-        raise exceptions.MissingConfigurationElement("variables.lon")
+        raise exceptions.MissingConfigurationElement(LON_VARIABLE_KEY)
     if lon_var not in dataset:
         missing_vars.append(f"lon ({lon_var})")
     if has_bb_lat and lat_var is None:
-        raise exceptions.MissingConfigurationElement("variables.lat")
+        raise exceptions.MissingConfigurationElement(LAT_VARIABLE_KEY)
     if lat_var not in dataset:
         missing_vars.append(f"lat ({lat_var})")
 
@@ -576,13 +583,13 @@ def probe(
     dataset, dataset_config = load_dataset(dataset_id)
     with_level = level is not None
     fixed_coords, fixed_dims = dgets(
-        dataset_config, ["variables.fixed", "dimensions.fixed"], {}
+        dataset_config, [FIXED_VARIABLES_KEY, FIXED_DIMENSIONS_KEY], {}
     )
     interp_vars = config.interpolation.vars.items
     spatial_interp_vars = []
     lon_var, lat_var, time_var = dgets(
         dataset_config,
-        ["variables.lon", "variables.lat", "variables.time"],
+        [LON_VARIABLE_KEY, LAT_VARIABLE_KEY, "variables.time"],
     )
     time_dim = dget(dataset_config, "dimensions.time")
     time_range = TimeRange.from_string(time_range)
@@ -913,7 +920,7 @@ def free_selection(
             raise exceptions.VariableNotFound([var])
 
     fixed_coords, fixed_dims = dgets(
-        dataset_config, ["variables.fixed", "dimensions.fixed"], {}
+        dataset_config, [FIXED_VARIABLES_KEY, FIXED_DIMENSIONS_KEY], {}
     )
     as_dims = config.as_dims or []
     fixed_coords, fixed_dims = get_required_dims_and_coords(

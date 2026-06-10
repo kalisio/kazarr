@@ -33,7 +33,7 @@ def pipeline(config, name, dataset=None):
                 )
 
         if process_type == "pipeline":
-            dataset, config = pipeline(pipelines, config, process_name, dataset)
+            dataset, config = pipeline(config, process_name, dataset)
             continue
 
         process_start_time = time.time()

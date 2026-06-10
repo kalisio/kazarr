@@ -19,7 +19,7 @@ def apply_point_list_bounding_box(
         bb_lat_max = bbox.lat_max if bbox.lat_max is not None else np.inf
         mask &= (lats_vals >= bb_lat_min) & (lats_vals <= bb_lat_max)
 
-    point_indices = np.where(mask)[0]
+    point_indices = np.nonzero(mask)[0]
     n_points = len(point_indices)
     if n_points == 0:
         raise exceptions.NoDataInSelection()
@@ -114,7 +114,7 @@ def apply_irregular_bounding_box(
         if not np.any(mask):
             raise exceptions.NoDataInSelection()
         else:
-            where_indices = np.where(mask)
+            where_indices = np.nonzero(mask)
             rows, cols = where_indices[-2], where_indices[-1]
             row_min, row_max = rows.min(), rows.max()
             col_min, col_max = cols.min(), cols.max()
@@ -157,7 +157,7 @@ def apply_level_bounding_box_regular_grid(levels_1d, bbox):
     level_mask = (levels_1d >= bb_level_min) & (levels_1d <= bb_level_max)
     if not np.any(level_mask):
         raise exceptions.NoDataInSelection()
-    level_indices = np.where(level_mask)[0]
+    level_indices = np.nonzero(level_mask)[0]
     level_min, level_max = int(level_indices[0]), int(level_indices[-1])
     return level_min, level_max, levels_1d[level_min : level_max + 1]
 

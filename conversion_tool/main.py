@@ -4,6 +4,8 @@ import argparse
 import src.pipelines as pipelines
 from src.utils import load_json, merge
 
+TEMPLATE_DEFAULT_PATH = "templates.json"
+
 
 def new_dataset(
     input_path,
@@ -13,7 +15,7 @@ def new_dataset(
     description="",
     output_path=None,
     pipeline_name="preprocess",
-    templates_path="templates.json",
+    templates_path=TEMPLATE_DEFAULT_PATH,
     data_mapping="vertices",
     mesh_type="auto",
     dask_dashboard=False
@@ -46,7 +48,7 @@ def new_dataset(
     _, config = pipelines.pipeline(pipeline_config, pipeline_name)
 
 
-def list_templates(templates_path="templates.json"):
+def list_templates(templates_path=TEMPLATE_DEFAULT_PATH):
     templates = load_json(templates_path)
 
     print("Available templates:")
@@ -64,7 +66,7 @@ def main():
     parser_list_templates.add_argument(
         "--templates-path",
         type=str,
-        default="templates.json",
+        default=TEMPLATE_DEFAULT_PATH,
         help="Path to templates configuration file (local or s3://) [default: templates.json]",
     )
 
@@ -114,7 +116,7 @@ def main():
     parser_create_dataset.add_argument(
         "--templates-path",
         type=str,
-        default="templates.json",
+        default=TEMPLATE_DEFAULT_PATH,
         help="Path to templates configuration file (local or s3://) [default: templates.json]",
     )
     parser_create_dataset.add_argument(

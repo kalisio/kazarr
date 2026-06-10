@@ -26,6 +26,13 @@ from src.utils import (
 )
 
 
+S3_PREFIX = "s3://"
+BUCKET_NAME_ENV_VAR = "BUCKET_NAME"
+LON_VARIABLE_KEY = "variables.lon"
+LAT_VARIABLE_KEY = "variables.lat"
+LEVEL_VARIABLE_KEY = "variables.level"
+
+
 def init_dask_dashboard(dataset, config):
     """Initialize the Dask dashboard to monitor computation progress and load."""
     client = Client()
@@ -58,11 +65,11 @@ def load_from_netcdf(dataset, config):
     )
 
     new_dataset = None
-    if path.startswith("s3://"):
-        bucket = os.getenv("BUCKET_NAME")
+    if path.startswith(S3_PREFIX):
+        bucket = os.getenv(BUCKET_NAME_ENV_VAR)
         if bucket is None:
-            raise ValueError("BUCKET_NAME environment variable not set.")
-        path = path.replace("s3://", "")
+            raise ValueError(f"{BUCKET_NAME_ENV_VAR} environment variable not set.")
+        path = path.replace(S3_PREFIX, "")
         path = os.path.join(bucket, path)
 
         # Check if path is folder or file
@@ -153,11 +160,11 @@ def load_from_grib(dataset, config):
     backend_kwargs = get_ci(config, "backend_kwargs", default={})
 
     new_dataset = None
-    if path.startswith("s3://"):
-        bucket = os.getenv("BUCKET_NAME")
+    if path.startswith(S3_PREFIX):
+        bucket = os.getenv(BUCKET_NAME_ENV_VAR)
         if bucket is None:
-            raise ValueError("BUCKET_NAME environment variable not set.")
-        path = path.replace("s3://", "")
+            raise ValueError(f"{BUCKET_NAME_ENV_VAR} environment variable not set.")
+        path = path.replace(S3_PREFIX, "")
         path = os.path.join(bucket, path)
 
         # Check if path is folder or file
@@ -291,11 +298,11 @@ def load_from_zarr(dataset, config):
         get_ci(config, "path"),
         message="Missing 'load_path' or 'path' config parameters for load_from_zarr process.",
     )
-    if path.startswith("s3://"):
-        bucket = os.getenv("BUCKET_NAME")
+    if path.startswith(S3_PREFIX):
+        bucket = os.getenv(BUCKET_NAME_ENV_VAR)
         if bucket is None:
-            raise ValueError("BUCKET_NAME environment variable not set.")
-        path = path.replace("s3://", "")
+            raise ValueError(f"{BUCKET_NAME_ENV_VAR} environment variable not set.")
+        path = path.replace(S3_PREFIX, "")
         path = os.path.join(bucket, path)
 
         # check=false to avoid checking (1 more request) for existence of root in the store
@@ -397,9 +404,9 @@ def combine_at_time(dataset, config):
     # but if they are present in the secondary dataset they should be checked against the primary dataset
     # to ensure proper alignment during concatenation.
     # TODO: Those variables must be static and not ATTRS dependent (e.g. ATTRS.level_type)
-    lon_var = get_ci(config, "variables.lon")
-    lat_var = get_ci(config, "variables.lat")
-    level_var = get_ci(config, "variables.level")
+    lon_var = get_ci(config, LON_VARIABLE_KEY)
+    lat_var = get_ci(config, LAT_VARIABLE_KEY)
+    level_var = get_ci(config, LEVEL_VARIABLE_KEY)
 
     if (
         "secondary_datasets" not in config
@@ -804,13 +811,13 @@ def reproject_coordinates(dataset, config):
 
     lon_var = get_ci(
         config,
-        "variables.lon",
-        message="Missing 'variables.lon' config parameter for reproject_coordinates process.",
+        LON_VARIABLE_KEY,
+        message=f"Missing '{LON_VARIABLE_KEY}' config parameter for reproject_coordinates process.",
     )
     lat_var = get_ci(
         config,
-        "variables.lat",
-        message="Missing 'variables.lat' config parameter for reproject_coordinates process.",
+        LAT_VARIABLE_KEY,
+        message=f"Missing '{LAT_VARIABLE_KEY}' config parameter for reproject_coordinates process.",
     )
     if lon_var not in dataset or lat_var not in dataset:
         raise ValueError(
@@ -841,9 +848,9 @@ def reproject_coordinates(dataset, config):
 
 
 def simplify_grid(dataset, config):
-    lon_var = get_ci(config, "variables.lon")
-    lat_var = get_ci(config, "variables.lat")
-    level_var = get_ci(config, "variables.level")
+    lon_var = get_ci(config, LON_VARIABLE_KEY)
+    lat_var = get_ci(config, LAT_VARIABLE_KEY)
+    level_var = get_ci(config, LEVEL_VARIABLE_KEY)
 
     new_coords = {}
     original_dims = set()
@@ -909,11 +916,11 @@ def save(dataset, config):
     dataset.attrs["kazarr"] = kazarr_metadata
 
     final_path = path
-    if path.startswith("s3://"):
-        bucket = os.getenv("BUCKET_NAME")
+    if path.startswith(S3_PREFIX):
+        bucket = os.getenv(BUCKET_NAME_ENV_VAR)
         if bucket is None:
-            raise ValueError("BUCKET_NAME environment variable not set.")
-        final_path = path.replace("s3://", "s3://" + bucket + "/")
+            raise ValueError(f"{BUCKET_NAME_ENV_VAR} environment variable not set.")
+        final_path = path.replace(S3_PREFIX, S3_PREFIX + bucket + "/")
 
     # if os.getenv("AWS_ENDPOINT_URL", "").endswith("cloud.ovh.net"):
     #   # Special case for OVH S3 to disable payload signing

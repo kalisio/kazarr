@@ -15,12 +15,17 @@ from loguru import logger as log
 import src.exceptions as exceptions
 
 
+ZARR_EXTENSION = ".zarr"
+S3_PREFIX = "s3://"
+BUCKET_NAME_ENV_VAR = "BUCKET_NAME"
+
+
 def get_datasets_path():
     return os.getenv("DATASETS_PATH", "/")
 
 
 def s3_credentials_exists():
-    bucket = os.getenv("BUCKET_NAME")
+    bucket = os.getenv(BUCKET_NAME_ENV_VAR)
     if bucket is None:
         return False
     s3_store = s3fs.S3FileSystem(anon=False)
@@ -42,12 +47,12 @@ def load(path):
                 os.path.join(get_datasets_path().rstrip("/"), path), chunks="auto"
             )
         except Exception:
-            raise exceptions.DatasetNotFound(path.replace(".zarr", ""))
+            raise exceptions.DatasetNotFound(path.replace(ZARR_EXTENSION, ""))
 
-    bucket = os.getenv("BUCKET_NAME")
+    bucket = os.getenv(BUCKET_NAME_ENV_VAR)
     if bucket is None:
         raise exceptions.GenericInternalError(
-            "BUCKET_NAME environment variable not set."
+            f"{BUCKET_NAME_ENV_VAR} environment variable not set."
         )
     try:
         cache_size = os.getenv("CACHE_SIZE", "512MB")
@@ -60,16 +65,16 @@ def load(path):
         if not use_cache:
             store = s3fs.S3Map(
                 root=os.path.join(
-                    bucket, get_datasets_path(), path.replace("s3://", "")
+                    bucket, get_datasets_path(), path.replace(S3_PREFIX, "")
                 ),
                 s3=s3fs.S3FileSystem(anon=False),
             )
         else:
             store = S3CachedStore(
                 s3_root=os.path.join(
-                    bucket, get_datasets_path(), path.replace("s3://", "")
+                    bucket, get_datasets_path(), path.replace(S3_PREFIX, "")
                 ),
-                cache_dir=os.path.join(cache_path, path.replace("s3://", "")),
+                cache_dir=os.path.join(cache_path, path.replace(S3_PREFIX, "")),
                 expiry_seconds=60 * 60 * 24 * 7 * 4,
             )
 
@@ -87,10 +92,10 @@ def load(path):
 # Load JSON file from S3
 def load_json(path):
     s3_store = s3fs.S3FileSystem(anon=False)
-    bucket = os.getenv("BUCKET_NAME")
+    bucket = os.getenv(BUCKET_NAME_ENV_VAR)
     if bucket is None:
         raise exceptions.GenericInternalError(
-            "BUCKET_NAME environment variable not set."
+            f"{BUCKET_NAME_ENV_VAR} environment variable not set."
         )
     try:
         with s3_store.open(os.path.join(bucket, path), "r") as f:
@@ -111,19 +116,19 @@ def find_datasets(path="/"):
         log.info("[KAZARR] Searching datasets in path: {path}", path=full_path)
         for root, dirs, _ in os.walk(full_path):
             for dirname in dirs:
-                if dirname.endswith(".zarr"):
+                if dirname.endswith(ZARR_EXTENSION):
                     found_path = os.path.join(root, dirname)
                     datasets.append(
-                        found_path.replace(get_datasets_path(), "").replace(".zarr", "")
+                        found_path.replace(get_datasets_path(), "").replace(ZARR_EXTENSION, "")
                     )
         return datasets
 
     # Search all folders recursively that ends with .zarr
     s3_store = s3fs.S3FileSystem(anon=False)
-    bucket = os.getenv("BUCKET_NAME")
+    bucket = os.getenv(BUCKET_NAME_ENV_VAR)
     if bucket is None:
         raise exceptions.GenericInternalError(
-            "BUCKET_NAME environment variable not set."
+            f"{BUCKET_NAME_ENV_VAR} environment variable not set."
         )
     datasets = []
     try:
@@ -131,12 +136,12 @@ def find_datasets(path="/"):
             os.path.join(bucket, get_datasets_path().rstrip("/"), path.lstrip("/"))
         ):
             for dirname in dirs[:]:
-                if dirname.endswith(".zarr"):
+                if dirname.endswith(ZARR_EXTENSION):
                     found_path = f"{root}/{dirname}"
                     datasets.append(
                         found_path.replace(
                             os.path.join(bucket, get_datasets_path().rstrip("/")), ""
-                        ).replace(".zarr", "")
+                        ).replace(ZARR_EXTENSION, "")
                     )
                     dirs.remove(dirname)
     except NoCredentialsError:
@@ -153,7 +158,7 @@ def load_datasets(search_path=None):
 
 # Load a dataset and its configuration from its ID
 def load_dataset(dataset_path):
-    dataset = load(dataset_path + ".zarr")
+    dataset = load(dataset_path + ZARR_EXTENSION)
     cache_size = os.getenv("CACHE_SIZE", "512MB")
     cache_path = os.getenv("CACHE_DIR")
     use_cache = cache_path is not None and get_cache_size_bytes(cache_size) is not None

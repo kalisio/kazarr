@@ -6,6 +6,10 @@ import src.exceptions as exceptions
 from src.processing.contexts import TimeRange
 
 
+ATTRS_KEY = "ATTRS."
+ATTRIBUTES_KEY = "ATTRIBUTES."
+
+
 # Ensure xindex is set for a variable in the dataset
 def set_xindex(dataset, var_name):
     if var_name not in dataset.xindexes:
@@ -318,9 +322,9 @@ def dgets(d, keys, default=None):
 def get_dataset_level_vars(dataset, config):
     level_var = dget(config, "variables.level")
     if level_var is not None and (
-        level_var.startswith("ATTRS.") or level_var.startswith("ATTRIBUTES.")
+        level_var.startswith(ATTRS_KEY) or level_var.startswith(ATTRIBUTES_KEY)
     ):
-        level_var_name = level_var.replace("ATTRS.", "").replace("ATTRIBUTES.", "")
+        level_var_name = level_var.replace(ATTRS_KEY, "").replace(ATTRIBUTES_KEY, "")
         level_vars = {}
         for var in dataset.data_vars:
             if level_var_name in dataset[var].attrs:
@@ -340,10 +344,10 @@ def get_dataset_level_vars(dataset, config):
 def get_level_var(dataset, config, variable):
     level_var = dget(config, "variables.level")
     if level_var is not None and (
-        level_var.startswith("ATTRS.") or level_var.startswith("ATTRIBUTES.")
+        level_var.startswith(ATTRS_KEY) or level_var.startswith(ATTRIBUTES_KEY)
     ):
         level_var = dataset[variable].attrs.get(
-            level_var.replace("ATTRS.", "").replace("ATTRIBUTES.", ""), None
+            level_var.replace(ATTRS_KEY, "").replace(ATTRIBUTES_KEY, ""), None
         )
     return level_var
 
