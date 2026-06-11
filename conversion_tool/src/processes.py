@@ -14,6 +14,7 @@ import cfgrib
 from dask.distributed import Client, performance_report
 
 from src.utils import (
+    get_dataset_config_value,
     get_ci,
     merge,
     rechunk_if_needed,
@@ -57,11 +58,12 @@ def load_from_netcdf(dataset, config):
         print(f"Progress: {ds_count} / {total_count} ({percentage:.2f}%)")
         return ds
 
-    path = get_ci(
+    path = get_dataset_config_value(
+        dataset,
         config,
         "load_path",
-        get_ci(config, "path"),
-        message="Missing 'load_path' or 'path' config parameters for load_from_netcdf process.",
+        default=get_ci(config, "path"),
+        error_message="Missing 'load_path' or 'path' config parameters for load_from_netcdf process.",
     )
 
     new_dataset = None
@@ -81,10 +83,11 @@ def load_from_netcdf(dataset, config):
                 chunks="auto",
             )
         elif fs.isdir(path):
-            concat_dim = get_ci(
+            concat_dim = get_dataset_config_value(
+                dataset,
                 config,
                 "concat_dim",
-                message="Missing 'concat_dim' config parameter for loading multiple NetCDF files from S3 folder.",
+                error_message="Missing 'concat_dim' config parameter for loading multiple NetCDF files from S3 folder.",
             )
             files = fs.glob(os.path.join(path, "*.nc"))
             files = sorted(files)
@@ -109,10 +112,11 @@ def load_from_netcdf(dataset, config):
         if os.path.isfile(path):
             new_dataset = xr.open_dataset(path, chunks="auto", engine="h5netcdf")
         elif os.path.isdir(path):
-            concat_dim = get_ci(
+            concat_dim = get_dataset_config_value(
+                dataset,
                 config,
                 "concat_dim",
-                message="Missing 'concat_dim' for loading multiple NetCDF files from folder.",
+                error_message="Missing 'concat_dim' for loading multiple NetCDF files from folder.",
             )
             files = [
                 os.path.join(path, f) for f in os.listdir(path) if f.endswith(".nc")
@@ -150,14 +154,19 @@ def load_from_grib(dataset, config):
         print(f"Progress: {ds_count} / {total_count} ({percentage:.2f}%)")
         return ds
 
-    path = get_ci(
+    path = get_dataset_config_value(
+        dataset,
         config,
         "load_path",
-        get_ci(config, "path"),
-        message="Missing 'load_path' or 'path' config parameters for load_from_grib process.",
+        default=get_ci(config, "path"),
+        error_message="Missing 'load_path' or 'path' config parameters for load_from_grib process.",
     )
-    file_pattern = get_ci(config, "file_regex", "*.grib2")
-    backend_kwargs = get_ci(config, "backend_kwargs", default={})
+    file_pattern = get_dataset_config_value(
+        dataset, config, "file_regex", default="*.grib2"
+    )
+    backend_kwargs = get_dataset_config_value(
+        dataset, config, "backend_kwargs", default={}
+    )
 
     new_dataset = None
     if path.startswith(S3_PREFIX):
@@ -181,10 +190,11 @@ def load_from_grib(dataset, config):
                 backend_kwargs=backend_kwargs,
             )
         elif fs.isdir(path):
-            concat_dim = get_ci(
+            concat_dim = get_dataset_config_value(
+                dataset,
                 config,
                 "concat_dim",
-                message="Missing 'concat_dim' config parameter for loading multiple GRIB files from S3 folder.",
+                error_message="Missing 'concat_dim' config parameter for loading multiple GRIB files from S3 folder.",
             )
 
             all_files = fs.ls(os.path)
@@ -252,10 +262,11 @@ def load_from_grib(dataset, config):
                     except Exception as e:
                         print(f"Error occurred while merging datasets: {e}")
         elif os.path.isdir(path):
-            concat_dim = get_ci(
+            concat_dim = get_dataset_config_value(
+                dataset,
                 config,
                 "concat_dim",
-                message="Missing 'concat_dim' for loading multiple GRIB files from folder.",
+                error_message="Missing 'concat_dim' for loading multiple GRIB files from folder.",
             )
 
             files = [
@@ -292,11 +303,12 @@ def load_from_grib(dataset, config):
 
 def load_from_zarr(dataset, config):
     """Load a dataset from a local or S3 Zarr store."""
-    path = get_ci(
+    path = get_dataset_config_value(
+        dataset,
         config,
         "load_path",
-        get_ci(config, "path"),
-        message="Missing 'load_path' or 'path' config parameters for load_from_zarr process.",
+        default=get_ci(config, "path"),
+        error_message="Missing 'load_path' or 'path' config parameters for load_from_zarr process.",
     )
     if path.startswith(S3_PREFIX):
         bucket = os.getenv(BUCKET_NAME_ENV_VAR)
@@ -320,19 +332,27 @@ def load_and_merge_from_grib(dataset, config):
 
     # List of strings that can be used to discriminate files to merge together
     # TODO: improve this by allowing to extract discriminator values with regex capture groups, to support more complex cases
-    discriminator = get_ci(
+    discriminator = get_dataset_config_value(
+        dataset,
         config,
         "discriminator",
-        message="Missing 'discriminator' config parameter for load_and_merge_from_grib process.",
+        error_message="Missing 'discriminator' config parameter for load_and_merge_from_grib process.",
     )
-    rename_before_merge = get_ci(config, "rename_before_merge", default=[])
-    backend_kwargs = get_ci(config, "dataset_backend_kwargs", default=[])
-    in_place = get_ci(config, "merge_in_place", default=False)
-    path = get_ci(
+    rename_before_merge = get_dataset_config_value(
+        dataset, config, "rename_before_merge", default=[]
+    )
+    backend_kwargs = get_dataset_config_value(
+        dataset, config, "dataset_backend_kwargs", default=[]
+    )
+    in_place = get_dataset_config_value(
+        dataset, config, "merge_in_place", default=False
+    )
+    path = get_dataset_config_value(
+        dataset,
         config,
         "load_path",
-        get_ci(config, "path"),
-        message="Missing 'load_path' or 'path' config parameters for load_and merge_from_grib process.",
+        default=get_ci(config, "path"),
+        error_message="Missing 'load_path' or 'path' config parameters for load_and merge_from_grib process.",
     )
 
     if isinstance(discriminator, str):
@@ -386,16 +406,20 @@ def load_and_merge_from_grib(dataset, config):
 
 def combine_at_time(dataset, config):
     """Combine the main dataset with another dataset along the time dimension."""
-    combine_time = get_ci(
+    combine_time = get_dataset_config_value(
+        dataset,
         config,
         "combine_time",
-        message="Missing 'combine_time' config parameter for combine_at_time process.",
+        error_message="Missing 'combine_time' config parameter for combine_at_time process.",
     )
-    combine_dataset_tag = get_ci(config, "combine_dataset_tag", default="secondary_1")
-    time_var = get_ci(
+    combine_dataset_tag = get_dataset_config_value(
+        dataset, config, "combine_dataset_tag", default="secondary_1"
+    )
+    time_var = get_dataset_config_value(
+        dataset,
         config,
         "variables.time",
-        message="Missing 'variables.time' config parameter for combine_at_time process.",
+        error_message="Missing 'variables.time' config parameter for combine_at_time process.",
     )
 
     # Those variables will be used to check if spatial dimensions have changed between the two datasets,
@@ -473,7 +497,8 @@ def combine_at_time(dataset, config):
         )
     )
     if is_point_list:
-        point_discriminator_var = get_ci(
+        point_discriminator_var = get_dataset_config_value(
+            dataset,
             config,
             "combine_point_discriminator_var",
         )
@@ -546,10 +571,11 @@ def combine_at_time(dataset, config):
 
 def assign_coords(dataset, config):
     """Assign coordinates to dataset dimensions based on the provided configuration."""
-    coords = get_ci(
+    coords = get_dataset_config_value(
+        dataset,
         config,
         "assign_coords",
-        message="Missing 'assign_coords' config parameter for assign_coords process.",
+        error_message="Missing 'assign_coords' config parameter for assign_coords process.",
     )
     if not isinstance(coords, dict):
         raise TypeError(
@@ -616,10 +642,11 @@ def unify_chunks(dataset, config):
 
 def rename_variables(dataset, config):
     """Rename dataset variables using the provided renaming map."""
-    rename_map = get_ci(
+    rename_map = get_dataset_config_value(
+        dataset,
         config,
         "rename_map",
-        message="Missing 'rename_map' config parameter for rename_variables process.",
+        error_message="Missing 'rename_map' config parameter for rename_variables process.",
     )
     if not isinstance(rename_map, dict):
         raise TypeError(
@@ -645,10 +672,11 @@ def rename_variables(dataset, config):
 
 def exclude_variables(dataset, config):
     """Drop specified variables from the dataset."""
-    exclude_vars = get_ci(
+    exclude_vars = get_dataset_config_value(
+        dataset,
         config,
         "exclude_vars",
-        message="Missing 'exclude_vars' config parameter for exclude_variables process.",
+        error_message="Missing 'exclude_vars' config parameter for exclude_variables process.",
     )
     if not isinstance(exclude_vars, list):
         raise TypeError(
@@ -661,10 +689,11 @@ def exclude_variables(dataset, config):
 
 def keep_variables(dataset, config):
     """Keep only the specified variables and drop all others from the dataset."""
-    keep_vars = get_ci(
+    keep_vars = get_dataset_config_value(
+        dataset,
         config,
         "keep_vars",
-        message="Missing 'keep_vars' config parameter for keep_variables process.",
+        error_message="Missing 'keep_vars' config parameter for keep_variables process.",
     )
     if not isinstance(keep_vars, list):
         raise TypeError(
@@ -678,23 +707,27 @@ def keep_variables(dataset, config):
 
 def delta_time_to_datetime(dataset, config):
     """Convert a relative time delta variable into absolute datetime values based on a reference time."""
-    time_ref_var = get_ci(
+    time_ref_var = get_dataset_config_value(
+        dataset,
         config,
         "referenceTime.variable",
-        message="Missing 'referenceTime.variable' config parameter for delta_time_to_datetime process.",
+        error_message="Missing 'referenceTime.variable' config parameter for delta_time_to_datetime process.",
     )
-    time_ref_format = get_ci(config, "referenceTime.format")
-    delta_unit = get_ci(config, "referenceTime.delta_unit")
-    time_var = get_ci(
+    time_ref_format = get_dataset_config_value(dataset, config, "referenceTime.format")
+    delta_unit = get_dataset_config_value(dataset, config, "referenceTime.delta_unit")
+    time_var = get_dataset_config_value(
+        dataset,
         config,
         "variables.time",
-        message="Missing 'variables.time' config parameter for delta_time_to_datetime process.",
+        error_message="Missing 'variables.time' config parameter for delta_time_to_datetime process.",
     )
 
-    time_dim = get_ci(config, "dimensions.time")
+    time_dim = get_dataset_config_value(dataset, config, "dimensions.time")
 
     # Whether or not to update the original time variable in the config to point to the new datetime variable created by this process (default: True). If False, the new datetime variable will be created but the config will still point to the original time variable, which may cause issues for downstream processes that rely on it being a datetime variable.
-    update_time_var = get_ci(config, "updateTimeVar", default=True)
+    update_time_var = get_dataset_config_value(
+        dataset, config, "updateTimeVar", default=True
+    )
 
     units = {
         "years": "Y",
@@ -798,15 +831,17 @@ def delta_time_to_datetime(dataset, config):
 
 def reproject_coordinates(dataset, config):
     """Reproject dataset coordinates (longitude, latitude, altitude) to another CRS."""
-    from_crs = get_ci(
+    from_crs = get_dataset_config_value(
+        dataset,
         config,
         "reprojection.from_crs",
-        message="Missing 'from_crs' config parameter for reproject_coordinates process.",
+        error_message="Missing 'from_crs' config parameter for reproject_coordinates process.",
     )
-    to_crs = get_ci(
+    to_crs = get_dataset_config_value(
+        dataset,
         config,
         "reprojection.to_crs",
-        message="Missing 'to_crs' config parameter for reproject_coordinates process.",
+        error_message="Missing 'to_crs' config parameter for reproject_coordinates process.",
     )
 
     lon_var = get_ci(
@@ -871,9 +906,15 @@ def simplify_grid(dataset, config):
     unused_dims = original_dims - simplified_dims
     if unused_dims:
         for dim in unused_dims:
-            print(f"[KAZARR] Removing unused dimension '{dim}' after grid simplification.")
+            print(
+                f"[KAZARR] Removing unused dimension '{dim}' after grid simplification."
+            )
             dataset = dataset.squeeze(dim)
-            if "dimensions" in config and "fixed" in config["dimensions"] and dim in config["dimensions"]["fixed"]:
+            if (
+                "dimensions" in config
+                and "fixed" in config["dimensions"]
+                and dim in config["dimensions"]["fixed"]
+            ):
                 del config["dimensions"]["fixed"][dim]
 
     # Check if grid is now regular
@@ -886,7 +927,9 @@ def simplify_grid(dataset, config):
             break
     if is_regular:
         config["mesh_type"] = "regular"
-        print("[KAZARR] Grid simplified to regular grid. Mesh type set to 'regular' in config.")
+        print(
+            "[KAZARR] Grid simplified to regular grid. Mesh type set to 'regular' in config."
+        )
 
     dataset, _ = assign_coords(dataset, {"assign_coords": new_coords})
     return dataset, config
@@ -894,17 +937,20 @@ def simplify_grid(dataset, config):
 
 def save(dataset, config):
     """Save the final dataset to Zarr format locally or on S3."""
-    path = get_ci(config, "save_path")
+    path = get_dataset_config_value(dataset, config, "save_path")
     if path is None:
-        path = get_ci(
+        path = get_dataset_config_value(
+            dataset,
             config,
             "path",
-            message="Missing 'save_path' or 'path' config parameter for save process.",
+            error_message="Missing 'save_path' or 'path' config parameter for save process.",
         )
         path = path.replace(".nc", "").replace(".grib2", "") + ".zarr"
     config["save_path"] = path  # Update config with actual save path
-    version = get_ci(config, "version", default=3)
-    float64_to_float32 = get_ci(config, "float64_to_float32", default=False)
+    version = get_dataset_config_value(dataset, config, "version", default=3)
+    float64_to_float32 = get_dataset_config_value(
+        dataset, config, "float64_to_float32", default=False
+    )
 
     if float64_to_float32:
         for var in dataset.data_vars:
@@ -972,8 +1018,11 @@ def save(dataset, config):
 
 def clean(dataset, config):
     """Clean temporary, generated, or index files."""
-    clean = get_ci(
-        config, "clean", default={"used": False, "generated": True, "idx": True}
+    clean = get_dataset_config_value(
+        dataset,
+        config,
+        "clean",
+        default={"used": False, "generated": True, "idx": True},
     )
 
     def clean_proc(paths):

@@ -281,6 +281,7 @@ def check_store_as_secondary(dataset, new_dataset, config):
         dataset = new_dataset
     return dataset, config
 
+
 def get_redundant_dimensions(dataset, variable, tolerance=1e-6):
     redundant_dims = []
     if variable not in dataset:
@@ -296,3 +297,33 @@ def get_redundant_dimensions(dataset, variable, tolerance=1e-6):
         if float(abs_diff.max(skipna=True)) <= tolerance:
             redundant_dims.append(dim)
     return redundant_dims
+
+
+def get_attr_value(dataset, key, variable=None):
+    if not isinstance(key, str):
+        raise ValueError("Attribute key must be a string.")
+
+    if not key.startswith("ATTRS.") and not key.startswith("ATTRIBUTES."):
+        return key
+
+    key = key.split(".", 1)[1]
+    if variable is not None and key in dataset[variable].attrs:
+        return dataset[variable].attrs[key]
+    elif key in dataset.attrs:
+        return dataset.attrs[key]
+    else:
+        raise ValueError(
+            f"Key '{key}' not found in variable '{variable}' or dataset attributes."
+        )
+
+
+def get_dataset_config_value(
+    dataset, config, key, default=None, error_message=None, variable=None
+):
+    if not isinstance(key, str):
+        raise ValueError("Config key must be a string.")
+
+    value = get_ci(config, key, default=default, message=error_message)
+    if value is not None and isinstance(value, str):
+        return get_attr_value(dataset, value, variable=variable)
+    return value
