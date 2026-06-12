@@ -10,6 +10,7 @@ import numpy as np
 import s3fs
 from pyproj import Transformer
 import cfgrib
+from platformdirs import user_cache_dir
 
 from dask.distributed import Client, performance_report
 
@@ -21,9 +22,11 @@ from src.utils import (
     merge_grib,
     get_s3_storage_options,
     get_s3_filesystem,
-    timestamp_to_datetime,
-    check_store_as_secondary,
+    parse_datetime,
     get_redundant_dimensions,
+    get_spatial_variables,
+    add_to_clean_config,
+    init_store_as_secondary,
 )
 
 
@@ -139,7 +142,7 @@ def load_from_netcdf(dataset, config):
 
     if new_dataset is None:
         raise ValueError(f"Unable to load NetCDF dataset from path: {path}")
-    return check_store_as_secondary(dataset, new_dataset, config)
+    return init_store_as_secondary(dataset, new_dataset, config)
 
 
 def load_from_grib(dataset, config):
@@ -180,9 +183,13 @@ def load_from_grib(dataset, config):
         fs = get_s3_filesystem(config, path)
         target_tmp_dir = "/tmp/kazarr_grib/"
         if fs.isfile(path):
+            target_tmp_dir = user_cache_dir(
+                appname="kazarr", appauthor=False, version="gribs"
+            )
             os.makedirs(target_tmp_dir, exist_ok=True)
             if not os.path.exists(os.path.join(target_tmp_dir, os.path.basename(path))):
                 fs.get(path, os.path.join(target_tmp_dir, os.path.basename(path)))
+                config = add_to_clean_config(config, "used_paths", os.path.join(target_tmp_dir, os.path.basename(path)))
             new_dataset = xr.open_dataset(
                 os.path.join(target_tmp_dir, os.path.basename(path)),
                 engine="cfgrib",
@@ -298,7 +305,7 @@ def load_from_grib(dataset, config):
             )
     if new_dataset is None:
         raise ValueError(f"Unable to load GRIB dataset from path: {path}")
-    return check_store_as_secondary(dataset, new_dataset, config)
+    return init_store_as_secondary(dataset, new_dataset, config)
 
 
 def load_from_zarr(dataset, config):
@@ -324,7 +331,7 @@ def load_from_zarr(dataset, config):
         new_dataset = xr.open_zarr(s3_store, chunks="auto")
     else:
         new_dataset = xr.open_zarr(path, chunks="auto")
-    return check_store_as_secondary(dataset, new_dataset, config)
+    return init_store_as_secondary(dataset, new_dataset, config)
 
 
 def load_and_merge_from_grib(dataset, config):
@@ -401,7 +408,7 @@ def load_and_merge_from_grib(dataset, config):
             f"Unable to find any files matching discriminators {discriminators} in path: {path} for load_and_merge_from_grib process."
         )
 
-    return check_store_as_secondary(dataset, new_dataset, config)
+    return init_store_as_secondary(dataset, new_dataset, config)
 
 
 def combine_at_time(dataset, config):
@@ -411,6 +418,12 @@ def combine_at_time(dataset, config):
         config,
         "combine_time",
         error_message="Missing 'combine_time' config parameter for combine_at_time process.",
+    )
+    combine_time_format = get_dataset_config_value(
+        dataset,
+        config,
+        "combine_time_format",
+        default="%Y-%m-%dT%H:%M:%S",
     )
     combine_dataset_tag = get_dataset_config_value(
         dataset, config, "combine_dataset_tag", default="secondary_1"
@@ -450,30 +463,54 @@ def combine_at_time(dataset, config):
         raise ValueError(
             f"Time variable '{time_var}' not found in the secondary dataset '{combine_dataset_tag}' for combine_at_time process."
         )
-
-    def normalize_combine_time(value):
-        if isinstance(value, np.datetime64):
-            return value
-        if isinstance(value, datetime):
-            return np.datetime64(value)
-        if isinstance(value, str):
-            try:
-                return np.datetime64(value)
-            except ValueError:
-                return np.datetime64(timestamp_to_datetime(value))
-        if isinstance(value, (int, float)):
-            return np.datetime64(timestamp_to_datetime(value))
-        return value
+    
+    if dataset[time_var].ndim != 1:
+        raise ValueError(
+            f"Time variable '{time_var}' in the main dataset has {dataset[time_var].ndims} dimensions, but a 1-dimensional time variable is required for combine_at_time process."
+        )
+    
+    time_dim = dataset[time_var].dims[0]
 
     if np.issubdtype(dataset[time_var].dtype, np.datetime64) or np.issubdtype(
         combine_dataset[time_var].dtype, np.datetime64
     ):
-        combine_time = normalize_combine_time(combine_time)
+        try:
+            combine_time = parse_datetime(combine_time, combine_time_format)
+        except Exception as e:
+            raise ValueError(
+                f"Failed to parse 'combine_time' value '{combine_time}' with format '{combine_time_format}' for combine_at_time process. Original error: {e}"
+            ) from e
 
-    primary_before = dataset.sel({time_var: dataset[time_var] <= combine_time})
-    secondary_after = combine_dataset.sel(
-        {time_var: combine_dataset[time_var] > combine_time}
-    )
+    try:
+        primary_before = dataset.sel({time_var: dataset[time_var] <= combine_time})
+        secondary_after = combine_dataset.sel(
+            {time_var: combine_dataset[time_var] > combine_time}
+        )
+    except Exception as e:
+        raise ValueError(
+            f"Failed to split datasets at 'combine_time' value '{combine_time}' "
+            f"(type: {type(combine_time).__name__}) on time variable '{time_var}' "
+            f"(dtype: {dataset[time_var].dtype}). Check that 'combine_time' is compatible "
+            f"with the time variable's dtype. Original error: {e}"
+        ) from e
+
+    if len(primary_before[time_var]) == 0:
+        raise ValueError(
+            (
+                f"'combine_time' value '{combine_time}' is earlier than or equal to all timestamps "
+                f"in the primary dataset (earliest: {dataset[time_var].values[0] if len(dataset[time_var]) > 0 else 'N/A'}). "
+                f"The primary dataset contributes no data to the combined result."
+            )
+        )
+    if len(secondary_after[time_var]) == 0:
+        raise ValueError(
+            (
+                f"'combine_time' value '{combine_time}' is later than or equal to all timestamps "
+                f"in the secondary dataset '{combine_dataset_tag}' "
+                f"(latest: {combine_dataset[time_var].values[-1] if len(combine_dataset[time_var]) > 0 else 'N/A'}). "
+                f"The secondary dataset contributes no data to the combined result."
+            )
+        )
 
     # For list point case, we need to find a variable to discriminate points, and set index of this variable
     spatial_vars_defined = lon_var is not None and lat_var is not None
@@ -512,13 +549,23 @@ def combine_at_time(dataset, config):
                 if have_same_dims and is_string_type:
                     corresponding_vars.append(var)
 
-            if len(corresponding_vars) > 1:
+            if len(corresponding_vars) != 1:
+                if len(corresponding_vars) > 1:
+                    message_end = (
+                        f"{corresponding_vars} were found. Please specify 'combine_point_discriminator_var' "
+                        "config parameter to select which one to use."
+                    )
+                else:
+                    message_end = (
+                        "no variable with the same dimensions as the spatial variables and of string type was found. "
+                        "Please specify 'combine_point_discriminator_var' config parameter to select a variable to use, "
+                        "or check that the dataset contains a string variable with the same dimensions as the spatial variables."
+                    )
                 raise ValueError(
                     (
                         "This dataset was detected as a point list. To combine two datasets"
                         ", this process need a variable to discriminate points (names), "
-                        f"but {corresponding_vars} were found. Please specify 'combine_point_discriminator_var' "
-                        "config parameter to select which one to use."
+                        f"but {message_end}"
                     )
                 )
 
@@ -530,8 +577,31 @@ def combine_at_time(dataset, config):
             raise ValueError(
                 f"Variable '{index_target_var}' not found in the secondary dataset. Please specify a valid variable to discriminate points ('combine_point_discriminator_var' config parameter)."
             )
+        
+        if len(primary_before[index_target_var].dims) == 0:
+            raise ValueError(
+                (
+                    f"Variable '{index_target_var}' selected as point discriminator "
+                    "is a scalar variable in the primary dataset, but it needs to be"
+                    " an array variable with the same dimensions as the spatial "
+                    "variables to be used as an index for combining the datasets. "
+                    "Please specify a valid variable to discriminate points "
+                    "('combine_point_discriminator_var' config parameter) that is "
+                    "an array variable with the same dimensions as the spatial "
+                    "variables."
+                )
+            )
 
         index_dim_name = primary_before[index_target_var].dims[0]
+
+        for label, ds in [("primary", primary_before), ("secondary", secondary_after)]:
+            if index_dim_name not in ds.dims:
+                raise ValueError(
+                    f"Dimension '{index_dim_name}' (derived from discriminator variable "
+                    f"'{index_target_var}') was not found among the {label} dataset dimensions: "
+                    f"{list(ds.dims)}. Cannot set index for point-list combination."
+                )
+
         primary_before = primary_before.set_index({index_dim_name: index_target_var})
         secondary_after = secondary_after.set_index({index_dim_name: index_target_var})
 
@@ -554,11 +624,60 @@ def combine_at_time(dataset, config):
                 diff = secondary_after.sizes[dim] - primary_before.sizes[dim]
                 # If so, pad the first dataset to align dimensions
                 if diff > 0:
-                    primary_before = primary_before.pad(
-                        {dim: (0, diff)}, constant_values=np.nan
-                    )
+                    try:
+                        primary_before = primary_before.pad(
+                            {dim: (0, diff)}, constant_values=np.nan
+                        )
+                    except Exception as e:
+                        raise ValueError(
+                            f"Failed to pad primary dataset along dimension '{dim}' by {diff} element(s) "
+                            f"to align with secondary dataset. This can happen if the dimension is an index "
+                            f"or has an incompatible dtype. Original error: {e}"
+                        ) from e
 
-        combined_dataset = xr.concat([primary_before, secondary_after], dim=time_var)
+        try:
+            combined_dataset = xr.concat(
+                [primary_before, secondary_after], dim=time_dim
+            )
+        except Exception as e:
+            raise ValueError(
+                f"Failed to concatenate primary and secondary datasets along '{time_var}'. "
+                f"This can happen if both datasets have variables with incompatible shapes or dtypes. "
+                f"Primary variables: {list(primary_before.data_vars)}, "
+                f"Secondary variables: {list(secondary_after.data_vars)}. "
+                f"Original error: {e}"
+            ) from e
+        
+    # Try to remove useless time dimension created by concat
+    # 1. Remove time dimension from spatial variables:
+    #   As grid can change between the two datasets, but the combined one
+    # should have the shape of the two combined, we will keep the last version (last time step)
+    # and fill NaN values with the first version (first time step) for the time steps where 
+    # the grid is different, to avoid having NaN values for spatial variables in the 
+    # combined dataset.
+    def merge_vars(ds, var):
+        if ds[var].ndim > 1 and time_dim in ds[var].dims:
+            ds[var] = ds[var][-1].fillna(ds[var][0])
+        return ds
+    
+    for var in [lon_var, lat_var, level_var]:
+        if time_dim in combined_dataset[var].dims:
+            combined_dataset = merge_vars(combined_dataset, var)
+
+    # 2. Remove time dimension from scalar variables that have not changed
+    #   Scalar variables will also have been concatenated along the 
+    # time dimension, but if their value is the same in both 
+    # datasets, we can just keep one version, and so, remove
+    # the time dimension added by concat
+    for var in combined_dataset.data_vars:
+        if combined_dataset[var].dims != (time_dim,):
+            continue
+        if var not in primary_before or var not in secondary_after:
+            continue
+        if primary_before[var].ndim != 0 and secondary_after[var].ndim != 0:
+            continue
+        if primary_before[var].values == secondary_after[var].values:
+            combined_dataset[var] = primary_before[var]
 
     if is_point_list:
         combined_dataset = combined_dataset.rename_vars(
@@ -771,32 +890,12 @@ def delta_time_to_datetime(dataset, config):
             raise ValueError(
                 f"Reference time variable '{time_ref_var}' must be a scalar, a string, or a datetime64 variable."
             )
-
-        is_dt64 = isinstance(time_ref, np.datetime64)
-
-        if (
-            not isinstance(time_ref, (int, float))
-            and not is_dt64
-            and time_ref_format is None
-        ):
+        try:
+            time_ref = parse_datetime(time_ref, time_ref_format)
+        except Exception as e:
             raise ValueError(
                 "Missing 'referenceTime.format' config parameter for delta_time_to_datetime process."
-            )
-
-        if (time_ref_format is None or time_ref_format == "timestamp") and isinstance(
-            time_ref, (int, float)
-        ):
-            time_ref = timestamp_to_datetime(time_ref)
-        elif not is_dt64 and not isinstance(time_ref, datetime):
-            time_ref = (
-                time_ref.decode("utf-8")
-                if isinstance(time_ref, bytes)
-                else str(time_ref)
-            )
-            time_ref = datetime.strptime(time_ref, time_ref_format)
-
-        if not is_dt64:
-            time_ref = np.datetime64(time_ref)
+            ) from e
     except ValueError as e:
         raise ValueError(f"Error parsing reference time: {e}") from e
 
@@ -804,7 +903,7 @@ def delta_time_to_datetime(dataset, config):
         # Try to deduce time dimension from time variable if time dimension is not provided
         # If time dimension is found, we create a coordinate "datetimes" along that dimension
         # If not, we create a new variable "datetimes"
-        if time_dim is None and time_var is not None and time_var in dataset:
+        if time_dim is None and time_var is not None and time_var in dataset and dataset[time_var].ndim >= 1:
             time_dim = dataset[time_var].dims[0]
 
         time_deltas = dataset[time_var].values
@@ -883,20 +982,18 @@ def reproject_coordinates(dataset, config):
 
 
 def simplify_grid(dataset, config):
-    lon_var = get_ci(config, LON_VARIABLE_KEY)
-    lat_var = get_ci(config, LAT_VARIABLE_KEY)
-    level_var = get_ci(config, LEVEL_VARIABLE_KEY)
+    spatial_variables = get_spatial_variables(dataset, config)
 
     new_coords = {}
     original_dims = set()
     simplified_dims = set()
-    for var in [lon_var, lat_var, level_var]:
+    for var in spatial_variables:
         if var is None:
             continue
         original_dims.update(dataset[var].dims)
         redundant_dims = get_redundant_dimensions(dataset, var)
         if redundant_dims:
-            dataset[var] = dataset[var].isel({dim: 0 for dim in redundant_dims})
+            dataset[var] = dataset[var].isel(dict.fromkeys(redundant_dims, 0))
             simplified_dims.update(dataset[var].dims)
             if dataset[var].ndim == 1:
                 new_coords[var] = dataset[var].dims[0]
@@ -919,7 +1016,7 @@ def simplify_grid(dataset, config):
 
     # Check if grid is now regular
     is_regular = True
-    for var in [lon_var, lat_var, level_var]:
+    for var in spatial_variables:
         if var is None:
             continue
         if dataset[var].ndim != 1:

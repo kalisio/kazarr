@@ -757,9 +757,9 @@ def probe(
                 # Force to linear interpolation as IDW (only other method supported for probe) doesn't make sense on a regular grid
                 interp_spatial_method = "linear"
                 interp_vars = list(dict.fromkeys(spatial_interp_vars + interp_vars))
-                interp_methods = {
-                    var_name: interp_spatial_method for var_name in spatial_interp_vars
-                }
+                interp_methods = dict.fromkeys(
+                    spatial_interp_vars, interp_spatial_method
+                )
             var_data = sel(
                 dataset,
                 var,

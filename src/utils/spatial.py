@@ -17,7 +17,7 @@ def _get_array_hash(arr: np.ndarray) -> str:
     sample_indices = np.linspace(0, arr.size - 1, min(100, arr.size), dtype=int)
     sample_data = arr.ravel()[sample_indices]
 
-    hasher = hashlib.md5()
+    hasher = hashlib.md5(usedforsecurity=False)
     hasher.update(str(arr.shape).encode())
     hasher.update(str(arr.dtype).encode())
     hasher.update(sample_data.tobytes())

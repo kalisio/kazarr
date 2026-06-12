@@ -196,6 +196,17 @@ def rechunk_if_needed(dataset, target_size_mb=100, tolerance=0.3):
     return dataset
 
 
+def add_to_clean_config(config, clean_type, paths):
+    if "clean" not in config:
+        config["clean"] = {"used_paths": [], "generated_paths": [], "idx_folders": []}
+
+    if clean_type not in ["used_paths", "generated_paths", "idx_folders"]:
+        raise ValueError(f"Invalid clean type: {clean_type}")
+
+    config["clean"][clean_type].extend(paths if isinstance(paths, list) else [paths])
+    return config
+
+
 def merge_grib(folder_path, output_filename, config, glob_search_pattern="*.grib2"):
     print(f'[KAZARR] < Merging GRIB files in "{folder_path}" into "{output_filename}"')
     if os.path.exists(os.path.join(folder_path, output_filename)):
@@ -211,31 +222,15 @@ def merge_grib(folder_path, output_filename, config, glob_search_pattern="*.grib
     if not files:
         return config
 
-    if "clean" not in config:
-        config["clean"] = {"used_paths": files}
-    elif "used_paths" not in config["clean"]:
-        config["clean"]["used_paths"] = files
-    else:
-        config["clean"]["used_paths"].extend(files)
+    config = add_to_clean_config(config, "used_paths", [str(file) for file in files])
 
     with open(folder / output_filename, "wb") as output_file:
         for file in files:
             with open(file, "rb") as input_file:
                 shutil.copyfileobj(input_file, output_file)
 
-    if "generated_paths" not in config["clean"]:
-        config["clean"]["generated_paths"] = [
-            os.path.join(folder_path, output_filename)
-        ]
-    else:
-        config["clean"]["generated_paths"].append(
-            os.path.join(folder_path, output_filename)
-        )
-
-    if "idx_folders" not in config["clean"]:
-        config["clean"]["idx_folders"] = [folder_path]
-    elif folder_path not in config["clean"]["idx_folders"]:
-        config["clean"]["idx_folders"].append(folder_path)
+    config = add_to_clean_config(config, "generated_paths", os.path.join(folder_path, output_filename))
+    config = add_to_clean_config(config, "idx_folders", folder_path)
 
     print(
         f'[KAZARR] > Completed merging GRIB files ({len(files)}) into "{output_filename}"'
@@ -262,23 +257,57 @@ def timestamp_to_datetime(timestamp):
     return datetime.fromtimestamp(ts / divisor)
 
 
-def check_store_as_secondary(dataset, new_dataset, config):
+def parse_datetime(date_input, date_format=None):
+    if isinstance(date_input, np.datetime64):
+        return date_input
+
+    if isinstance(date_input, (int, float)):
+        if date_format is None or date_format == "timestamp":
+            dt_obj = timestamp_to_datetime(date_input)
+            return np.datetime64(dt_obj)
+
+    if isinstance(date_input, datetime):
+        return np.datetime64(date_input)
+
+    if date_format is None:
+        raise ValueError("Date format required to parse datetime string or bytes.")
+
+    if isinstance(date_input, bytes):
+        date_input = date_input.decode("utf-8")
+    else:
+        date_input = str(date_input)
+
+    dt_obj = datetime.strptime(date_input, date_format)
+    return np.datetime64(dt_obj)
+
+
+def init_store_as_secondary(dataset, new_dataset, config):
     store_as_secondary = get_ci(config, "store_as_secondary", default=False)
     secondary_tag = get_ci(config, "secondary_tag")
 
     if store_as_secondary:
         if "secondary_datasets" not in config:
             config["secondary_datasets"] = {}
+            add_to_global_config_update(config, "secondary_datasets")
         if secondary_tag and secondary_tag in config["secondary_datasets"]:
             print(
                 f"[KAZARR] Warning: Secondary dataset tag '{secondary_tag}' already exists in config. Overwriting it with the newly loaded dataset."
             )
         elif not secondary_tag:
             secondary_tag = f"secondary_{len(config.get('secondary_datasets', {})) + 1}"
+            config["secondary_tag"] = secondary_tag
 
         config["secondary_datasets"][secondary_tag] = new_dataset
     else:
         dataset = new_dataset
+    return dataset, config
+
+def update_store_as_secondary(dataset, config):
+    store_as_secondary = get_ci(config, "store_as_secondary", default=False)
+    secondary_tag = get_ci(config, "secondary_tag")
+
+    if store_as_secondary and secondary_tag:
+        config["secondary_datasets"][secondary_tag] = dataset
     return dataset, config
 
 
@@ -327,3 +356,50 @@ def get_dataset_config_value(
     if value is not None and isinstance(value, str):
         return get_attr_value(dataset, value, variable=variable)
     return value
+
+
+def get_spatial_variables(dataset, config):
+    lon_var = get_ci(config, "variables.lon")
+    lat_var = get_ci(config, "variables.lat")
+    level_var = get_ci(config, "variables.level")
+
+    spatial_vars = set()
+    for var in [lon_var, lat_var, level_var]:
+        if isinstance(var, str):
+            if var.startswith("ATTRS.") or var.startswith("ATTRIBUTES."):
+                try:
+                    target = get_attr_value(dataset, var)
+                    spatial_vars.add(target)
+                except ValueError:
+                    spatial_vars.update(get_attr_value_over_all_variables(dataset, var))
+            elif var in dataset:
+                spatial_vars.add(var)
+            else:
+                raise ValueError(
+                    f"Spatial variable '{var}' not found in dataset variables."
+                )
+        else:
+            raise ValueError(
+                f"Spatial variable '{var}' must be a string referencing a variable name or an attribute (e.g., 'ATTRS.lon') in the dataset."
+            )
+    return spatial_vars
+
+
+def get_attr_value_over_all_variables(dataset, key):
+    values = []
+    for var in dataset.variables:
+        try:
+            value = get_attr_value(dataset, key, variable=var)
+            if value is not None:
+                values.append(value)
+        except ValueError:
+            continue
+    return values
+
+
+def add_to_global_config_update(config, key):
+    if "global_config_update" not in config:
+        config["global_config_update"] = []
+    if key not in config["global_config_update"]:
+        config["global_config_update"].append(key)
+    return config
