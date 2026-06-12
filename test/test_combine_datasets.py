@@ -236,7 +236,7 @@ class TestCombineRadialGrid:
                         {
                             "type": "process",
                             "name": "combine_at_time",
-                            "params": {"combine_time": "2026-01-03"},
+                            "params": {"combine_time": "2026-01-03", "combine_time_format": "%Y-%m-%d"},
                         },
                         "unify_chunks",
                         "save",
