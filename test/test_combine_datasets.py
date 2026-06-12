@@ -131,9 +131,9 @@ class TestCombineRadialGrid:
                     {
                         "name": "time",
                         "type": "date",
-                        "size": 5,
+                        "size": 15,
                         "start": "2026-01-01",
-                        "freq": "D",
+                        "freq": "2D",
                     },
                     {"name": "DimK", "size": "lat.DimK"},
                     {"name": "DimJ", "size": "lat.DimJ"},
@@ -148,9 +148,9 @@ class TestCombineRadialGrid:
                     {
                         "name": "time",
                         "type": "date",
-                        "size": 5,
+                        "size": 15,
                         "start": "2026-01-01",
-                        "freq": "D",
+                        "freq": "2D",
                     },
                     {"name": "DimK", "size": "lat.DimK"},
                     {"name": "DimJ", "size": "lat.DimJ"},
