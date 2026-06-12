@@ -168,10 +168,12 @@ Load a dataset from NetCDF(s) file(s) from local storage or S3.
 
 **Parameters:**
 
-| Name         | Type   | Description                                                                 |
-| ------------ | ------ | --------------------------------------------------------------------------- |
-| `load_path`  | String | Path to file or folder (Defaults to `INPUT_PATH` from command line)         |
-| `concat_dim` | String | Dimension on which to merge NetCDF files, if `load_path` is a directory     |
+| Name                 | Type    | Description                                                                                                                                         |
+| -------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `load_path`          | String  | Path to file or folder (Defaults to `INPUT_PATH` from command line)                                                                                 |
+| `concat_dim`         | String  | Dimension on which to merge NetCDF files, if `load_path` is a directory                                                                             |
+| `store_as_secondary` | Boolean | Whether or not store this dataset as a secondary dataset. Usefull for processes that need multiples datasets. Default: `false`                      |
+| `secondary_tag`      | String  | When `store_as_secondary` is true, define a key to this newly loaded dataset. Default: `secondary_X` where X is the xth loaded dataset as secondary |
 
 ### `load_from_grib`
 
@@ -179,10 +181,12 @@ Load a dataset from GRIB(s) file(s) from local storage or S3.
 
 **Parameters:**
 
-| Name         | Type   | Description                                                                 |
-| ------------ | ------ | --------------------------------------------------------------------------- |
-| `load_path`  | String | Path to file or folder (Defaults to `INPUT_PATH` from command line)         |
-| `concat_dim` | String | Dimension on which to merge GRIB files, if `load_path` is a directory       |
+| Name                 | Type    | Description                                                                                                                                         |
+| -------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `load_path`          | String  | Path to file or folder (Defaults to `INPUT_PATH` from command line)                                                                                 |
+| `concat_dim`         | String  | Dimension on which to merge GRIB files, if `load_path` is a directory                                                                               |
+| `store_as_secondary` | Boolean | Whether or not store this dataset as a secondary dataset. Usefull for processes that need multiples datasets. Default: `false`                      |
+| `secondary_tag`      | String  | When `store_as_secondary` is true, define a key to this newly loaded dataset. Default: `secondary_X` where X is the xth loaded dataset as secondary |
 
 ### `load_from_zarr`
 
@@ -190,9 +194,11 @@ Load a Zarr dataset from local storage or S3.
 
 **Parameters:**
 
-| Name        | Type   | Description                                                                 |
-| ----------- | ------ | --------------------------------------------------------------------------- |
-| `load_path` | String | Path to Zarr store (Defaults to `INPUT_PATH` from command line)             |
+| Name                 | Type    | Description                                                                                                                                         |
+| -------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `load_path`          | String  | Path to Zarr store (Defaults to `INPUT_PATH` from command line)                                                                                     |
+| `store_as_secondary` | Boolean | Whether or not store this dataset as a secondary dataset. Usefull for processes that need multiples datasets. Default: `false`                      |
+| `secondary_tag`      | String  | When `store_as_secondary` is true, define a key to this newly loaded dataset. Default: `secondary_X` where X is the xth loaded dataset as secondary |
 
 ### `load_and_merge_from_grib`
 
@@ -201,13 +207,53 @@ For example, this process can be used with files splitted over time and packages
 
 **Parameters:**
 
-| Name                     | Type         | Description                                                                                                                                                                                            |
-| ------------------------ | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Name                     | Type          | Description                                                                                                                                                                                            |
+| ------------------------ | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `discriminator`          | List<String\> | String to find in each file name you want to group to be concatenated                                                                                                                                  |
 | `rename_before_merge`    | List<Object\> | In some cases, two datasets can have variables with same name, and that will cause merge to fail. For each group, you should define an object with original variable name as key and new one as value  |
 | `dataset_backend_kwargs` | List<Object\> | For each group of file that will be concatenated, you can provide args to cfgrib engine (e.g. `{"filter_by_keys": {"shortName": ["MyVariable"]}` will only consider `MyVariable` when loading dataset) |
-| `merge_in_place`         | Boolean      | If true, will use Xarray to concatenate files, instead of creating a temporary GRIB file. This may increase needed memory                                                                              |
-| `path`                   | String       | Path to the folder where GRIB files are stored                                                                                                                                                         |
+| `merge_in_place`         | Boolean       | If true, will use Xarray to concatenate files, instead of creating a temporary GRIB file. This may increase needed memory                                                                              |
+| `path`                   | String        | Path to the folder where GRIB files are stored                                                                                                                                                         |
+| `store_as_secondary`     | Boolean       | Whether or not store this dataset as a secondary dataset. Usefull for processes that need multiples datasets. Default: `false`                                                                         |
+| `secondary_tag`          | String        | When `store_as_secondary` is true, define a key to this newly loaded dataset. Default: `secondary_X` where X is the xth loaded dataset as secondary                                                    |
+
+### `combine_at_time`
+
+Merges two datasets sharing the same base by splitting them at a given point in time: values from the primary dataset are retained up to (inclusive) that point, and values from the secondary dataset are retained from that point onward (exclusive).
+
+> Typical use case: a study is recomputed following parameter changes, but historical values from the original run must be preserved as the ground truth.
+
+**Prerequisites**:
+
+This operation requires two datasets loaded in your pipeline:
+
+- The primary dataset, loaded normally
+- The secondary dataset, must be loaded with `"store_as_secondary": true`
+
+__Example__:
+
+```json
+{
+  // ...
+  "pipelines": {
+    "myPipeline": [
+      "load_from_zarr", // This process will use INPUT_PATH from the command line
+      { "type": "process", "name": "load_from_zarr", "params": { "load_path": "/path/to/my/secondary/zarr/dataset.zarr", "store_as_secondary": true, "secondary_tag": "mySecondaryDataset" } },
+      { "type": "proces", "name": "combine_at_time", "params": { "combine_time": "2026-06-12 16:00", "combine_time_format": "%Y-%m-%d %H:%M", "combine_dataset_tag": "mySecondaryDataset" } },
+      // ...
+    ]
+  }
+}
+```
+
+**Parameters:**
+
+| Name                  | Type   | Description                                                                                                                                                                                        |
+| --------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `combine_time`        | String | The split time. Data before this value is taken from the primary dataset; data from this value onward is taken from the secondary dataset. |
+| `combine_time_format` | String | Format of the `combine_time` ([in Python format](https://docs.python.org/3.11/library/datetime.html#strftime-and-strptime-format-codes)). Default: `%Y-%m-%dT%H:%M:%S`                                                                                                                      |
+| `combine_dataset_tag` | String | Tag identifying the secondary dataset to merge with. Default: `secondary_1`                                                                                                                                       |
+| `variables.time`      | String | Name of the time variable in the dataset.                                                                                                                                                          |
 
 ### `assign_coords`
 
