@@ -3,7 +3,6 @@ import itertools
 import re
 import shutil
 from pathlib import Path
-from datetime import datetime
 
 import xarray as xr
 import numpy as np
