@@ -1074,7 +1074,7 @@ def save(dataset, config):
             if dataset[var].dtype == np.float64:
                 dataset[var] = dataset[var].astype(np.float32)
 
-    keep_keys = ["variables", "dimensions", "mesh_data_on_cells", "mesh_type"]
+    keep_keys = ["variables", "dimensions", "mesh_data_on_cells", "mesh_type", "description"]
     kazarr_metadata = {k: v for k, v in config.items() if k in keep_keys}
     dataset.attrs["kazarr"] = kazarr_metadata
 
