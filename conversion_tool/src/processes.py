@@ -981,6 +981,27 @@ def reproject_coordinates(dataset, config):
 
 
 def simplify_grid(dataset, config):
+    lon_var = get_ci(config, LON_VARIABLE_KEY)
+    lat_var = get_ci(config, LAT_VARIABLE_KEY)
+    if lon_var is None or lat_var is None:
+        raise ValueError(
+            f"Missing '{LON_VARIABLE_KEY}' or '{LAT_VARIABLE_KEY}' config parameter for simplify_grid process."
+        )
+    if lon_var not in dataset or lat_var not in dataset:
+        raise ValueError(
+            f"Longitude '{lon_var}' or latitude '{lat_var}' variable not found in dataset for simplify_grid process."
+        )
+    
+    lons = dataset[lon_var]
+    lats = dataset[lat_var]
+    is_point_list = lons.ndim == 1 and lats.ndim == 1 and lons.dims == lats.dims
+    is_one_point = lons.ndim == 0 and lats.ndim == 0
+    if is_point_list or is_one_point:
+        print(
+            "[KAZARR] Grid is already regular (1D longitude and latitude with same dimension). No simplification needed."
+        )
+        return dataset, config
+
     spatial_variables = get_spatial_variables(dataset, config)
 
     new_coords = {}

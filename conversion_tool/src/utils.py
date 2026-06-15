@@ -229,7 +229,9 @@ def merge_grib(folder_path, output_filename, config, glob_search_pattern="*.grib
             with open(file, "rb") as input_file:
                 shutil.copyfileobj(input_file, output_file)
 
-    config = add_to_clean_config(config, "generated_paths", os.path.join(folder_path, output_filename))
+    config = add_to_clean_config(
+        config, "generated_paths", os.path.join(folder_path, output_filename)
+    )
     config = add_to_clean_config(config, "idx_folders", folder_path)
 
     print(
@@ -301,6 +303,7 @@ def init_store_as_secondary(dataset, new_dataset, config):
     else:
         dataset = new_dataset
     return dataset, config
+
 
 def update_store_as_secondary(dataset, config):
     store_as_secondary = get_ci(config, "store_as_secondary", default=False)
