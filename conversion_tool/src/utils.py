@@ -349,6 +349,20 @@ def get_attr_value(dataset, key, variable=None):
         )
 
 
+def get_arg_value(config, key):
+    if not isinstance(key, str):
+        raise ValueError("Argument key must be a string.")
+
+    if not key.startswith("ARGS."):
+        return key
+
+    arg = get_ci(config, key)
+    if arg is not None:
+        return arg
+    else:
+        raise ValueError(f"Key '{key}' not found in ARGS. You can pass additional arguments using the --args option in the command line.")
+
+
 def get_dataset_config_value(
     dataset, config, key, default=None, error_message=None, variable=None
 ):
@@ -357,6 +371,7 @@ def get_dataset_config_value(
 
     value = get_ci(config, key, default=default, message=error_message)
     if value is not None and isinstance(value, str):
+        value = get_arg_value(config, value)
         return get_attr_value(dataset, value, variable=variable)
     return value
 
@@ -406,3 +421,36 @@ def add_to_global_config_update(config, key):
     if key not in config["global_config_update"]:
         config["global_config_update"].append(key)
     return config
+
+
+def get_valid_template_args(template_args):
+    valid_args = {}
+    for arg in template_args:
+        if "=" in arg:
+            key, value = arg.split("=", 1)
+
+            # Try to convert value to int or float if possible
+            try:
+                if "." in value:
+                    value = float(value)
+                else:
+                    value = int(value)
+            except ValueError:
+                pass  # Keep as string if conversion fails
+
+            # Test if the value is a list or dictionary, and display warning message
+            # as it is not supported in the current implementation
+            try:
+                parsed_value = json.loads(value)
+                if isinstance(parsed_value, (list, dict)):
+                    print(
+                        f"[KAZARR] Warning: Template argument '{arg}' has a value that is a list or dictionary. This is not supported. Ignoring."
+                    )
+                    continue
+            except (ValueError, TypeError):
+                pass  # Not a JSON string, continue
+
+            valid_args[key] = value
+        else:
+            print(f"[KAZARR] Warning: Invalid template argument '{arg}'. Expected format 'key=value'. Ignoring.")
+    return valid_args

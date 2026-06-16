@@ -46,15 +46,17 @@ def pipeline(config, name, dataset=None):
                 pipeline_config["store_as_secondary"] = False
 
             # Update config updated in sub-pipeline that need to be propagated to the main config
-            dataset, out_pipeline_config = pipeline(pipeline_config, process_name, dataset)
+            out_pipeline_dataset, out_pipeline_config = pipeline(pipeline_config, process_name, dataset)
             if "global_config_update" in out_pipeline_config:
                 for key in out_pipeline_config["global_config_update"]:
                     config[key] = out_pipeline_config[key]
 
             # When the sub-pipeline is finished, now we can store the output dataset as secondary
             if pipeline_store_as_secondary:
-                _, config_with_secondary = init_store_as_secondary(None, dataset, merge({ "store_as_secondary": True, "secondary_tag": dget(pipeline_config, "secondary_tag") }, copy.deepcopy(config)))
+                _, config_with_secondary = init_store_as_secondary(None, out_pipeline_dataset, merge({ "store_as_secondary": True, "secondary_tag": dget(pipeline_config, "secondary_tag") }, copy.deepcopy(config)))
                 config["secondary_datasets"] = config_with_secondary.get("secondary_datasets", [])
+            else:
+                dataset = out_pipeline_dataset
 
             # Special case when delta_time_to_datetime process is used in a sub-pipeline 
             # and changes the name of the time variable: we need to update the time variable 

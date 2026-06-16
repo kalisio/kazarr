@@ -15,7 +15,6 @@ from dask.distributed import Client, performance_report
 
 from src.utils import (
     get_dataset_config_value,
-    get_ci,
     merge,
     rechunk_if_needed,
     merge_grib,
@@ -64,7 +63,7 @@ def load_from_netcdf(dataset, config):
         dataset,
         config,
         "load_path",
-        default=get_ci(config, "path"),
+        default=get_dataset_config_value(dataset, config, "path"),
         error_message="Missing 'load_path' or 'path' config parameters for load_from_netcdf process.",
     )
 
@@ -160,7 +159,7 @@ def load_from_grib(dataset, config):
         dataset,
         config,
         "load_path",
-        default=get_ci(config, "path"),
+        default=get_dataset_config_value(dataset, config, "path"),
         error_message="Missing 'load_path' or 'path' config parameters for load_from_grib process.",
     )
     file_pattern = get_dataset_config_value(
@@ -313,7 +312,7 @@ def load_from_zarr(dataset, config):
         dataset,
         config,
         "load_path",
-        default=get_ci(config, "path"),
+        default=get_dataset_config_value(dataset, config, "path"),
         error_message="Missing 'load_path' or 'path' config parameters for load_from_zarr process.",
     )
     if path.startswith(S3_PREFIX):
@@ -357,7 +356,7 @@ def load_and_merge_from_grib(dataset, config):
         dataset,
         config,
         "load_path",
-        default=get_ci(config, "path"),
+        default=get_dataset_config_value(dataset, config, "path"),
         error_message="Missing 'load_path' or 'path' config parameters for load_and merge_from_grib process.",
     )
 
@@ -440,9 +439,9 @@ def combine_at_time(dataset, config):
     # but if they are present in the secondary dataset they should be checked against the primary dataset
     # to ensure proper alignment during concatenation.
     # TODO: Those variables must be static and not ATTRS dependent (e.g. ATTRS.level_type)
-    lon_var = get_ci(config, LON_VARIABLE_KEY)
-    lat_var = get_ci(config, LAT_VARIABLE_KEY)
-    level_var = get_ci(config, LEVEL_VARIABLE_KEY)
+    lon_var = get_dataset_config_value(dataset, config, LON_VARIABLE_KEY)
+    lat_var = get_dataset_config_value(dataset, config, LAT_VARIABLE_KEY)
+    level_var = get_dataset_config_value(dataset, config, LEVEL_VARIABLE_KEY)
 
     if (
         "secondary_datasets" not in config
@@ -942,15 +941,17 @@ def reproject_coordinates(dataset, config):
         error_message="Missing 'to_crs' config parameter for reproject_coordinates process.",
     )
 
-    lon_var = get_ci(
+    lon_var = get_dataset_config_value(
+        dataset,
         config,
         LON_VARIABLE_KEY,
-        message=f"Missing '{LON_VARIABLE_KEY}' config parameter for reproject_coordinates process.",
+        error_message=f"Missing '{LON_VARIABLE_KEY}' config parameter for reproject_coordinates process.",
     )
-    lat_var = get_ci(
+    lat_var = get_dataset_config_value(
+        dataset,
         config,
         LAT_VARIABLE_KEY,
-        message=f"Missing '{LAT_VARIABLE_KEY}' config parameter for reproject_coordinates process.",
+        error_message=f"Missing '{LAT_VARIABLE_KEY}' config parameter for reproject_coordinates process.",
     )
     if lon_var not in dataset or lat_var not in dataset:
         raise ValueError(
@@ -981,8 +982,8 @@ def reproject_coordinates(dataset, config):
 
 
 def simplify_grid(dataset, config):
-    lon_var = get_ci(config, LON_VARIABLE_KEY)
-    lat_var = get_ci(config, LAT_VARIABLE_KEY)
+    lon_var = get_dataset_config_value(dataset, config, LON_VARIABLE_KEY)
+    lat_var = get_dataset_config_value(dataset, config, LAT_VARIABLE_KEY)
     if lon_var is None or lat_var is None:
         raise ValueError(
             f"Missing '{LON_VARIABLE_KEY}' or '{LAT_VARIABLE_KEY}' config parameter for simplify_grid process."

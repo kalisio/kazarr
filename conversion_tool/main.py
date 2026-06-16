@@ -1,8 +1,9 @@
+import os
 import json
 import argparse
 
 import src.pipelines as pipelines
-from src.utils import load_json, merge
+from src.utils import load_json, merge, get_valid_template_args
 
 TEMPLATE_DEFAULT_PATH = "templates.json"
 
@@ -12,6 +13,7 @@ def new_dataset(
     template=None,
     config={},
     config_file=None,
+    template_args=[],
     description="",
     output_path=None,
     pipeline_name="preprocess",
@@ -35,6 +37,7 @@ def new_dataset(
         {
             "description": description,
             "path": input_path,
+            "ARGS": get_valid_template_args(template_args),
         },
     )
     if output_path is not None:
@@ -92,6 +95,13 @@ def main():
         help="Additional configuration as JSON string",
     )
     parser_create_dataset.add_argument(
+        "-a",
+        "--args",
+        action="append",
+        default=[],
+        help="Additional arguments that can be accessed in templates in the form key=value (can be used multiple times). In the template, these can be accessed as ARGS.key",
+    )
+    parser_create_dataset.add_argument(
         "-f",
         "--config-file",
         type=str,
@@ -147,6 +157,7 @@ def main():
             template=args.template,
             config=args.config,
             config_file=args.config_file,
+            template_args=args.args,
             description=args.description,
             output_path=args.output,
             pipeline_name=args.pipeline,
@@ -162,4 +173,17 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        error_message_prefix = "[KAZARR] ERROR: "
+        error_message_length = len(str(e)) + len(error_message_prefix)
+        try:
+            terminal_width = os.get_terminal_size().columns
+        except Exception:
+            terminal_width = 16
+        separator_length = min(error_message_length, terminal_width)
+        print("=" * separator_length)
+        print(f"{error_message_prefix}{e}")
+        print("=" * separator_length)
+        raise e
