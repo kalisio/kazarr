@@ -3,6 +3,7 @@ import itertools
 import re
 import shutil
 import uuid
+import tempfile
 from pathlib import Path
 
 import xarray as xr
@@ -27,6 +28,7 @@ from src.utils import (
     add_to_global_config_update,
     add_to_clean_config,
     init_store_as_secondary,
+    resolve_args,
 )
 
 
@@ -1072,7 +1074,7 @@ def save(dataset, config):
             "path",
             error_message="Missing 'save_path' or 'path' config parameter for save process.",
         )
-        path = path.replace(".nc", "").replace(".grib2", "") + ".zarr"
+        path = path.replace(".nc", "").replace(".grib2", "").replace(".zarr", "") + ".zarr"
     config["save_path"] = path  # Update config with actual save path
     version = get_dataset_config_value(dataset, config, "version", default=3)
     float64_to_float32 = get_dataset_config_value(
@@ -1086,6 +1088,7 @@ def save(dataset, config):
 
     keep_keys = ["variables", "dimensions", "mesh_data_on_cells", "mesh_type", "description"]
     kazarr_metadata = {k: v for k, v in config.items() if k in keep_keys}
+    kazarr_metadata = resolve_args(kazarr_metadata, config)
     dataset.attrs["kazarr"] = kazarr_metadata
 
     final_path = path
@@ -1104,9 +1107,13 @@ def save(dataset, config):
         if bucket is None:
             raise ValueError(f"{BUCKET_NAME_ENV_VAR} environment variable not set.")
         final_path = final_path.replace(S3_PREFIX, S3_PREFIX + bucket + "/")
-        write_path = write_path.replace(S3_PREFIX, S3_PREFIX + bucket + "/")
+        if is_update:
+            write_path = os.path.join(tempfile.gettempdir(), "kazarr" + tmp_suffix + ".zarr")
+            write_path = write_path.replace("\\", "/")
+        else:
+            write_path = write_path.replace(S3_PREFIX, S3_PREFIX + bucket + "/")
 
-    print("[KAZARR] Saving dataset to Zarr format...")
+    print(f"[KAZARR] Saving dataset to Zarr format to {write_path}...")
 
     dataset = rechunk_if_needed(dataset)
 
@@ -1132,11 +1139,13 @@ def save(dataset, config):
 
     if is_update:
         print(f"[KAZARR] Moving temporary dataset from '{write_path}' to '{final_path}'...")
-        if write_path.startswith(S3_PREFIX):
-            fs = get_s3_filesystem(config, write_path)
+        if final_path.startswith(S3_PREFIX):
+            fs = get_s3_filesystem(config, final_path)
             if fs.exists(final_path):
                 fs.rm(final_path, recursive=True)
-            fs.mv(write_path, final_path, recursive=True)
+            fs.put(write_path, final_path, recursive=True)
+            if os.path.exists(write_path):
+                shutil.rmtree(write_path)
         else:
             if os.path.exists(final_path):
                 shutil.rmtree(final_path)

@@ -364,6 +364,16 @@ def get_arg_value(config, key):
         raise ValueError(f"Key '{key}' not found in ARGS. You can pass additional arguments using the --args option in the command line.")
 
 
+def resolve_args(data, config):
+    if isinstance(data, dict):
+        return {k: resolve_args(v, config) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [resolve_args(v, config) for v in data]
+    elif isinstance(data, str) and data.startswith("ARGS."):
+        return get_arg_value(config, data)
+    return data
+
+
 def get_dataset_config_value(
     dataset, config, key, default=None, error_message=None, variable=None
 ):
