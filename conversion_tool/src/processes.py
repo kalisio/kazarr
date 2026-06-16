@@ -2,6 +2,7 @@ import os
 import itertools
 import re
 import shutil
+import uuid
 from pathlib import Path
 
 import xarray as xr
@@ -23,6 +24,7 @@ from src.utils import (
     parse_datetime,
     get_redundant_dimensions,
     get_spatial_variables,
+    add_to_global_config_update,
     add_to_clean_config,
     init_store_as_secondary,
 )
@@ -315,6 +317,13 @@ def load_from_zarr(dataset, config):
         default=get_dataset_config_value(dataset, config, "path"),
         error_message="Missing 'load_path' or 'path' config parameters for load_from_zarr process.",
     )
+
+    if "opened_datasets" in config:
+        config["opened_datasets"].append(path)
+    else:
+        config["opened_datasets"] = [path]
+    add_to_global_config_update(config, "opened_datasets")
+
     if path.startswith(S3_PREFIX):
         bucket = os.getenv(BUCKET_NAME_ENV_VAR)
         if bucket is None:
@@ -1080,33 +1089,22 @@ def save(dataset, config):
     dataset.attrs["kazarr"] = kazarr_metadata
 
     final_path = path
-    if path.startswith(S3_PREFIX):
+    is_update = False
+    write_path = final_path
+    if "opened_datasets" in config and final_path in config["opened_datasets"]:
+        print(
+            f"[KAZARR] Dataset already opened from path '{final_path}'. Saving to a temporary path to avoid overwriting the original dataset."
+        )
+        is_update = True
+        tmp_suffix = f"_tmp_{uuid.uuid4().hex[:8]}"
+        write_path = final_path.replace(".zarr", tmp_suffix + ".zarr")
+
+    if final_path.startswith(S3_PREFIX):
         bucket = os.getenv(BUCKET_NAME_ENV_VAR)
         if bucket is None:
             raise ValueError(f"{BUCKET_NAME_ENV_VAR} environment variable not set.")
-        final_path = path.replace(S3_PREFIX, S3_PREFIX + bucket + "/")
-
-    # if os.getenv("AWS_ENDPOINT_URL", "").endswith("cloud.ovh.net"):
-    #   # Special case for OVH S3 to disable payload signing
-    #   # (error: botocore.exceptions.ClientError: An error occurred (InvalidArgument) when calling the PutObject operation: x-amz-content-sha256 must be UNSIGNED-PAYLOAD, or a valid sha256 value.)
-    #   # Either define the environment variables (only the first one seems necessary)
-    #   os.environ["AWS_REQUEST_CHECKSUM_CALCULATION"] = "when_required"
-    #   os.environ["AWS_RESPONSE_CHECKSUM_VALIDATION"] = "when_required"
-    #   # Either create a custom s3fs S3FileSystem with config kwargs
-    #   fs = s3fs.S3FileSystem(
-    #     config_kwargs={
-    #       'signature_version': 's3v4',
-    #       's3': {
-    #         'payload_signing_enabled': False,
-    #         'addressing_style': 'path',
-    #       },
-    #       'request_checksum_calculation': 'when_required',
-    #       'response_checksum_validation': 'when_required',
-    #     }
-    #   )
-    #   store = fs.get_mapper(final_path)
-    #   dataset.to_zarr(store=store, mode="w", consolidated=(version == 2), zarr_format=version)
-    # else:
+        final_path = final_path.replace(S3_PREFIX, S3_PREFIX + bucket + "/")
+        write_path = write_path.replace(S3_PREFIX, S3_PREFIX + bucket + "/")
 
     print("[KAZARR] Saving dataset to Zarr format...")
 
@@ -1117,20 +1115,33 @@ def save(dataset, config):
         "consolidated": version == 2,
         "zarr_format": version,
     }
-    storage_options = get_s3_storage_options(config, final_path)
+    storage_options = get_s3_storage_options(config, write_path)
     if storage_options:
         zarr_kwargs["storage_options"] = storage_options
     if config.get("dask_dashboard_initialised", False):
         with performance_report(filename="dask-performance-report.html"):
-            dataset.to_zarr(final_path, **zarr_kwargs)
-            path = Path(__file__).parent.resolve()
+            dataset.to_zarr(write_path, **zarr_kwargs)
+            path_report = Path(__file__).parent.resolve()
             print("===============================================")
             print(
-                f"[KAZARR] Dask performance report available at: file://{path}/dask-performance-report.html"
+                f"[KAZARR] Dask performance report available at: file://{path_report}/dask-performance-report.html"
             )
             print("===============================================")
     else:
-        dataset.to_zarr(final_path, **zarr_kwargs)
+        dataset.to_zarr(write_path, **zarr_kwargs)
+
+    if is_update:
+        print(f"[KAZARR] Moving temporary dataset from '{write_path}' to '{final_path}'...")
+        if write_path.startswith(S3_PREFIX):
+            fs = get_s3_filesystem(config, write_path)
+            if fs.exists(final_path):
+                fs.rm(final_path, recursive=True)
+            fs.mv(write_path, final_path, recursive=True)
+        else:
+            if os.path.exists(final_path):
+                shutil.rmtree(final_path)
+            shutil.move(write_path, final_path)
+
     return dataset, config
 
 
