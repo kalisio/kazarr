@@ -22,6 +22,7 @@ RUN micromamba install -y -n base -c conda-forge \
   scipy \
   uvloop \
   loguru \
+  diskcache \
   && micromamba clean --all --yes
 
 EXPOSE 8000

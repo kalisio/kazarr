@@ -1,11 +1,10 @@
 import os
-import time
 import json
 import copy
 from functools import lru_cache
-from pathlib import Path
 
 import s3fs
+from diskcache import Cache
 import xarray as xr
 from botocore.exceptions import NoCredentialsError
 from zarr.abc.store import Store
@@ -18,6 +17,7 @@ import src.exceptions as exceptions
 ZARR_EXTENSION = ".zarr"
 S3_PREFIX = "s3://"
 BUCKET_NAME_ENV_VAR = "BUCKET_NAME"
+CACHE_LIMIT_MARGIN = 0.9  # 90% of the specified cache size limit
 
 
 def get_datasets_path():
@@ -70,11 +70,11 @@ def load(path):
                 s3=s3fs.S3FileSystem(anon=False),
             )
         else:
+            dataset_id = path.replace(S3_PREFIX, "")
             store = S3CachedStore(
-                s3_root=os.path.join(
-                    bucket, get_datasets_path(), path.replace(S3_PREFIX, "")
-                ),
-                cache_dir=os.path.join(cache_path, path.replace(S3_PREFIX, "")),
+                s3_root=os.path.join(bucket, get_datasets_path(), dataset_id),
+                cache_dir=cache_path,
+                dataset_id=dataset_id,
                 expiry_seconds=60 * 60 * 24 * 7 * 4,
             )
 
@@ -159,12 +159,6 @@ def load_datasets(search_path=None):
 # Load a dataset and its configuration from its ID
 def load_dataset(dataset_path):
     dataset = load(dataset_path + ZARR_EXTENSION)
-    cache_size = os.getenv("CACHE_SIZE", "512MB")
-    cache_path = os.getenv("CACHE_DIR")
-    use_cache = cache_path is not None and get_cache_size_bytes(cache_size) is not None
-    if use_cache:
-        # Enforce cache size limit after loading
-        enforce_cache_limit(cache_path, max_size=cache_size)
     config = copy.deepcopy(dataset.attrs.get("kazarr", {}))
     return dataset, config
 
@@ -188,55 +182,31 @@ def get_cache_size_bytes(cache_size_str):
     return size_bytes
 
 
-# Enforce cache size limit by deleting old files
-def enforce_cache_limit(cache_dir, max_size="512MB"):
-    cache_path = Path(cache_dir)
-    if not cache_path.exists():
-        return
-    max_size_bytes = get_cache_size_bytes(max_size)
-    if max_size_bytes is None:
-        return
-
-    # 1. Compute total cache size
-    total_size = sum(f.stat().st_size for f in cache_path.glob("**/*") if f.is_file())
-    if total_size < max_size_bytes:
-        return
-
-    log.debug(
-        "[Kazarr - Cache] Cache exceeding max size of {max_size_mb:.2f} MB. Starting cleanup...",
-        max_size_mb=max_size_bytes / 1e6,
-    )
-
-    # 2. Retrieve all files with their modification date
-    files = []
-    for f in cache_path.glob("**/*"):
-        if f.is_file():
-            files.append((f, f.stat().st_mtime, f.stat().st_size))
-
-    # 3. Sort by date (oldest to newest)
-    files.sort(key=lambda x: x[1])
-
-    # 4. Delete old files until under limit
-    for f_path, _, f_size in files:
-        try:
-            os.remove(f_path)
-            total_size -= f_size
-            if total_size < max_size_bytes:
-                break
-        except OSError:
-            pass  # File may be in use or already deleted
-
-
 class S3CachedStore(Store):
     def __init__(
-        self, s3_root: str, cache_dir: str, expiry_seconds: int = 60 * 60 * 24 * 7 * 4
+        self,
+        s3_root: str,
+        cache_dir: str,
+        dataset_id: str = "",
+        expiry_seconds: int = 60 * 60 * 24 * 7 * 4,
     ):
         super().__init__(read_only=True)
         self.s3_root = s3_root.rstrip("/")
-        self.cache_dir = cache_dir
-        self.expiry_seconds = expiry_seconds
         self.s3 = s3fs.S3FileSystem(anon=False)
-        Path(cache_dir).mkdir(parents=True, exist_ok=True)
+        self.expiry_seconds = expiry_seconds
+        self.dataset_id = dataset_id.strip("/")
+
+        cache_size_str = os.getenv("CACHE_SIZE", "512MB")
+        max_size_bytes = get_cache_size_bytes(cache_size_str) or (512 * 1024 * 1024)
+
+        # To avoid overflow, we set the cache size limit to 90% of the specified size
+        max_size_bytes = int(max_size_bytes * CACHE_LIMIT_MARGIN)
+
+        self.cache = Cache(
+            directory=cache_dir,
+            size_limit=max_size_bytes,
+            eviction_policy="least-recently-used",
+        )
 
     @property
     def supports_writes(self) -> bool:
@@ -250,34 +220,33 @@ class S3CachedStore(Store):
     def supports_listing(self) -> bool:
         return True
 
-    def _local_path(self, key: str) -> str:
-        return os.path.join(self.cache_dir, key)
-
-    def _is_expired(self, local_path: str) -> bool:
-        try:
-            return (time.time() - os.path.getmtime(local_path)) > self.expiry_seconds
-        except FileNotFoundError:
-            return True
+    def _cache_key(self, key: str) -> str:
+        return f"{self.dataset_id}/{key}" if self.dataset_id else key
 
     def _fetch(self, key: str) -> bytes:
-        local_path = self._local_path(key)
-        if not os.path.exists(local_path) or self._is_expired(local_path):
+        c_key = self._cache_key(key)
+        data = self.cache.get(c_key)
+
+        if data is None:
+            log.debug("[Kazarr - Cache] MISS for key: {key}", key=c_key)
             s3_path = f"{self.s3_root}/{key}"
             try:
                 data = self.s3.cat(s3_path)
             except FileNotFoundError:
                 raise KeyError(key)
-            os.makedirs(os.path.dirname(local_path), exist_ok=True)
-            with open(local_path, "wb") as f:
-                f.write(data)
-        with open(local_path, "rb") as f:
-            return f.read()
+
+            self.cache.set(c_key, data, expire=self.expiry_seconds)
+        else:
+            log.debug("[Kazarr - Cache] HIT for key: {key}", key=c_key)
+
+        return data
 
     def __eq__(self, other: object) -> bool:
         return (
             isinstance(other, S3CachedStore)
             and self.s3_root == other.s3_root
-            and self.cache_dir == other.cache_dir
+            and self.cache.directory == other.cache.directory
+            and self.dataset_id == getattr(other, "dataset_id", "")
         )
 
     async def get(
@@ -306,8 +275,7 @@ class S3CachedStore(Store):
         raise NotImplementedError("Read-only store")
 
     async def exists(self, key: str) -> bool:
-        local_path = self._local_path(key)
-        if os.path.exists(local_path) and not self._is_expired(local_path):
+        if self._cache_key(key) in self.cache:
             return True
         return self.s3.exists(f"{self.s3_root}/{key}")
 

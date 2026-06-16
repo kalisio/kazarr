@@ -18,6 +18,7 @@ dependencies:
   - scipy
   - uvloop
   - loguru
+  - diskcache
   - python-dotenv
   - cfgrib
   - h5py
