@@ -3,7 +3,7 @@ import json
 import argparse
 
 import src.pipelines as pipelines
-from src.utils import load_json, merge, get_valid_template_args
+from src.utils import load_json, merge, get_valid_template_args, load_custom_eccodes
 
 TEMPLATE_DEFAULT_PATH = "templates.json"
 
@@ -20,8 +20,12 @@ def new_dataset(
     templates_path=TEMPLATE_DEFAULT_PATH,
     data_mapping="vertices",
     mesh_type="auto",
+    custom_eccodes_path=None,
     dask_dashboard=False
 ):
+    # Before doing anything, load custom codes (ecCodes) if any
+    load_custom_eccodes(custom_eccodes_path)
+
     pipeline_config = {}
     if template is not None:
         templates = load_json(templates_path, config)
@@ -144,6 +148,11 @@ def main():
         help="Type of mesh to generate (default: auto, which infers from data between regular and rectilinear but not able to handle radial meshes)",
     )
     parser_create_dataset.add_argument(
+        "--custom-eccodes-path",
+        type=str,
+        help="Path to a directory containing custom ecCodes (local) to be used for processing",
+    )
+    parser_create_dataset.add_argument(
         "--dask-dashboard",
         action="store_true",
         help="Whether to start a Dask dashboard for monitoring the processing (default: False)",
@@ -164,6 +173,7 @@ def main():
             templates_path=args.templates_path,
             data_mapping=args.data_mapping,
             mesh_type=args.mesh_type,
+            custom_eccodes_path=args.custom_eccodes_path,
             dask_dashboard=args.dask_dashboard
         )
     elif args.command == "list-templates":

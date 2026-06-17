@@ -9,6 +9,7 @@ import s3fs
 import numpy as np
 from botocore.exceptions import NoCredentialsError
 from dask import array as da
+import eccodes
 
 
 def get_s3_storage_options(config, path=None):
@@ -465,3 +466,38 @@ def get_valid_template_args(template_args):
         else:
             print(f"[KAZARR] Warning: Invalid template argument '{arg}'. Expected format 'key=value'. Ignoring.")
     return valid_args
+
+
+def load_custom_eccodes(custom_codes_path=None):
+    codes_env_var = "ECCODES_DEFINITION_PATH"
+    codes_env_var_value = os.getenv(codes_env_var)
+    if custom_codes_path is None:
+        custom_codes_path = os.getenv("CUSTOM_ECCODES_PATH")
+
+    if custom_codes_path and not os.path.isdir(custom_codes_path):
+        # Explicitly provided path does not exist or is not a directory, log a warning and ignore it
+        print(f"[KAZARR] Warning: Custom ecCodes path '{custom_codes_path}' does not exist or is not a directory. Ignoring.")
+        return
+    elif not custom_codes_path:
+        # Fallback to passive default custom codes path if env var not provided
+        custom_codes_path = "./custom_eccodes/"
+
+    if os.path.isdir(custom_codes_path):
+        abs_custom_path = os.path.abspath(custom_codes_path)
+
+        def add_path_to_env_var(env_var_value, new_path):
+            if env_var_value is None:
+                return new_path
+            elif new_path not in env_var_value.split(":"):
+                return f"{new_path}:{env_var_value}"
+            return env_var_value
+
+        if codes_env_var_value is None:
+            default_path = eccodes.codes_definition_path()
+            codes_env_var_value = add_path_to_env_var(default_path, abs_custom_path)
+        elif abs_custom_path not in codes_env_var_value.split(":"):
+            codes_env_var_value = add_path_to_env_var(codes_env_var_value, abs_custom_path)
+    if codes_env_var_value:
+        os.environ[codes_env_var] = codes_env_var_value
+        if hasattr(eccodes, "codes_set_definitions_path"):
+            eccodes.codes_set_definitions_path(codes_env_var_value)
