@@ -25,11 +25,49 @@ def set_xindex(dataset, var_name):
 # Check if a variable is monotonic
 def is_monotonic_var(dataset, var_name):
     try:
-        var_data = dataset[var_name].values
-        is_monotonic = np.all(np.diff(var_data) >= 0) or np.all(np.diff(var_data) <= 0)
+        # When indexes are created, monotonicity is already checked
+        # and stored in the index object, so we can use it directly.
+        if var_name in dataset.indexes:
+            idx = dataset.indexes[var_name]
+
+            if idx.is_monotonic_increasing:
+                return True, "increasing"
+            elif idx.is_monotonic_decreasing:
+                return True, "decreasing"
+            else:
+                return False, None
+
+        data = dataset[var_name]
+        if len(data.dims) != 1:
+            return False, None
+
+        # Do not use .values to avoid loading the entire data into memory for large datasets
+        diffs = np.diff(data.data)
+
+        is_increasing = bool(np.all(diffs >= 0))
+        is_decreasing = bool(np.all(diffs <= 0))
+
+        if is_increasing:
+            return True, "increasing"
+        elif is_decreasing:
+            return True, "decreasing"
+        else:
+            return False, None
+
+    except KeyError:
+        return False, None
     except Exception:
-        is_monotonic = False
-    return is_monotonic
+        return False, None
+
+
+def is_monotonic_var_increasing(dataset, var_name):
+    is_monotonic, direction = is_monotonic_var(dataset, var_name)
+    return is_monotonic and direction == "increasing"
+
+
+def is_monotonic_var_decreasing(dataset, var_name):
+    is_monotonic, direction = is_monotonic_var(dataset, var_name)
+    return is_monotonic and direction == "decreasing"
 
 
 # Get dimensions and coordinates that must be provided for a selection, and not already defined
@@ -188,14 +226,15 @@ def sel(
     fixed_coords,
     fixed_dims,
     interp_vars=None,
-    interp_method="linear",
+    interp_method="nearest",
     interp_methods=None,  # Use when different interpolation methods are needed for different variables
     interp_config=None,
 ):
-    if interp_vars is None:
-        interp_vars = []
-    if interp_config is None:
-        interp_config = {}
+    interp_vars = interp_vars or []
+    interp_config = interp_config or {}
+    interp_methods = interp_methods or {}
+
+    fixed_coords = fixed_coords.copy()
 
     for var in interp_vars:
         if var in dataset.coords and var not in dataset.dims:
@@ -207,29 +246,38 @@ def sel(
     for coord in fixed_coords:
         try:
             dataset = set_xindex(dataset, coord)
-        except exceptions.BadConfigurationVariable:
-            raise exceptions.VariableCannotBeUsedForSelection(coord)
+        except exceptions.BadConfigurationVariable as e:
+            raise exceptions.VariableCannotBeUsedForSelection(coord) from e
 
     # Convert coords values to target dtype
     for var, val in fixed_coords.items():
-        # Avoid to convert slice
-        if not isinstance(val, slice):
+        # Avoid to convert slice or ndarray with the same dtype as the dataset variable
+        if not isinstance(val, slice) and not (
+            isinstance(val, np.ndarray) and val.dtype == dataset[var].dtype
+        ):
             fixed_coords[var] = np.array(val, dtype=dataset[var].dtype)
 
     # Only monotonic variables can be used with sel(method='nearest')
-    monotonic_fixed_vars = {
-        var: val
-        for var, val in fixed_coords.items()
-        if is_monotonic_var(dataset, var)
-        and var not in interp_vars
-        and not isinstance(val, slice)
-    }
-    non_monotonic_fixed_vars = {
-        var: val
-        for var, val in fixed_coords.items()
-        if (not is_monotonic_var(dataset, var) or isinstance(val, slice))
-        and var not in interp_vars
-    }
+    # so we need to separate variables
+    monotonic_fixed_vars = {}
+    non_monotonic_fixed_vars = {}
+
+    for var, val in fixed_coords.items():
+        is_monotonic, _ = is_monotonic_var(dataset, var)
+        is_slice = isinstance(val, slice)
+
+        if var in interp_vars:
+            method = interp_methods.get(var, interp_method)
+            if method == "nearest":
+                if is_monotonic and not is_slice:
+                    monotonic_fixed_vars[var] = val
+                else:
+                    non_monotonic_fixed_vars[var] = val
+        else:
+            if is_monotonic and not is_slice:
+                monotonic_fixed_vars[var] = val
+            else:
+                non_monotonic_fixed_vars[var] = val
 
     try:
         data = (
@@ -237,64 +285,68 @@ def sel(
             .sel(non_monotonic_fixed_vars)
             .isel(fixed_dims)[variable]
         )
-    except ValueError:
+    except ValueError as e:
         raise exceptions.BadSelection(
-            "Data selection failed. Please check your query parameters and dataset configuration. This can happen if you have specified a coordinate and its corresponding dimension at the same time."
-        )
-    except IndexError:
-        raise exceptions.BadSelection(
-            "Data selection failed due to an index error. Please check your query parameters and dataset configuration."
-        )
-    except Exception:
-        raise exceptions.GenericInternalError(
-            "Data selection failed. Please check your query parameters and dataset configuration."
-        )
+            f"Data selection failed (ValueError). Check query params: {e}"
+        ) from e
+    except IndexError as e:
+        raise exceptions.BadSelection(f"Data selection failed (IndexError): {e}") from e
+    except Exception as e:
+        raise exceptions.GenericInternalError(f"Data selection failed: {e}") from e
+
     # Interpolate if needed
-    if len(interp_vars) > 0:
+    if interp_vars:
         interpolated_vars = {
             var: fixed_coords[var] for var in interp_vars if var in fixed_coords
         }
-        if len(interpolated_vars) > 0:
-            try:
-                if interp_methods is not None:
-                    method_groups = {}
-                    for var, value in interpolated_vars.items():
-                        method = interp_methods.get(var, interp_method)
-                        method_groups.setdefault(method, {})[var] = value
-                else:
-                    method_groups = {interp_method: interpolated_vars}
 
-                for method, vars_to_interp in method_groups.items():
-                    if method not in [
-                        "linear",
-                        "nearest",
-                        "zero",
-                        "slinear",
-                        "quadratic",
-                        "cubic",
-                        "quintic",
-                        "polynomial",
-                        "pchip",
-                        "barycentric",
-                        "krogh",
-                        "akima",
-                        "makima",
-                    ]:
-                        log.warning(
-                            "[Kazarr] Unsupported interpolation method: {interp_method}. Falling back to linear.",
-                            interp_method=method,
-                        )
-                        method = "linear"
+        if interpolated_vars:
+            method_groups = {}
+            for var, value in interpolated_vars.items():
+                method = interp_methods.get(var, interp_method)
+                method_groups.setdefault(method, {})[var] = value
+
+            valid_methods = {
+                "linear",
+                "zero",
+                "slinear",
+                "quadratic",
+                "cubic",
+                "quintic",
+                "polynomial",
+                "pchip",
+                "barycentric",
+                "krogh",
+                "akima",
+                "makima",
+            }
+
+            for method, vars_to_interp in method_groups.items():
+                if method == "nearest":
+                    continue
+
+                if method not in valid_methods:
+                    log.warning(
+                        f"[Kazarr] Unsupported interpolation method: {method}. Falling back to linear."
+                    )
+                    method = "linear"
+
+                all_increasing = all(
+                    is_monotonic_var_increasing(data, var)
+                    for var in vars_to_interp
+                    if var in data.coords and data[var].size > 1
+                )
+
+                try:
                     data = data.interp(
                         vars_to_interp,
                         method=method,
-                        assume_sorted=True,
+                        assume_sorted=all_increasing,
                         **interp_config,
                     )
-            except ValueError:
-                raise exceptions.BadSelection(
-                    "Data interpolation failed. Please check your query parameters and dataset configuration."
-                )
+                except ValueError as e:
+                    raise exceptions.BadSelection("Data interpolation failed.") from e
+
     return data
 
 
