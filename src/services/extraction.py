@@ -86,7 +86,7 @@ def extract(
             bounded_time_range = get_bounded_time(dataset, time_var, time_range)
             time_range_indexer = bounded_time_range.get_indexer()
             if time_range_indexer is not None:
-                fixed_coords[time_var] = bounded_time_range.get_indexer()
+                fixed_coords[time_var] = time_range_indexer
                 if config.interpolation.vars.time and time_var not in interp_vars:
                     interp_vars.append(time_var)
                 # Remove "time" from request parameters to avoid confusion in later steps (case where time is a variable in the dataset)
@@ -626,9 +626,13 @@ def probe(
 
     if time_range.has_time() and time_var is not None:
         bounded_time_range = get_bounded_time(dataset, time_var, time_range)
-        fixed_coords[time_var] = bounded_time_range.get_indexer()
-        if config.interpolation.vars.time:
-            interp_vars.append(time_var)
+        time_range_indexer = bounded_time_range.get_indexer()
+        if time_range_indexer is not None:
+            fixed_coords[time_var] = time_range_indexer
+            if config.interpolation.vars.time:
+                interp_vars.append(time_var)
+            # Remove "time" from request parameters to avoid confusion in later steps (case where time is a variable in the dataset)
+            request.query_params._dict.pop("time", None)
 
     interp_spatial_method = config.interpolation.spatial.method
     interp_spatial_params = config.interpolation.spatial.params or {}
