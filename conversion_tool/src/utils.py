@@ -198,13 +198,13 @@ def rechunk_if_needed(dataset, target_size_mb=100, tolerance=0.3):
 
 def add_to_clean_config(config, clean_type, paths):
     if "clean" not in config:
-        config["clean"] = {"used_paths": [], "generated_paths": [], "idx_folders": []}
+        config["clean"] = {"used_paths": set(), "generated_paths": set(), "idx_folders": set()}
         add_to_global_config_update(config, "clean")
 
     if clean_type not in ["used_paths", "generated_paths", "idx_folders"]:
         raise ValueError(f"Invalid clean type: {clean_type}")
 
-    config["clean"][clean_type].extend(paths if isinstance(paths, list) else [paths])
+    config["clean"][clean_type].update(paths if isinstance(paths, list) else [paths])
     return config
 
 

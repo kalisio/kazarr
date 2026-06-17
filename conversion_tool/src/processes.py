@@ -247,9 +247,16 @@ def load_from_grib(dataset, config):
                 datasets = cfgrib.open_datasets(path, backend_kwargs=backend_kwargs)
                 full_variables = set()
                 final_variables = set()
+                duplicate_vars = set()
                 for ds in datasets:
+                    for var in ds.data_vars:
+                        if var in full_variables:
+                            duplicate_vars.add(var)
                     full_variables.update(ds.data_vars)
                     full_variables.update(ds.coords)
+
+                duplicate_vars_indexes = {var: 0 for var in duplicate_vars}
+
                 if len(datasets) == 1:
                     new_dataset = datasets[0].chunk("auto")
                 else:
@@ -260,6 +267,16 @@ def load_from_grib(dataset, config):
                         # Use chunk("auto") on each dataset to enable Dask parallelism during merge, which can help reduce memory usage and speed up the process
                         for i, ds in enumerate(datasets):
                             datasets[i] = ds.chunk("auto")
+                            rename_dict = {}
+                            for var in duplicate_vars_indexes:
+                                if var in ds.data_vars:
+                                    duplicate_vars_indexes[var] += 1
+                                    if duplicate_vars_indexes[var] > 1:
+                                        new_var_name = f"{var}_{duplicate_vars_indexes[var]}"
+                                        rename_dict[var] = new_var_name
+                                        print(f"         ! Renaming {var} to {new_var_name} in dataset {i} to avoid conflicts.")
+                            if rename_dict:
+                                datasets[i] = datasets[i].rename(rename_dict)
                         new_dataset = xr.merge(datasets, compat="minimal", join="outer")
                         final_variables.update(new_dataset.data_vars)
                         final_variables.update(new_dataset.coords)
@@ -305,6 +322,8 @@ def load_from_grib(dataset, config):
                 preprocess=progress_callback,
                 **backend_kwargs,
             )
+
+            add_to_clean_config(config, "idx_folders", files)
     if new_dataset is None:
         raise ValueError(f"Unable to load GRIB dataset from path: {path}")
     return init_store_as_secondary(dataset, new_dataset, config)
