@@ -253,6 +253,7 @@ conda install -y -n kazarr_env -c conda-forge \
   vtk-base=9.5.2 \
   scipy \
   uvloop \
+  diskcache \
   loguru
 ```
 
