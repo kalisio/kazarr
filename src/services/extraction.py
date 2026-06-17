@@ -16,6 +16,7 @@ from src.utils.data import (
     get_bounded_time,
     get_times_in_range,
 )
+from src.utils.requests import get_from_query
 from src.utils.file import load_dataset
 from src.utils.logging import StepLoggerAndAborter
 from src.utils.spatial import get_cached_ckdtree
@@ -45,7 +46,7 @@ def extract(
 
     step_logger = StepLoggerAndAborter(
         "extract",
-        parameters=(dataset_id, variable, time_range, format, config),
+        parameters=(dataset_id, variable, time_range, level, format, config),
         cancel_event=cancel_event,
     )
 
@@ -78,6 +79,7 @@ def extract(
         missing_vars.append(f"lat ({lat_var})")
 
     time_var = dget(dataset_config, "variables.time")
+    time_range = get_from_query(time_var, time_range, request)
     time_range = TimeRange.from_string(time_range)
     if time_range.has_time() and time_var is not None:
         if time_var not in dataset:
@@ -109,6 +111,8 @@ def extract(
     # For irregular grids the level variable is 3D and cannot be set as a
     # fixed coordinate — the custom vertical interpolation step handles it later.
     spatial_interp_vars = None
+    query_level = get_from_query(level_var, level, request)
+    level = float(query_level) if query_level is not None else None
     if level is not None and level_var is not None and has_regular_level:
         fixed_coords[level_var] = level
         config.is_3d = False
@@ -581,7 +585,6 @@ def probe(
     step_logger.step_start("Load dataset and config")
     variables = variables if isinstance(variables, list) else [variables]
     dataset, dataset_config = load_dataset(dataset_id)
-    with_level = level is not None
     fixed_coords, fixed_dims = dgets(
         dataset_config, [FIXED_VARIABLES_KEY, FIXED_DIMENSIONS_KEY], {}
     )
@@ -604,6 +607,10 @@ def probe(
                 break
         if level_var is None:
             raise exceptions.DifferentTypesOfLevel()
+        
+    query_level = get_from_query(level_var, level, request)
+    level = float(query_level) if query_level is not None else None
+    with_level = level is not None
 
     not_found_vars = []
     for var in variables:
