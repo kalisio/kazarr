@@ -1101,7 +1101,7 @@ def save(dataset, config):
     )
 
     if float64_to_float32:
-        for var in dataset.data_vars:
+        for var in dataset.variables:
             if dataset[var].dtype == np.float64:
                 dataset[var] = dataset[var].astype(np.float32)
 
