@@ -60,13 +60,18 @@ conversion_tool new-dataset [OPTIONS] INPUT_PATH
 *   `-t, --template TEXT`: [Template](#templates) to use for the configuration of the new dataset.
 *   `-c, --config JSON`: Additional [configuration](#config) as JSON string.
 *   `-f, --config-file PATH`: Path to a JSON file containing additional configuration.
+*   `-a, --args TEXT`: Additional arg to pass to templates. Expected format: key=value. Can be used multiple times. Can be accessed from templates by using "ARGS.key" as a value for any field.
 *   `-d, --description TEXT`: Description of the new dataset.
 *   `-o, --output PATH`: Output path for the processed dataset (local or `s3://`).
 *   `-p, --pipeline TEXT`: [Pipeline](#pipelines) to use for processing the new dataset [default: preprocess].
 *   `--templates-path PATH`: Path to [templates](#templates) configuration file [default: templates.json].
 *   `--data-mapping`: Whether to map data on mesh vertices or celles [default: vertices].
 *   `--mesh-type`: Type of mesh to generate (default: auto, which infers from data between regular and rectilinear but not able to handle radial meshes)
+*   `--custom-eccodes-path`: Path to a folder containing extra ecCodes. This path must be set to the parent folder containing the grib1, grib2, etc. subdirectories.
 *   `--dask-dashboard`: Start a Dask dashboard for monitoring the processing
+
+> [!TIP]
+> You can also define the path to custom ecCodes definitions folder with the `CUSTOM_ECCODES_PATH` environment variable
 
 ### `list-templates`
 
@@ -104,6 +109,9 @@ This lets you avoid repeating parameters for datasets with the same structure.
 
 > [!IMPORTANT]
 > Paths pointing to [S3](#s3-configuration) should be prefixed with `s3://`.
+
+> [!TIP]
+> You can add variables in command line with `-a key=value` and use it in templates with `"ARGS.key"` (only strings and int and float values are supported)
 
 To use a template, reference keys in `templates.json` (or your custom templates file) using the `-t` or `--template` argument.
 

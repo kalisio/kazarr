@@ -11,8 +11,16 @@
       */
       "lon": "MyLongitudeVar",
       "lat": "MyLatitudeVar",
-      "level": "MyLevelVar",
-      "time": "MyTimeVar"
+      /*
+      In some cases, the name of the variable to use can be specified in the attributes of the variable.
+      In this case, you can use the ATTRIBUTES prefix to specify the name of the property that contains the name of the variable to use.but 
+      */
+      "level": "ATTRIBUTES.MyLevelVar",
+      /*
+      You can also use ARGS to specify a variable name that will be provided as argument of the conversion tool. 
+      In this case, you should provide --args time_var=MyTimeVar or -a time_var=MyTimeVar when calling the conversion tool.
+      */
+      "time": "ARGS.time_var"
     },
     "dimensions": {
       "fixed": {
