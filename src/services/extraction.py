@@ -96,6 +96,9 @@ def extract(
 
     if len(missing_vars) > 0:
         raise exceptions.BadConfigurationVariable(missing_vars)
+    
+    # Normalize longitudes if the dataset is in [0, 360] and the bbox uses negative values
+    dataset, _ = bbox.normalize_dataset_longitudes(dataset, lon_var, lat_var, bbox=bounding_box)
 
     # Detect multi-timestep mode: when time is not specified but time_var is defined,
     # we will return data for all timesteps.
@@ -630,6 +633,9 @@ def probe(
         missing_vars.append(f"time ({time_var})")
     if len(missing_vars) > 0:
         raise exceptions.BadConfigurationVariable(missing_vars)
+    
+    # Normalize longitudes if the dataset is in [0, 360] and the probe uses negative lon
+    dataset, lon = bbox.normalize_dataset_longitudes(dataset, lon_var, lat_var, lon=lon)
 
     if time_range.has_time() and time_var is not None:
         bounded_time_range = get_bounded_time(dataset, time_var, time_range)

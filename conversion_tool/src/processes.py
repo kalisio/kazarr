@@ -37,6 +37,7 @@ BUCKET_NAME_ENV_VAR = "BUCKET_NAME"
 LON_VARIABLE_KEY = "variables.lon"
 LAT_VARIABLE_KEY = "variables.lat"
 LEVEL_VARIABLE_KEY = "variables.level"
+ZARR_EXTENSION = ".zarr"
 
 
 def init_dask_dashboard(dataset, config):
@@ -183,7 +184,6 @@ def load_from_grib(dataset, config):
 
         # Check if path is folder or file
         fs = get_s3_filesystem(config, path)
-        target_tmp_dir = "/tmp/kazarr_grib/"
         if fs.isfile(path):
             target_tmp_dir = user_cache_dir(
                 appname="kazarr", appauthor=False, version="gribs"
@@ -732,49 +732,48 @@ def assign_coords(dataset, config):
     # Parse possible templates in coords
     expanded_coords = {}
     for var, dim in coords.items():
-        if isinstance(dim, dict) and "variables" in dim:
-            var_ranges = dim["variables"]
-            dim_template = dim["dim"]
-
-            keys = []
-            ranges = []
-            for key, rng in var_ranges.items():
-                keys.append(key)
-                n_min = rng.get("min", 0)
-                n_max = rng.get("max", 0)
-                ranges.append(range(n_min, n_max + 1))
-
-            for values in itertools.product(*ranges):
-                var_name = var
-                dim_name = dim_template
-
-                for key, value in zip(keys, values):
-                    target = f"{{{key}}}"
-                    var_name = var_name.replace(target, str(value))
-                    dim_name = dim_name.replace(target, str(value))
-
-                expanded_coords[var_name] = dim_name
-        else:
+        if not isinstance(dim, dict) or "variables" not in dim:
             expanded_coords[var] = dim
+            continue
+        var_ranges = dim["variables"]
+        dim_template = dim["dim"]
+
+        keys = []
+        ranges = []
+        for key, rng in var_ranges.items():
+            keys.append(key)
+            n_min = rng.get("min", 0)
+            n_max = rng.get("max", 0)
+            ranges.append(range(n_min, n_max + 1))
+
+        for values in itertools.product(*ranges):
+            var_name = var
+            dim_name = dim_template
+
+            for key, value in zip(keys, values):
+                target = f"{{{key}}}"
+                var_name = var_name.replace(target, str(value))
+                dim_name = dim_name.replace(target, str(value))
+
+            expanded_coords[var_name] = dim_name
 
     assign_dict = {}
     for var, dim in expanded_coords.items():
-        if var not in dataset or dim not in dataset.dims:
+        if var not in dataset or dim not in dataset.dims or var in dataset.coords:
             continue
-        elif var not in dataset.coords:
-            values = dataset[var].values
-            # Decode binary strings if needed
-            if values.dtype.kind == "S":  # Fixed-length bytes
-                values = values.astype(str)
-            elif values.dtype == object:  # Variable-length bytes or other objects
-                if values.size > 0 and isinstance(values.flat[0], bytes):
-                    values = np.array(
-                        [
-                            v.decode("utf-8") if isinstance(v, bytes) else v
-                            for v in values.ravel()
-                        ]
-                    ).reshape(values.shape)
-            assign_dict[var] = (dim, values, dataset[var].attrs)
+        values = dataset[var].values
+        # Decode binary strings if needed
+        if values.dtype.kind == "S":  # Fixed-length bytes
+            values = values.astype(str)
+        elif values.dtype == object:  # Variable-length bytes or other objects
+            if values.size > 0 and isinstance(values.flat[0], bytes):
+                values = np.array(
+                    [
+                        v.decode("utf-8") if isinstance(v, bytes) else v
+                        for v in values.ravel()
+                    ]
+                ).reshape(values.shape)
+        assign_dict[var] = (dim, values, dataset[var].attrs)
 
     dataset = dataset.assign_coords(assign_dict)
 
@@ -1011,6 +1010,44 @@ def reproject_coordinates(dataset, config):
     return dataset, config
 
 
+def normalize_longitudes(dataset, config):
+    """Normalize longitude values from [0, 360] to [-180, 180] range.
+    Detects if the dataset's longitude coordinate uses the [0, 360] convention
+    and converts it to [-180, 180] so that all datasets are on the same base.
+    The data is then sorted by longitude to maintain a monotonically increasing
+    coordinate order.
+    Config parameters:
+        - variables.lon (required): Name of the longitude variable.
+    """
+    lon_var = get_dataset_config_value(
+        dataset,
+        config,
+        LON_VARIABLE_KEY,
+        error_message=f"Missing '{LON_VARIABLE_KEY}' config parameter for normalize_longitudes process.",
+    )
+    if lon_var not in dataset:
+        raise ValueError(
+            f"Longitude variable '{lon_var}' not found in dataset for normalize_longitudes process."
+        )
+    lon_max = float(dataset[lon_var].max())
+    if lon_max <= 180:
+        print(
+            f"[KAZARR] Longitudes are already in [-180, 180] range (max={lon_max:.2f}). "
+            "No normalization needed."
+        )
+        return dataset, config
+    print(
+        f"[KAZARR] Normalizing longitudes from [0, 360] to [-180, 180] (max={lon_max:.2f})..."
+    )
+    dataset = dataset.assign_coords({lon_var: (((dataset[lon_var] + 180) % 360) - 180)})
+    # Sort by longitude to restore monotonically increasing order
+    # after the wrap-around transformation
+    if dataset[lon_var].ndim == 1:
+        dataset = dataset.sortby(lon_var)
+    print("[KAZARR] Longitudes normalized successfully.")
+    return dataset, config
+
+
 def simplify_grid(dataset, config):
     lon_var = get_dataset_config_value(dataset, config, LON_VARIABLE_KEY)
     lat_var = get_dataset_config_value(dataset, config, LAT_VARIABLE_KEY)
@@ -1093,7 +1130,7 @@ def save(dataset, config):
             "path",
             error_message="Missing 'save_path' or 'path' config parameter for save process.",
         )
-        path = path.replace(".nc", "").replace(".grib2", "").replace(".zarr", "") + ".zarr"
+        path = path.replace(".nc", "").replace(".grib2", "").replace(ZARR_EXTENSION, "") + ZARR_EXTENSION
     config["save_path"] = path  # Update config with actual save path
     version = get_dataset_config_value(dataset, config, "version", default=3)
     float64_to_float32 = get_dataset_config_value(
@@ -1119,7 +1156,7 @@ def save(dataset, config):
         )
         is_update = True
         tmp_suffix = f"_tmp_{uuid.uuid4().hex[:8]}"
-        write_path = final_path.replace(".zarr", tmp_suffix + ".zarr")
+        write_path = final_path.replace(ZARR_EXTENSION, tmp_suffix + ZARR_EXTENSION)
 
     if final_path.startswith(S3_PREFIX):
         bucket = os.getenv(BUCKET_NAME_ENV_VAR)
@@ -1127,7 +1164,7 @@ def save(dataset, config):
             raise ValueError(f"{BUCKET_NAME_ENV_VAR} environment variable not set.")
         final_path = final_path.replace(S3_PREFIX, S3_PREFIX + bucket + "/")
         if is_update:
-            write_path = os.path.join(tempfile.gettempdir(), "kazarr" + tmp_suffix + ".zarr")
+            write_path = os.path.join(tempfile.gettempdir(), "kazarr" + tmp_suffix + ZARR_EXTENSION)
             write_path = write_path.replace("\\", "/")
         else:
             write_path = write_path.replace(S3_PREFIX, S3_PREFIX + bucket + "/")
