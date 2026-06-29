@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Optional
 import numpy as np
 import pandas as pd
 
@@ -114,3 +115,31 @@ class TimeRange:
         
     def has_time(self):
         return self.start is not None or (self.end is not None and self.has_time_range)
+
+
+@dataclass
+class MultiTimeRange:
+    ranges: Optional[list[TimeRange]]
+
+    def __post_init__(self):
+        if self.ranges is None:
+            self.ranges = []
+
+    @classmethod
+    def from_strings(cls, times: list[str] | str | None):
+        if not times:
+            return cls([TimeRange.from_string(None)])
+        if isinstance(times, str):
+            times = [times]
+
+        ranges = []
+        for t in times:
+            ranges.append(TimeRange.from_string(t))
+
+        if not ranges:
+            ranges = [TimeRange.from_string(None)]
+
+        return cls(ranges)
+
+    def has_time(self):
+        return any(r.has_time() for r in self.ranges)

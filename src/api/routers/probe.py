@@ -23,7 +23,7 @@ async def probe_data(
     lon: float = Query(..., description="The longitude coordinate to probe"),
     lat: float = Query(..., description="The latitude coordinate to probe"),
     level: float | None = Query(None, description="The level coordinate to probe"),
-    time: models.TimeParams = Depends(),
+    time: models.MultiTimeParams = Depends(),
     spatial_interp: models.SpatialInterpolationParams = Depends(),
 ):
     interp_vars_params = base.interp_vars_params
@@ -71,7 +71,7 @@ async def probe_data(
             lon,
             lat,
             level=level,
-            time_range=time.time,
+            time_range=time.times if time.times else time.time,
             format=base.format,
             config=config,
             cancel_event=cancel_event,
@@ -88,7 +88,7 @@ async def probe_data_multi(
     request: Request,
     base: models.MultipleVariablesParams = Depends(),
     body: models.MultiProbeBody = Body(...),
-    time: models.TimeParams = Depends(),
+    time: models.MultiTimeParams = Depends(),
     spatial_interp: models.SpatialInterpolationParams = Depends(),
 ):
     interp_vars_params = base.interp_vars_params
@@ -125,6 +125,13 @@ async def probe_data_multi(
         },
     }
 
+    if body.times:
+        times = body.times
+    elif time.times:
+        times = time.times
+    else:
+        times = time.time
+
     cancel_event = threading.Event()
     watcher_task = asyncio.create_task(watch_disconnection(request, cancel_event))
     try:
@@ -134,7 +141,7 @@ async def probe_data_multi(
             base.dataset,
             variables,
             body.points,
-            time_range=time.time,
+            time_range=times,
             format=base.format,
             config=config,
             cancel_event=cancel_event,

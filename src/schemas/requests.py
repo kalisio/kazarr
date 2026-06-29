@@ -107,6 +107,13 @@ class TimeParams:
         description="Whether to interpolate values on time dimension or to get the closest time step. Shortcut to interp_vars=TIME_VARIABLE_NAME.",
     )
 
+@dataclass
+class MultiTimeParams(TimeParams):
+    times: list[str] | None = Query(
+        None,
+        description="List of times for which to retrieve data.",
+    )
+
 
 @dataclass
 class MeshParams:
@@ -156,6 +163,7 @@ class GeoJSONFeatureCollection(BaseModel):
 class MultiProbeBody(BaseModel):
     # ad hoc format
     points: List[ProbePoint] | None = None
+    times: list[str] | None = None
     # GeoJSON FeatureCollection format
     type: str | None = None
     features: list[GeoJSONFeature] | None = None

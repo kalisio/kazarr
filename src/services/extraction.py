@@ -21,7 +21,7 @@ from src.utils.file import load_dataset
 from src.utils.logging import StepLoggerAndAborter
 from src.utils.spatial import get_cached_ckdtree
 from src.processing import bbox, interpolation, output
-from src.processing.contexts import BBoxContext, TimeRange
+from src.processing.contexts import BBoxContext, TimeRange, MultiTimeRange
 
 
 FIXED_DIMENSIONS_KEY = "dimensions.fixed"
@@ -598,7 +598,7 @@ def probe(
         [LON_VARIABLE_KEY, LAT_VARIABLE_KEY, "variables.time"],
     )
     time_dim = dget(dataset_config, "dimensions.time")
-    time_range = TimeRange.from_string(time_range)
+    time_range = MultiTimeRange.from_strings(time_range)
     level_vars = get_dataset_level_vars(dataset, dataset_config)
     level_var = None
     if level_vars is None or isinstance(level_vars, str):
@@ -639,8 +639,8 @@ def probe(
 
     if time_range.has_time() and time_var is not None:
         bounded_time_range = get_bounded_time(dataset, time_var, time_range)
-        time_range_indexer = bounded_time_range.get_indexer()
-        if time_range_indexer is not None:
+        time_range_indexer = get_times_in_range(dataset, time_var, bounded_time_range)
+        if time_range_indexer is not None and len(time_range_indexer) > 0:
             fixed_coords[time_var] = time_range_indexer
             if config.interpolation.vars.time:
                 interp_vars.append(time_var)

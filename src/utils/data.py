@@ -3,7 +3,7 @@ import pandas as pd
 from loguru import logger as log
 
 import src.exceptions as exceptions
-from src.processing.contexts import TimeRange
+from src.processing.contexts import TimeRange, MultiTimeRange
 
 
 ATTRS_KEY = "ATTRS."
@@ -162,7 +162,9 @@ def get_required_dims_and_coords(
     return fixed_coords, fixed_dims
 
 
-def get_bounded_time(dataset, time_var, time_range: TimeRange) -> TimeRange:
+def get_bounded_time(
+    dataset, time_var, time_range: TimeRange | MultiTimeRange
+) -> TimeRange | MultiTimeRange:
     if time_var not in dataset or not is_monotonic_var(dataset, time_var):
         raise exceptions.GenericInternalError(
             f"Time variable '{time_var}' not found or not monotonic in dataset."
@@ -190,20 +192,52 @@ def get_bounded_time(dataset, time_var, time_range: TimeRange) -> TimeRange:
                 f"Unable to convert time value '{t_val}' to the correct type."
             )
 
-    bounded_start = bound_value(time_range.start)
-    bounded_end = bound_value(time_range.end)
+    if isinstance(time_range, MultiTimeRange):
+        bounded_ranges = []
+        for tr in time_range.ranges:
+            bounded_start = bound_value(tr.start)
+            bounded_end = bound_value(tr.end)
+            bounded_ranges.append(
+                TimeRange(
+                    start=bounded_start,
+                    end=bounded_end,
+                    has_time_range=tr.has_time_range,
+                )
+            )
+        return MultiTimeRange(ranges=bounded_ranges)
+    else:
+        bounded_start = bound_value(time_range.start)
+        bounded_end = bound_value(time_range.end)
+        return TimeRange(
+            start=bounded_start,
+            end=bounded_end,
+            has_time_range=time_range.has_time_range,
+        )
 
-    return TimeRange(
-        start=bounded_start, end=bounded_end, has_time_range=time_range.has_time_range
-    )
 
-
-def get_times_in_range(dataset, time_var, time_range: TimeRange):
+def get_times_in_range(dataset, time_var, time_range: TimeRange | MultiTimeRange):
     if time_var not in dataset:
         return []
 
+    if isinstance(time_range, MultiTimeRange):
+        all_times = []
+        for tr in time_range.ranges:
+            all_times.extend(get_times_in_range(dataset, time_var, tr))
+
+        # Deduplicate and sort
+        if not all_times:
+            return []
+
+        time_data = np.unique(np.array(all_times, dtype=dataset[time_var].dtype))
+        if np.issubdtype(time_data.dtype, np.datetime64):
+            return [str(np.datetime_as_string(t)) for t in time_data]
+        else:
+            return time_data.tolist()
+
     if time_range.start is None and not time_range.has_time_range:
         time_data = dataset[time_var].values
+    elif not time_range.has_time_range:
+        return [time_range.start]
     else:
         try:
             sliced_data = dataset[time_var].sel({time_var: time_range.get_indexer()})
