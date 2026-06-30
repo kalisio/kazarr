@@ -803,6 +803,7 @@ def probe(
                 time_var,
                 fixed_coords,
                 fixed_dims,
+                interp_vars=interp_vars,
                 interp_method=interp_vars_method,
                 interp_config=interp_vars_params,
             ).values
