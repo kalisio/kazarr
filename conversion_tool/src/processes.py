@@ -646,6 +646,9 @@ def combine_at_time(dataset, config):
                     if dim not in spatial_dimensions:
                         spatial_dimensions.append(dim)
 
+        if is_point_list:
+            spatial_dimensions = [d for d in spatial_dimensions if d != index_dim_name]
+
         # Check if spatial dimensions have changed between the two datasets
         for dim in spatial_dimensions:
             if dim in primary_before.dims:
