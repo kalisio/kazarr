@@ -795,7 +795,7 @@ def probe(
     )
     times = None
     if time_var is not None:
-        if time_range.has_time() and interp_spatial_method != "nearest":
+        if time_range.has_time() and interp_vars_method != "nearest":
             times = get_times_in_range(dataset, time_var, time_range)
         elif time_var in dataset:
             times = sel(
@@ -803,7 +803,6 @@ def probe(
                 time_var,
                 fixed_coords,
                 fixed_dims,
-                interp_vars=interp_vars,
                 interp_method=interp_vars_method,
                 interp_config=interp_vars_params,
             ).values
