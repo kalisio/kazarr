@@ -66,18 +66,22 @@ def normalize_dataset_longitudes(dataset, lon_var, lat_var, bbox=None, lon=None)
     if is_0_360:
         mapped_min = bb_lon_min % 360.0
         mapped_max = bb_lon_max % 360.0
+        if np.isclose(mapped_max, 0.0) and bb_lon_max > bb_lon_min:
+            mapped_max = 360.0
         seam_val = 360.0
         min_val = 0.0
     else:
         mapped_min = ((bb_lon_min + 180.0) % 360.0) - 180.0
         mapped_max = ((bb_lon_max + 180.0) % 360.0) - 180.0
+        if np.isclose(mapped_max, -180.0) and bb_lon_max > bb_lon_min:
+            mapped_max = 180.0
         seam_val = 180.0
         min_val = -180.0
 
     crosses_seam = (
         mapped_min > mapped_max
         or (bb_lon_max - bb_lon_min) >= 360.0
-        or mapped_min == mapped_max
+        or np.isclose(mapped_min, mapped_max)
     )
 
     is_native = (is_0_360 and bb_lon_min >= 0 and bb_lon_max <= 360) or (
@@ -85,7 +89,25 @@ def normalize_dataset_longitudes(dataset, lon_var, lat_var, bbox=None, lon=None)
     )
 
     if is_native and not crosses_seam:
-        # Normal case: no crossing, and already in native domain
+        # Normal case: bbox already in native domain without crossing the seam.
+        # Special sub-case: [0, 360] dataset whose last longitude is < 360°
+        # (e.g. Arpège ends at 359.75°) but the tile requests up to 360°.
+        # In that case, the RegularGridInterpolator would produce NaN for any
+        # target point beyond the dataset's max longitude.  Fix: append the
+        # 0° column (shifted to 360°) so the interpolator sees a full cycle.
+        if (
+            is_0_360
+            and bb_lon_max >= float(longitudes.max())
+            and float(longitudes.max()) < 360.0  # dataset does NOT already end at 360°
+        ):
+            ds_ghost = dataset.sel({lon_var: dataset[lon_var].values[0:1]})
+            ghost_lon_val = float(dataset[lon_var].values[-1]) + (
+                float(dataset[lon_var].values[1]) - float(dataset[lon_var].values[0])
+                if dataset[lon_var].size > 1
+                else 1.0
+            )
+            ds_ghost = ds_ghost.assign_coords({lon_var: [ghost_lon_val]})
+            dataset = xr.concat([dataset, ds_ghost], dim=lon_var)
         return dataset, lon
 
     parts = []
