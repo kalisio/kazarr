@@ -45,6 +45,12 @@ def get_s3_storage_options(config, path=None):
     if "anon" not in storage_options:
         storage_options["anon"] = False
 
+    s3_storage_class = get_ci(config, "s3_storage_class")
+    if s3_storage_class:
+        s3_additional_kwargs = storage_options.get("s3_additional_kwargs", {})
+        s3_additional_kwargs.setdefault("StorageClass", s3_storage_class)
+        storage_options["s3_additional_kwargs"] = s3_additional_kwargs
+
     return storage_options
 
 

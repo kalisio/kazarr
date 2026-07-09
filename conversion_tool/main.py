@@ -21,7 +21,8 @@ def new_dataset(
     data_mapping="vertices",
     mesh_type="auto",
     custom_eccodes_path=None,
-    dask_dashboard=False
+    dask_dashboard=False,
+    s3_storage_class="STANDARD"
 ):
     # Before doing anything, load custom codes (ecCodes) if any
     load_custom_eccodes(custom_eccodes_path)
@@ -52,6 +53,8 @@ def new_dataset(
         pipeline_config["mesh_type"] = mesh_type
     if dask_dashboard:
         pipeline_config["enable_dask_dashboard"] = True
+    if s3_storage_class is not None:
+        pipeline_config["s3_storage_class"] = s3_storage_class
     _, config = pipelines.pipeline(pipeline_config, pipeline_name)
 
 
@@ -157,6 +160,13 @@ def main():
         action="store_true",
         help="Whether to start a Dask dashboard for monitoring the processing (default: False)",
     )
+    parser_create_dataset.add_argument(
+        "--s3-storage-class",
+        type=str,
+        choices=['STANDARD', 'REDUCED_REDUNDANCY', 'STANDARD_IA', 'ONEZONE_IA', 'INTELLIGENT_TIERING', 'GLACIER', 'DEEP_ARCHIVE', 'OUTPOSTS', 'GLACIER_IR', 'SNOW', 'EXPRESS_ONEZONE', 'FSX_OPENZFS'],
+        default='STANDARD',
+        help="S3 storage class for the output dataset (default: STANDARD)",
+    )
 
     args = parser.parse_args()
 
@@ -174,7 +184,8 @@ def main():
             data_mapping=args.data_mapping,
             mesh_type=args.mesh_type,
             custom_eccodes_path=args.custom_eccodes_path,
-            dask_dashboard=args.dask_dashboard
+            dask_dashboard=args.dask_dashboard,
+            s3_storage_class=args.s3_storage_class
         )
     elif args.command == "list-templates":
         list_templates(args.templates_path)
