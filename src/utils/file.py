@@ -1,6 +1,7 @@
 import os
 import json
 import copy
+import datetime
 from functools import lru_cache
 
 import s3fs
@@ -38,9 +39,11 @@ def s3_credentials_exists():
         return False
 
 
-# Open Zarr dataset as XArray dataset from S3
+# Internal cached loader — keyed by (path, version) so that updating a dataset
+# on S3 (which changes its last_modified timestamp) automatically creates a new
+# lru_cache entry and discards the stale xarray Dataset object.
 @lru_cache(maxsize=5)
-def load(path):
+def _load_versioned(path, version):
     if not s3_credentials_exists():
         try:
             return xr.open_zarr(
@@ -71,10 +74,13 @@ def load(path):
             )
         else:
             dataset_id = path.replace(S3_PREFIX, "")
+            # Use version (last_modified) to salt the diskcache namespace so
+            # stale chunks from a previous dataset version are never returned.
+            cache_namespace = f"{dataset_id}_{version}" if version else dataset_id
             store = S3CachedStore(
                 s3_root=os.path.join(bucket, get_datasets_path(), dataset_id),
                 cache_dir=cache_path,
-                dataset_id=dataset_id,
+                dataset_id=cache_namespace,
                 expiry_seconds=60 * 60 * 24 * 7 * 4,
             )
 
@@ -87,6 +93,14 @@ def load(path):
     except Exception as e:
         raise exceptions.GenericInternalError("Unable to access S3: " + str(e))
     return dataset
+
+
+def load(path):
+    """Open a Zarr dataset, using last_modified as a version key to invalidate
+    the in-memory lru_cache whenever the dataset is updated on S3."""
+    dataset_id = path.replace(ZARR_EXTENSION, "").replace(S3_PREFIX, "")
+    version = get_dataset_last_modified(dataset_id)
+    return _load_versioned(path, version)
 
 
 # Load JSON file from S3
@@ -119,7 +133,9 @@ def find_datasets(path="/"):
                 if dirname.endswith(ZARR_EXTENSION):
                     found_path = os.path.join(root, dirname)
                     datasets.append(
-                        found_path.replace(get_datasets_path(), "").replace(ZARR_EXTENSION, "")
+                        found_path.replace(get_datasets_path(), "").replace(
+                            ZARR_EXTENSION, ""
+                        )
                     )
         return datasets
 
@@ -161,6 +177,36 @@ def load_dataset(dataset_path):
     dataset = load(dataset_path + ZARR_EXTENSION)
     config = copy.deepcopy(dataset.attrs.get("kazarr", {}))
     return dataset, config
+
+
+def get_dataset_last_modified(dataset_id: str) -> os.stat_result | str | None:
+    path = dataset_id + ZARR_EXTENSION
+    if not s3_credentials_exists():
+        full_path = os.path.join(get_datasets_path().rstrip("/"), path)
+        try:
+            return datetime.datetime.fromtimestamp(
+                os.path.getmtime(full_path), tz=datetime.timezone.utc
+            )
+        except Exception:
+            return None
+
+    bucket = os.getenv(BUCKET_NAME_ENV_VAR)
+    if bucket is None:
+        return None
+    s3_store = s3fs.S3FileSystem(anon=False)
+    try:
+        s3_path = os.path.join(bucket, get_datasets_path().lstrip("/"), path)
+        # Often .zmetadata is updated when dataset changes
+        zmetadata_path = os.path.join(s3_path, ".zmetadata")
+        if s3_store.exists(zmetadata_path):
+            info = s3_store.info(zmetadata_path)
+            return info.get("LastModified")
+        # Fallback to the directory itself
+        info = s3_store.info(s3_path)
+        return info.get("LastModified")
+    except Exception as e:
+        log.warning(f"[Kazarr] Could not get last modified date for {dataset_id}: {e}")
+        return None
 
 
 # Convert cache size string (e.g., "1024MB") to bytes
