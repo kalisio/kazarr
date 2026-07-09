@@ -715,6 +715,9 @@ def combine_at_time(dataset, config):
             {index_dim_name: index_target_var}
         )
 
+    combined_dataset.attrs = dataset.attrs.copy()
+    combined_dataset.attrs.update(combine_dataset.attrs)
+
     combined_dataset = combined_dataset.sortby(time_var)
     return combined_dataset, config
 
