@@ -462,6 +462,11 @@ def combine_at_time(dataset, config):
         "variables.time",
         error_message="Missing 'variables.time' config parameter for combine_at_time process.",
     )
+    attr_indexed_var_renaming = get_dataset_config_value(
+        dataset,
+        config,
+        "attr_indexed_var_renaming",
+    )
 
     # Those variables will be used to check if spatial dimensions have changed between the two datasets,
     # and to pad the first dataset if needed to align dimensions before concatenation.
@@ -665,6 +670,136 @@ def combine_at_time(dataset, config):
                             f"to align with secondary dataset. This can happen if the dimension is an index "
                             f"or has an incompatible dtype. Original error: {e}"
                         ) from e
+                    
+        if attr_indexed_var_renaming is not None:
+            attr_pattern = attr_indexed_var_renaming.get("attr_pattern")
+            target_attr_name = attr_indexed_var_renaming.get("target_attr_name")
+            var_pattern = attr_indexed_var_renaming.get("var_pattern")
+            var_template = attr_indexed_var_renaming.get("var_template")
+
+            if (
+                not attr_pattern
+                or not target_attr_name
+                or not var_pattern
+                or not var_template
+            ):
+                raise ValueError(
+                    "'attr_indexed_var_renaming' requires 'attr_pattern', 'target_attr_name', "
+                    "'var_pattern', and 'var_template' keys to be defined."
+                )
+
+            def build_attr_index_map(attrs, pattern, target_name):
+                """Parse dataset attrs and return a dict mapping symbolic name (attr value) to
+                its numeric index string, restricted to attrs whose 'name' group matches
+                target_name. Also returns the highest index found."""
+                index_map = {}  # {symbolic_name: index_str}
+                max_index = 0
+                for key, value in attrs.items():
+                    m = re.fullmatch(pattern, key)
+                    if m:
+                        groups = m.groupdict()
+                        if "index" not in groups or "name" not in groups:
+                            raise ValueError(
+                                f"'attr_pattern' must contain named groups 'name' and 'index'. "
+                                f"Got groups: {list(groups.keys())} from pattern '{pattern}'."
+                            )
+                        if groups["name"] != target_name:
+                            continue
+                        index_str = groups["index"]
+                        symbolic_name = value
+                        index_map[symbolic_name] = index_str
+                        try:
+                            if int(index_str) > max_index:
+                                max_index = int(index_str)
+                        except ValueError:
+                            pass
+                return index_map, max_index
+
+            def collect_attr_renames(attrs, pattern, old_index, new_index):
+                """Return a rename mapping for all attrs matching pattern whose 'index' group
+                equals old_index, replacing it with new_index."""
+                renames = {}
+                for key in attrs:
+                    m = re.fullmatch(pattern, key)
+                    if m and m.groupdict().get("index") == old_index:
+                        renames[key] = (
+                            key[: m.start("index")] + new_index + key[m.end("index") :]
+                        )
+                return renames
+
+            primary_attr_map, primary_max_index = build_attr_index_map(
+                primary_before.attrs, attr_pattern, target_attr_name
+            )
+            secondary_attr_map, _ = build_attr_index_map(
+                secondary_after.attrs, attr_pattern, target_attr_name
+            )
+
+            rename_dict = {}
+            attr_rename_dict = {}  # {old_attr_key: new_attr_key}
+            current_index = primary_max_index + 1
+            for symbolic_name, sec_index in secondary_attr_map.items():
+                if symbolic_name in primary_attr_map:
+                    # Same entity exists in the primary dataset - remap to primary's index if different
+                    pri_index = primary_attr_map[symbolic_name]
+                    if pri_index != sec_index:
+                        for var in secondary_after.data_vars:
+                            var_match = re.fullmatch(var_pattern, var)
+                            if var_match:
+                                var_groups = var_match.groupdict()
+                                if var_groups.get("index") == sec_index:
+                                    new_var_name = var_template.format(
+                                        **{**var_groups, "index": pri_index}
+                                    )
+                                    rename_dict[var] = new_var_name
+                        attr_rename_dict.update(
+                            collect_attr_renames(
+                                secondary_after.attrs,
+                                attr_pattern,
+                                sec_index,
+                                pri_index,
+                            )
+                        )
+                else:
+                    # New entity not present in the primary dataset - assign a fresh index
+                    new_index = str(current_index)
+                    for var in secondary_after.data_vars:
+                        var_match = re.fullmatch(var_pattern, var)
+                        if var_match:
+                            var_groups = var_match.groupdict()
+                            if var_groups.get("index") == sec_index:
+                                new_var_name = var_template.format(
+                                    **{**var_groups, "index": new_index}
+                                )
+                                rename_dict[var] = new_var_name
+                    attr_rename_dict.update(
+                        collect_attr_renames(
+                            secondary_after.attrs, attr_pattern, sec_index, new_index
+                        )
+                    )
+                    current_index += 1
+
+            if rename_dict:
+                try:
+                    print(
+                        "[KAZARR] Renaming variables in the secondary dataset "
+                        "to align indices with the primary dataset:"
+                    )
+                    secondary_after = secondary_after.rename(rename_dict)
+                except Exception as e:
+                    raise ValueError(
+                        f"Failed to rename variables in the secondary dataset using 'attr_indexed_var_renaming'. "
+                        f"Rename mapping: {rename_dict}. Original error: {e}"
+                    ) from e
+
+            if attr_rename_dict:
+                print(
+                    "[KAZARR] Renaming attributes in the secondary dataset "
+                    "to align indices with the primary dataset:"
+                )
+                updated_attrs = {}
+                for attr_key, attr_value in secondary_after.attrs.items():
+                    updated_attrs[attr_rename_dict.get(attr_key, attr_key)] = attr_value
+                secondary_after.attrs = updated_attrs
 
         try:
             combined_dataset = xr.concat(
@@ -715,8 +850,8 @@ def combine_at_time(dataset, config):
             {index_dim_name: index_target_var}
         )
 
-    combined_dataset.attrs = dataset.attrs.copy()
-    combined_dataset.attrs.update(combine_dataset.attrs)
+    combined_dataset.attrs = primary_before.attrs.copy()
+    combined_dataset.attrs.update(secondary_after.attrs)
 
     combined_dataset = combined_dataset.sortby(time_var)
     return combined_dataset, config
