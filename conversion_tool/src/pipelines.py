@@ -20,8 +20,6 @@ def pipeline(config, name, dataset=None):
     if config.get("enable_dask_dashboard", False):
         target_pipeline = ["init_dask_dashboard"] + target_pipeline
 
-    time_var_has_changed = []
-
     for process in target_pipeline:
         process_type = "process"
         process_name = process
@@ -61,14 +59,12 @@ def pipeline(config, name, dataset=None):
             # Special case when delta_time_to_datetime process is used in a sub-pipeline 
             # and changes the name of the time variable: we need to update the time variable 
             # name in the global config so that following processes in the main pipeline can use it
-            original_time_var = dget(config, "variables.time")
-            new_time_var = dget(out_pipeline_config, "variables.time")
+            time_var_key = "variables.time"
+            original_time_var = dget(config, time_var_key)
+            new_time_var = dget(out_pipeline_config, time_var_key)
             if original_time_var is not None and new_time_var is not None and original_time_var != new_time_var:
-                time_var_has_changed.append(new_time_var)
+                config["variables"]["time"] = new_time_var
             continue
-
-        if time_var_has_changed and all(val == time_var_has_changed[0] for val in time_var_has_changed):
-            config["variables"]["time"] = merge(time_var_has_changed[0], dget(config, "variables.time")) if isinstance(dget(config, "variables.time"), dict) else time_var_has_changed[0]
 
         process_start_time = time.time()
         try:
