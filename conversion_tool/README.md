@@ -69,6 +69,8 @@ conversion_tool new-dataset [OPTIONS] INPUT_PATH
 *   `--mesh-type`: Type of mesh to generate (default: auto, which infers from data between regular and rectilinear but not able to handle radial meshes)
 *   `--custom-eccodes-path`: Path to a folder containing extra ecCodes. This path must be set to the parent folder containing the grib1, grib2, etc. subdirectories.
 *   `--dask-dashboard`: Start a Dask dashboard for monitoring the processing
+*   `--s3-storage-class`: Define which class to use for saving Zarr dataset to S3 [default: `STANDARD`]  
+choices: `STANDARD`, `REDUCED_REDUNDANCY`, `STANDARD_IA`, `ONEZONE_IA`, `INTELLIGENT_TIERING`, `GLACIER`, `DEEP_ARCHIVE`, `OUTPOSTS`, `GLACIER_IR`, `SNOW`, `EXPRESS_ONEZONE`, `FSX_OPENZFS`
 
 > [!TIP]
 > You can also define the path to custom ecCodes definitions folder with the `CUSTOM_ECCODES_PATH` environment variable
@@ -256,12 +258,45 @@ __Example__:
 
 **Parameters:**
 
-| Name                  | Type   | Description                                                                                                                                                                                        |
-| --------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `combine_time`        | String | The split time. Data before this value is taken from the primary dataset; data from this value onward is taken from the secondary dataset. |
-| `combine_time_format` | String | Format of the `combine_time` ([in Python format](https://docs.python.org/3.11/library/datetime.html#strftime-and-strptime-format-codes)). Default: `%Y-%m-%dT%H:%M:%S`                                                                                                                      |
-| `combine_dataset_tag` | String | Tag identifying the secondary dataset to merge with. Default: `secondary_1`                                                                                                                                       |
-| `variables.time`      | String | Name of the time variable in the dataset.                                                                                                                                                          |
+| Name                                         | Type   | Description                                                                                                                                                                                                                                                                                      |
+| -------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `combine_time`                               | String | The split time. Data before this value is taken from the primary dataset; data from this value onward is taken from the secondary dataset.                                                                                                                                                       |
+| `combine_time_format`                        | String | Format of the `combine_time` ([in Python format](https://docs.python.org/3.11/library/datetime.html#strftime-and-strptime-format-codes)). Default: `%Y-%m-%dT%H:%M:%S`                                                                                                                           |
+| `combine_dataset_tag`                        | String | Tag identifying the secondary dataset to merge with. Default: `secondary_1`                                                                                                                                                                                                                      |
+| `variables.time`                             | String | Name of the time variable in the dataset.                                                                                                                                                                                                                                                        |
+| `variables.lon`                              | String | Name of the longitude variable. Optional — used to detect point-list datasets and align spatial dimensions between the two datasets before concatenation.                                                                                                                                        |
+| `variables.lat`                              | String | Name of the latitude variable. Optional — same role as `variables.lon`.                                                                                                                                                                                                                          |
+| `variables.level`                            | String | Name of the level variable. Optional — used to align the level dimension between the two datasets before concatenation.                                                                                                                                                                          |
+| `combine_point_discriminator_var`            | String | For point-list datasets: name of the variable used to discriminate individual points (e.g. a station name variable). If omitted, the process auto-detects a string variable sharing the same dimension as `variables.lon`/`lat`.                                                                 |
+| `attr_indexed_var_renaming`                  | Object | Optional. When the two datasets share variables whose names embed a numeric index (e.g. `MyVar-0`, `MyVar-1`), and that index is described in the dataset attributes, use this option to re-align those indices before concatenation. See the dedicated section below.                           |
+| `attr_indexed_var_renaming.attr_pattern`     | String | Regex (Python `re.fullmatch`) applied to every **attribute key** of the dataset. Must contain two named groups: `(?P<name>...)` to capture the attribute name prefix, and `(?P<index>...)` to capture the numeric index.                                                                         |
+| `attr_indexed_var_renaming.target_attr_name` | String | The exact value that `(?P<name>...)` must match to select the attributes used as the index-to-entity mapping (e.g. `"MyVarName"`). All other matching attributes are still renamed if their index changes, but only attributes whose name prefix equals this value are used to build the mapping. |
+| `attr_indexed_var_renaming.var_pattern`      | String | Regex (Python `re.fullmatch`) applied to every **variable name**. Must contain at least `(?P<index>...)` to identify the index embedded in the name. Any other named group is passed to `var_template`.                                                                                          |
+| `attr_indexed_var_renaming.var_template`     | String | Python format string used to reconstruct a variable name after its index has been updated. Uses the named groups from `var_pattern` (e.g. `"{name}-{index}"`).                                                                                                                                   |
+
+#### `attr_indexed_var_renaming` — detailed explanation
+
+Some datasets encode multiple entities (e.g. measurement stations) as a set of parallel variables, each suffixed with a numeric index, where the mapping between index and entity name lives in the dataset **attributes**. When combining two such datasets, the same entity may carry a different index in each, causing variable name conflicts or data mix-ups.
+
+`attr_indexed_var_renaming` resolves this automatically:
+
+1. It scans both datasets' attributes with `attr_pattern` and `target_attr_name` to build an **index ↔ entity name** map for each dataset.
+2. For each entity in the secondary dataset it finds the correct index from the primary, and renames all secondary variables (matched by `var_pattern`) and attributes accordingly.
+3. Entities that appear only in the secondary dataset are assigned a new index that continues from the highest index found in the primary dataset.
+
+> [!WARNING]
+> The `attr_pattern` regex must use a **non-greedy** quantifier for the `name` group (e.g. `.+?` instead of `.+`) to correctly capture multi-digit indices. With a greedy `.+`, `MyVarName10` would be parsed as `name=MyVarName1, index=0`, causing the entity at index 10 to be silently ignored.
+
+**Example** — attributes are named `MyVarName0`, `MyVarName1`... (values are entity names) and variables are named `MyVar-0`, `MyVar-1`...:
+
+```json
+"attr_indexed_var_renaming": {
+  "attr_pattern": "^(?P<name>.+?)(?P<index>\\d+)$",
+  "target_attr_name": "MyVarName",
+  "var_pattern": "^(?P<name>.+)-(?P<index>\\d+)$",
+  "var_template": "{name}-{index}"
+}
+```
 
 ### `assign_coords`
 
