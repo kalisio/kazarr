@@ -764,10 +764,14 @@ def probe(
                 interp_config=interp_vars_params,
             )
             neighbor_data = filtered_da.isel(**spatial_indexers)
-            interpolated_values = (
-                (neighbor_data * weights_da).sum(dim="neighbor").values
-            )
-            var_data = interpolated_values.tolist()
+            # Identify timesteps (or any leading dims) where ALL neighbors are NaN.
+            # xarray.sum(skipna=True) returns 0.0 in that case, which would
+            # incorrectly replace the "point didn't exist yet" NaN values with 0.
+            all_nan_mask = neighbor_data.isnull().all(dim="neighbor")
+            interpolated_values = (neighbor_data * weights_da).sum(dim="neighbor")
+            # Restore NaN for positions that had no valid neighbor data at all.
+            interpolated_values = interpolated_values.where(~all_nan_mask)
+            var_data = interpolated_values.values.tolist()
         else:
             interp_methods = None
             if is_regular_grid and interp_spatial_method != "nearest":

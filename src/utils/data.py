@@ -355,6 +355,16 @@ def sel(
                 "makima",
             }
 
+            # Before interpolation, record positions that are entirely NaN along
+            # each interpolated dimension. These correspond to points that did not
+            # exist in the dataset before a given time (e.g. added via
+            # combine_at_time). After interpolation the NaN mask must be restored
+            # for those positions so they are not coerced to 0 by scipy.
+            nan_masks = {}
+            for dim in interpolated_vars:
+                if dim in data.dims:
+                    nan_masks[dim] = data.isnull().all(dim=dim)
+
             for method, vars_to_interp in method_groups.items():
                 if method == "nearest":
                     continue
@@ -380,6 +390,13 @@ def sel(
                     )
                 except ValueError as e:
                     raise exceptions.BadSelection("Data interpolation failed.") from e
+                
+            # Re-apply NaN for positions that were fully null before interpolation.
+            # This ensures that a point added after a certain date keeps NaN
+            # (not 0) for all timesteps before its creation.
+            for dim, mask in nan_masks.items():
+                if dim in data.dims and mask.any():
+                    data = data.where(~mask)
 
     return data
 
