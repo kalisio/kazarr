@@ -422,6 +422,138 @@ class TestRectilinearGrid:
             isinstance(v, list) and len(v) == 2 for v in values
         )
 
+    def test_probes_path_geojson_no_time(self, client: TestClient):
+        """Probe along a path with GeoJSON LineString body."""
+        payload = {
+            "type": "FeatureCollection",
+            "features": [
+                {
+                    "type": "Feature",
+                    "geometry": {
+                        "type": "LineString",
+                        "coordinates": [[2.3, 43.3], [2.4, 43.4], [2.5, 43.5]],
+                    }
+                }
+            ],
+        }
+        response = client.post(
+            f"/datasets/{DATASET_NAME}/probes?variables=Precipitation", json=payload
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"]["error_code"] == "PATH_MISSING_TIMES"
+
+    def test_probes_path_geojson_bad_time_length(self, client: TestClient):
+        """Probe along a path with GeoJSON LineString body and mismatched times."""
+        payload = {
+            "type": "FeatureCollection",
+            "features": [
+                {
+                    "type": "Feature",
+                    "geometry": {
+                        "type": "LineString",
+                        "coordinates": [[2.3, 43.3], [2.4, 43.4], [2.5, 43.5]],
+                    },
+                    "properties": {"times": ["2026-01-01T00:00:00", "2026-01-01T01:00:00"]},
+                }
+            ]
+        }
+        response = client.post(
+            f"/datasets/{DATASET_NAME}/probes?variables=Precipitation", json=payload
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"]["error_code"] == "PATH_INVALID_TIMES_LENGTH"
+
+    def test_probes_path_geojson_time_ranges(self, client: TestClient):
+        """Probe along a path with GeoJSON LineString body and time ranges."""
+        payload = {
+            "type": "FeatureCollection",
+            "features": [
+                {
+                    "type": "Feature",
+                    "geometry": {
+                        "type": "LineString",
+                        "coordinates": [[2.3, 43.3], [2.4, 43.4], [2.5, 43.5]],
+                    },
+                    "properties": {"times": ["2026-01-01T00:00:00/2026-01-01T01:00:00", "2026-01-01T01:00:00/2026-01-01T02:00:00", "2026-01-01T02:00:00/2026-01-01T03:00:00"]},
+                }
+            ]
+        }
+        response = client.post(
+            f"/datasets/{DATASET_NAME}/probes?variables=Precipitation", json=payload
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"]["error_code"] == "PATH_DOES_NOT_SUPPORT_TIME_RANGES"
+
+    def test_probes_path_geojson_no_points(self, client: TestClient):
+        """Probe along a path with GeoJSON LineString body and no points."""
+        payload = {
+            "type": "FeatureCollection",
+            "features": [
+                {
+                    "type": "Feature",
+                    "geometry": {
+                        "type": "LineString",
+                        "coordinates": [],
+                    },
+                    "properties": {"times": []},
+                }
+            ]
+        }
+        response = client.post(
+            f"/datasets/{DATASET_NAME}/probes?variables=Precipitation", json=payload
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"]["error_code"] == "MULTI_PROBE_BODY_MISSING_POINT"
+
+    def test_probes_path(self, client: TestClient):
+        """Probe along a path with explicit 'path' and 'times' fields."""
+        payload = {
+            "path": [{"lon": 2.3, "lat": 43.3}, {"lon": 2.4, "lat": 43.4}, {"lon": 2.5, "lat": 43.5}],
+            "times": ["2026-01-01T00:00:00", "2026-01-01T01:00:00", "2026-01-01T02:00:00"]
+        }
+        response = client.post(
+            f"/datasets/{DATASET_NAME}/probes?variables=Precipitation", json=payload
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["times"]) == 3
+        assert len(data["longitudes"]) == 3
+        assert len(data["latitudes"]) == 3
+        assert len(data["values"]["Precipitation"]) == 3
+
+    def test_probes_path_geojson(self, client: TestClient):
+        """Probe along a path with GeoJSON LineString body and matching times."""
+        payload = {
+            "type": "FeatureCollection",
+            "features": [
+                {
+                    "type": "Feature",
+                    "geometry": {
+                        "type": "LineString",
+                        "coordinates": [[2.3, 43.3], [2.4, 43.4], [2.5, 43.5]],
+                    },
+                    "properties": {"times": ["2026-01-01T00:00:00", "2026-01-01T01:00:00", "2026-01-01T02:00:00"]},
+                }
+            ]
+        }
+        response = client.post(
+            f"/datasets/{DATASET_NAME}/probes?variables=Precipitation&format=geojson", json=payload
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["features"]) == 1
+        feature = data["features"][0]
+        assert feature["geometry"]["type"] == "LineString"
+        assert len(feature["geometry"]["coordinates"]) == 3
+        assert len(feature["properties"]["times"]) == 3
+        assert len(feature["properties"]["Precipitation"]) == 3
+
     # ------------------------------------------------------------------
     # Mesh endpoint
     # ------------------------------------------------------------------

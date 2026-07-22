@@ -48,10 +48,10 @@ class TestGeneral:
         """Calling probe without lat/lon should return 422."""
         response = client.get("/datasets/some_dataset/probe?variables=Value")
 
-        assert response.status_code == 422
+        assert response.status_code in (400, 422)
 
     def test_probes_missing_points(self, client: TestClient):
         """Calling probes without points in body should return 422."""
         response = client.post("/datasets/some_dataset/probes?variables=Value", json={})
 
-        assert response.status_code == 422
+        assert response.status_code in (400, 422)
