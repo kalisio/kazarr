@@ -113,11 +113,78 @@ The `probes` endpoint accepts the following query parameters:
 | `format`                | Format of the extracted data (Supported: `raw`, `geojson`).                                               |    ✓     | `raw`         |
 | `as_dims`               | If a variable has the same name as a dim, force query parameters in this list to be treated as dimensions |    ✓     | `[]`          |
 
-The `probes` endpoint accepts the following body structure:
+The `probes` endpoint accepts the following body structures:
 
-`{ "points": [{"lat": {"lon": 5.35964198232827, "lat": 45.01486461788593, "level": 100.0}, {"lon": 7.79425497419718, "lat": 48.45134263206789, "level": 50.0}}, ...] }`
+- List of points (return values for each requested time) with ad hoc structure:
 
-For each point, the `level` property is optional.
+```json
+{
+   "points": [{"lat": {"lon": 5.35964198232827, "lat": 45.01486461788593, "level": 100.0}, {"lon": 7.79425497419718, "lat": 48.45134263206789, "level": 50.0}}, ...],
+   "times": ["2026-07-18T12:00:00", "2026-07-20T08:00:00/2026-07-20T22:00:00"]
+}
+```
+
+- List of points with GeoJSON structure:
+
+```json
+{
+   "type": "FeatureCollection",
+   "times": ["2026-07-18T12:00:00", "2026-07-20T08:00:00/2026-07-20T22:00:00"],
+   "features": [
+      {
+         "type": "Feature",
+         "geometry": {
+            "type": "Point",
+            "coordinates": [5.35964198232827, 45.01486461788593]
+         }
+      },
+      ...
+   ]
+}
+```
+
+- Path (one time per point) with ad hoc structure:
+
+```json
+{
+   "path": [{"lat": {"lon": 5.35964198232827, "lat": 45.01486461788593, "level": 100.0}, {"lon": 7.79425497419718, "lat": 48.45134263206789, "level": 50.0}}],
+   "times": ["2026-07-18T12:00:00", "2026-07-20T22:00:00"]
+}
+```
+
+- Path with GeoJSON structure:
+
+```json
+{
+   "type": "FeatureCollection",
+   "features": [
+      {
+         "type": "Feature",
+         "geometry": {
+            "type": "LineString",
+            "coordinates": [
+               [5.35964198232827, 45.01486461788593],
+               [7.7942597419718, 48.45134263206789]
+            ]
+         },
+         "properties": {
+            "times": ["2026-07-18T12:00:00", "2026-07-20T22:00:00"]
+         }
+      },
+      ...
+   ]
+}
+```
+
+> [!TIP]
+> For each point, the `level` property is optional.
+
+> [!TIP]
+> With "list of point" mode, if `times` is not provided, API will return every times
+
+> [!IMPORTANT]
+> Time ranges can't be used with "path" mode
+
 
 ### /datasets/{dataset}/isoline (GET)
 
