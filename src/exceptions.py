@@ -178,3 +178,37 @@ class InvalidDatetimeFormat(UserInputBasedException):
     def __init__(self, datetime_str):
         message = f"Invalid datetime format: '{datetime_str}'. Expected ISO 8601 format."
         super().__init__("INVALID_DATETIME_FORMAT", message, datetime_str)
+
+
+class PathMissingTimes(UserInputBasedException):
+    def __init__(self):
+        message = (
+            "Path mode ('path' or GeoJSON LineString) requires 'times' to be defined."
+        )
+        super().__init__("PATH_MISSING_TIMES", message)
+
+
+class PathInvalidTimesLength(UserInputBasedException):
+    def __init__(self, times, path_length):
+        message = (
+            f"Path mode requires exactly one time per point: "
+            f"got {len(times)} times for {path_length} points."
+        )
+        super().__init__("PATH_INVALID_TIMES_LENGTH", message, {"times": times, "path_length": path_length})
+
+
+class PathDoesNotSupportTimeRanges(UserInputBasedException):
+    def __init__(self, invalid_times):
+        message = (
+            "Trajectory mode requires single timestamps, not time ranges. "
+            f"Invalid values: {invalid_times}"
+        )
+        super().__init__("PATH_DOES_NOT_SUPPORT_TIME_RANGES", message, {"invalid_times": invalid_times})
+
+
+class MultiProbeBodyMissingPoint(UserInputBasedException):
+    def __init__(self):
+        message = (
+            "Body must contain 'points', 'path', or a GeoJSON FeatureCollection of Points/LineString."
+        )
+        super().__init__("MULTI_PROBE_BODY_MISSING_POINT", message)

@@ -76,7 +76,15 @@ def prepare_mesh_output(
 
 
 def prepare_output(
-    var_names, vals, lons, lats, levels=None, global_props=None, var_props=None, has_time_dimension=False
+    var_names,
+    vals,
+    lons,
+    lats,
+    levels=None,
+    global_props=None,
+    var_props=None,
+    has_time_dimension=False,
+    is_path=False,
 ):
     if global_props is None:
         global_props = {}
@@ -125,6 +133,10 @@ def prepare_output(
         var_vals = (
             var_vals.reshape(vals[0].shape[0], -1) if has_time_dimension else var_vals
         )
+
+        if is_path and len(var_vals) == 1:
+            var_vals = var_vals[0]  # Unwrap single value for path mode
+
         vals_dict[var_name] = var_vals.tolist()
         out_vars_props[var_name] = var_props.get(var_name, {}).copy()
         if bounds is not None:
@@ -144,7 +156,15 @@ def prepare_output(
 
 
 def prepare_raw_output(
-    var_names, vals, lons, lats, levels=None, global_props=None, var_props=None, has_time_dimension=False
+    var_names,
+    vals,
+    lons,
+    lats,
+    levels=None,
+    global_props=None,
+    var_props=None,
+    has_time_dimension=False,
+    is_path=False,
 ):
     flat_lons, flat_lats, flat_levels, vals_dict, collection_props, out_props, _ = (
         prepare_output(
@@ -156,6 +176,7 @@ def prepare_raw_output(
             global_props=global_props,
             var_props=var_props,
             has_time_dimension=has_time_dimension,
+            is_path=is_path,
         )
     )
 
@@ -168,7 +189,7 @@ def prepare_raw_output(
         data["levels"] = flat_levels
 
     return {
-        "shape": vals[0].shape,
+        "shape": vals[0].shape[1:] if is_path else vals[0].shape,
         **collection_props,
         "variables": out_props,
         **data,
@@ -176,7 +197,16 @@ def prepare_raw_output(
 
 
 def prepare_geojson_output(
-    var_names, vals, lons, lats, levels=None, collection_props=None, var_props=None, has_time_dimension=False
+    var_names,
+    vals,
+    lons,
+    lats,
+    levels=None,
+    collection_props=None,
+    var_props=None,
+    has_time_dimension=False,
+    is_path=False,
+    line_string_props=None,
 ):
     (
         flat_lons,
@@ -195,33 +225,64 @@ def prepare_geojson_output(
         global_props=collection_props,
         var_props=var_props,
         has_time_dimension=has_time_dimension,
+        is_path=is_path,
     )
 
     features = []
+    path = {"geometry": [], "values": {}} if is_path else None
     for i in range(len(flat_lons)):
         out_vals = {}
         for var_name, var_vals in vals_dict.items():
             if has_one_point and len(var_vals) > 1:
                 # Time series or multiple values for a single point
                 out_vals[var_name] = var_vals
-            elif has_time_dimension:
+            elif has_time_dimension and not is_path:
                 # Time series for multiple points
                 out_vals[var_name] = [var_vals[j][i] for j in range(len(var_vals))]
             else:
                 # Spatial data (one value per point) or single scalar
                 out_vals[var_name] = var_vals[i]
+            if is_path:
+                if var_name not in path["values"]:
+                    path["values"][var_name] = []
+                path["values"][var_name].append(
+                    out_vals[var_name]
+                    if not isinstance(out_vals[var_name], list)
+                    else out_vals[var_name][0]
+                )
 
         coordinates = [float(flat_lons[i]), float(flat_lats[i])]
-        if flat_levels is not None and flat_levels[i] is not None and not np.isnan(flat_levels[i]):
+        if (
+            flat_levels is not None
+            and flat_levels[i] is not None
+            and not np.isnan(flat_levels[i])
+        ):
             coordinates.append(float(flat_levels[i]))
+
+        if is_path:
+            path["geometry"].append(coordinates)
+        else:
+            features.append(
+                {
+                    "type": "Feature",
+                    "geometry": {
+                        "type": "Point",
+                        "coordinates": coordinates,
+                    },
+                    "properties": {"id": i, **out_vals},
+                }
+            )
+
+    if is_path:
+        line_string_props = line_string_props or {}
         features.append(
             {
                 "type": "Feature",
                 "geometry": {
-                    "type": "Point",
-                    "coordinates": coordinates,
+                    "type": "LineString",
+                    "coordinates": path["geometry"],
                 },
-                "properties": {"id": i, **out_vals},
+                "properties": {"id": 0, **path["values"], **line_string_props},
             }
         )
 

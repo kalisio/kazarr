@@ -3,6 +3,13 @@ from typing import List, Literal, Optional
 from fastapi import Query, Path
 from pydantic import BaseModel, model_validator
 
+from src.exceptions import (
+    PathMissingTimes,
+    PathInvalidTimesLength,
+    PathDoesNotSupportTimeRanges,
+    MultiProbeBodyMissingPoint,
+)
+
 
 @dataclass
 class BaseParams:
@@ -145,14 +152,34 @@ class ProbePoint(BaseModel):
     level: Optional[float] = None
 
 
-class GeoJSONPoint(BaseModel):
+class GeoJSONGeometry(BaseModel):
     type: str
-    coordinates: list[float]
+    coordinates: list
+
+    def as_probe_point(self) -> "ProbePoint":
+        """Convert a Point geometry to a ProbePoint."""
+        return ProbePoint(
+            lon=self.coordinates[0],
+            lat=self.coordinates[1],
+            level=self.coordinates[2] if len(self.coordinates) > 2 else None,
+        )
+
+    def as_probe_points(self) -> "List[ProbePoint]":
+        """Convert a LineString geometry to a list of ProbePoints."""
+        return [
+            ProbePoint(
+                lon=coord[0],
+                lat=coord[1],
+                level=coord[2] if len(coord) > 2 else None,
+            )
+            for coord in self.coordinates
+        ]
 
 
 class GeoJSONFeature(BaseModel):
     type: str
-    geometry: GeoJSONPoint
+    geometry: GeoJSONGeometry
+    properties: Optional[dict] = None
 
 
 class GeoJSONFeatureCollection(BaseModel):
@@ -161,29 +188,44 @@ class GeoJSONFeatureCollection(BaseModel):
 
 
 class MultiProbeBody(BaseModel):
-    # ad hoc format
+    # ad hoc format — normal mode (all times for each point)
     points: List[ProbePoint] | None = None
+    # ad hoc format — trajectory mode (time i for point i)
+    path: List[ProbePoint] | None = None
     times: list[str] | None = None
     # GeoJSON FeatureCollection format
     type: str | None = None
     features: list[GeoJSONFeature] | None = None
+    # Resolved after validation
+    is_path: bool = False
 
     @model_validator(mode="after")
     def resolve_points(self) -> "MultiProbeBody":
         if self.type == "FeatureCollection" and self.features is not None:
-            self.points = [
-                ProbePoint(
-                    lon=f.geometry.coordinates[0],
-                    lat=f.geometry.coordinates[1],
-                    level=f.geometry.coordinates[2]
-                    if len(f.geometry.coordinates) > 2
-                    else None,
-                )
-                for f in self.features
-                if f.geometry.type == "Point"
-            ]
-        if not self.points:
-            raise ValueError(
-                "Body must contain 'points' or a GeoJSON FeatureCollection of Points"
-            )
+            line_string_points: List[ProbePoint] = []
+            point_points: List[ProbePoint] = []
+            for f in self.features:
+                if f.geometry.type == "LineString":
+                    line_string_points.extend(f.geometry.as_probe_points())
+                    self.times = f.properties.get("times") if f.properties else None
+                    break  # Only one LineString is allowed, so we can stop after the first one
+                elif f.geometry.type == "Point":
+                    point_points.append(f.geometry.as_probe_point())
+
+            if line_string_points:
+                self.path = line_string_points
+            elif point_points:
+                self.points = point_points
+
+        if self.path is not None:
+            self.is_path = True
+            if not self.times:
+                raise PathMissingTimes()
+            if len(self.times) != len(self.path):
+                raise PathInvalidTimesLength(self.times, len(self.path))
+            invalid_times = [t for t in self.times if "/" in t]
+            if invalid_times:
+                raise PathDoesNotSupportTimeRanges(invalid_times)
+        elif not self.points:
+            raise MultiProbeBodyMissingPoint()
         return self

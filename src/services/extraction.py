@@ -851,15 +851,18 @@ def multi_probe(
     variables: Union[str, List[str]],
     points: List[Dict[str, float]],
     time_range: Optional[str] = None,
+    is_path: bool = False,
     format: str = "raw",
     config: Union[Dict[str, Any], ExtractionConfig, None] = None,
     cancel_event: Optional[threading.Event] = None,
 ):
     variables = variables if isinstance(variables, list) else [variables]
 
+    is_path = is_path and isinstance(time_range, list) and len(time_range) == len(points)
+
     lats, lons, levels, vals = [], [], [], {}
     times, var_props = None, None
-    for point in points:
+    for index, point in enumerate(points):
         result = probe(
             request,
             dataset_id,
@@ -867,7 +870,7 @@ def multi_probe(
             point.lon,
             point.lat,
             point.level,
-            time_range,
+            time_range if not is_path else time_range[index],
             "raw",
             config,
             cancel_event,
@@ -880,7 +883,9 @@ def multi_probe(
                 vals[var] = []
             vals[var].append(result["values"][var])
         if times is None:
-            times = result.get("times")
+            times = result.get("times") if not is_path else []
+        if is_path:
+            times.append(result.get("times")[0])
         if var_props is None:
             var_props = {var: result["variables"][var] for var in variables}
     vals = [vals[var] for var in variables]
@@ -896,17 +901,21 @@ def multi_probe(
             levels=np.asarray(levels) if levels and any(levels) else None,
             global_props={"times": times} if times is not None else None,
             has_time_dimension=times is not None,
+            is_path=is_path,
         )
     elif format == "geojson":
+        times_props = {"times": times} if times is not None else None
         out = output.prepare_geojson_output(
             variables,
             vals,
             np.asarray(lons),
             np.asarray(lats),
             levels=np.asarray(levels) if levels and any(levels) else None,
-            collection_props={"times": times} if times is not None else None,
+            collection_props=times_props if not is_path else None,
             var_props=var_props,
             has_time_dimension=times is not None,
+            is_path=is_path,
+            line_string_props=times_props if is_path else None
         )
     else:
         raise exceptions.BadConfigurationVariable(f"Unsupported format: {format}")
