@@ -78,9 +78,8 @@ def convert():
         # to avoid conflicts with the main app's imports and environment.
 
         entry_script = _tool_dir / "main.py"
-        tool_command = "new-dataset"
 
-        cmd = [sys.executable, str(entry_script), tool_command]
+        cmd = [sys.executable, str(entry_script)]
         opt_args = {
             "template": template,
             "config": json.dumps(config) if config is not None else None,
