@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "kazarr"
+name = "kazarr-conversion-tool"
 version = "0.1.0"
 description = "A tool to process various data formats to Zarr datasets compatible with the kazarr service"
 readme = "README.md"
