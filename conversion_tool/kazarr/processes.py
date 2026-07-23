@@ -1,5 +1,6 @@
 import os
 import itertools
+import logging
 import re
 import shutil
 import uuid
@@ -15,7 +16,7 @@ from platformdirs import user_cache_dir
 
 from dask.distributed import Client, performance_report
 
-from src.utils import (
+from kazarr.utils import (
     get_dataset_config_value,
     merge,
     rechunk_if_needed,
@@ -31,6 +32,7 @@ from src.utils import (
     resolve_args,
 )
 
+logger = logging.getLogger(__name__)
 
 S3_PREFIX = "s3://"
 BUCKET_NAME_ENV_VAR = "BUCKET_NAME"
@@ -44,9 +46,9 @@ def init_dask_dashboard(dataset, config):
     """Initialize the Dask dashboard to monitor computation progress and load."""
     client = Client()
     link = client.dashboard_link
-    print("======================================" + (len(link) * "="))
-    print(f"[KAZARR] Dask dashboard available at: {link}")
-    print("======================================" + (len(link) * "="))
+    message = "Dask dashboard available at: "
+    separator = "=" * (len(message) + len(link))
+    logger.info("\n%s\nDask dashboard available at: %s\n%s", separator, link, separator)
     config["dask_dashboard_initialised"] = True
 
     return dataset, config
@@ -61,7 +63,7 @@ def load_from_netcdf(dataset, config):
         nonlocal ds_count, total_count
         ds_count += 1
         percentage = ds_count / total_count * 100
-        print(f"Progress: {ds_count} / {total_count} ({percentage:.2f}%)")
+        logger.info("Progress: %d / %d (%.2f%%)", ds_count, total_count, percentage)
         return ds
 
     path = get_dataset_config_value(
@@ -100,7 +102,9 @@ def load_from_netcdf(dataset, config):
             s3_files = [fs.open(f) for f in files]
             total_count = len(s3_files)
 
-            print(f"Loading {total_count} NetCDF files from S3 folder {path}...")
+            logger.info(
+                "Loading %d NetCDF files from S3 folder %s...", total_count, path
+            )
 
             new_dataset = xr.open_mfdataset(
                 s3_files,
@@ -157,7 +161,7 @@ def load_from_grib(dataset, config):
         nonlocal ds_count, total_count
         ds_count += 1
         percentage = ds_count / total_count * 100
-        print(f"Progress: {ds_count} / {total_count} ({percentage:.2f}%)")
+        logger.info("Progress: %d / %d (%.2f%%)", ds_count, total_count, percentage)
         return ds
 
     path = get_dataset_config_value(
@@ -191,7 +195,11 @@ def load_from_grib(dataset, config):
             os.makedirs(target_tmp_dir, exist_ok=True)
             if not os.path.exists(os.path.join(target_tmp_dir, os.path.basename(path))):
                 fs.get(path, os.path.join(target_tmp_dir, os.path.basename(path)))
-                config = add_to_clean_config(config, "used_paths", os.path.join(target_tmp_dir, os.path.basename(path)))
+                config = add_to_clean_config(
+                    config,
+                    "used_paths",
+                    os.path.join(target_tmp_dir, os.path.basename(path)),
+                )
             new_dataset = xr.open_dataset(
                 os.path.join(target_tmp_dir, os.path.basename(path)),
                 engine="cfgrib",
@@ -241,8 +249,8 @@ def load_from_grib(dataset, config):
                     path, engine="cfgrib", chunks="auto", backend_kwargs=backend_kwargs
                 )
             except cfgrib.dataset.DatasetBuildError:
-                print(
-                    "[KAZARR] Failed to load GRIB file with Xarray, trying to open as multiple datasets... This may cause higher memory usage and slower performance."
+                logger.warning(
+                    "Failed to load GRIB file with Xarray, trying to open as multiple datasets... This may cause higher memory usage and slower performance."
                 )
                 datasets = cfgrib.open_datasets(path, backend_kwargs=backend_kwargs)
                 full_variables = set()
@@ -261,8 +269,8 @@ def load_from_grib(dataset, config):
                     new_dataset = datasets[0].chunk("auto")
                 else:
                     try:
-                        print(
-                            "[KAZARR] Multiple datasets found in GRIB file, attempting to merge them..."
+                        logger.info(
+                            "Multiple datasets found in GRIB file, attempting to merge them..."
                         )
                         # Use chunk("auto") on each dataset to enable Dask parallelism during merge, which can help reduce memory usage and speed up the process
                         for i, ds in enumerate(datasets):
@@ -272,9 +280,16 @@ def load_from_grib(dataset, config):
                                 if var in ds.data_vars:
                                     duplicate_vars_indexes[var] += 1
                                     if duplicate_vars_indexes[var] > 1:
-                                        new_var_name = f"{var}_{duplicate_vars_indexes[var]}"
+                                        new_var_name = (
+                                            f"{var}_{duplicate_vars_indexes[var]}"
+                                        )
                                         rename_dict[var] = new_var_name
-                                        print(f"         ! Renaming {var} to {new_var_name} in dataset {i} to avoid conflicts.")
+                                        logger.info(
+                                            "         ! Renaming %s to %s in dataset %d to avoid conflicts.",
+                                            var,
+                                            new_var_name,
+                                            i,
+                                        )
                             if rename_dict:
                                 datasets[i] = datasets[i].rename(rename_dict)
                         new_dataset = xr.merge(datasets, compat="minimal", join="outer")
@@ -282,11 +297,12 @@ def load_from_grib(dataset, config):
                         final_variables.update(new_dataset.coords)
                         removed_variables = full_variables - final_variables
                         if removed_variables:
-                            print(
-                                f"         ! The following variables were removed during merge due to conflicts: {removed_variables}"
+                            logger.info(
+                                "         ! The following variables were removed during merge due to conflicts: %s",
+                                removed_variables,
                             )
                     except Exception as e:
-                        print(f"Error occurred while merging datasets: {e}")
+                        logger.exception("Error occurred while merging datasets: %s", e)
         elif os.path.isdir(path):
             concat_dim = get_dataset_config_value(
                 dataset,
@@ -496,12 +512,12 @@ def combine_at_time(dataset, config):
         raise ValueError(
             f"Time variable '{time_var}' not found in the secondary dataset '{combine_dataset_tag}' for combine_at_time process."
         )
-    
+
     if dataset[time_var].ndim != 1:
         raise ValueError(
             f"Time variable '{time_var}' in the main dataset has {dataset[time_var].ndims} dimensions, but a 1-dimensional time variable is required for combine_at_time process."
         )
-    
+
     time_dim = dataset[time_var].dims[0]
 
     if np.issubdtype(dataset[time_var].dtype, np.datetime64) or np.issubdtype(
@@ -610,7 +626,7 @@ def combine_at_time(dataset, config):
             raise ValueError(
                 f"Variable '{index_target_var}' not found in the secondary dataset. Please specify a valid variable to discriminate points ('combine_point_discriminator_var' config parameter)."
             )
-        
+
         if len(primary_before[index_target_var].dims) == 0:
             raise ValueError(
                 (
@@ -670,7 +686,7 @@ def combine_at_time(dataset, config):
                             f"to align with secondary dataset. This can happen if the dimension is an index "
                             f"or has an incompatible dtype. Original error: {e}"
                         ) from e
-                    
+
         if attr_indexed_var_renaming is not None:
             attr_pattern = attr_indexed_var_renaming.get("attr_pattern")
             target_attr_name = attr_indexed_var_renaming.get("target_attr_name")
@@ -780,9 +796,9 @@ def combine_at_time(dataset, config):
 
             if rename_dict:
                 try:
-                    print(
-                        "[KAZARR] Renaming variables in the secondary dataset "
-                        "to align indices with the primary dataset:"
+                    logger.info(
+                        "Renaming variables in the secondary dataset "
+                        "to align indices with the primary dataset"
                     )
                     secondary_after = secondary_after.rename(rename_dict)
                 except Exception as e:
@@ -792,9 +808,9 @@ def combine_at_time(dataset, config):
                     ) from e
 
             if attr_rename_dict:
-                print(
-                    "[KAZARR] Renaming attributes in the secondary dataset "
-                    "to align indices with the primary dataset:"
+                logger.info(
+                    "Renaming attributes in the secondary dataset "
+                    "to align indices with the primary dataset"
                 )
                 updated_attrs = {}
                 for attr_key, attr_value in secondary_after.attrs.items():
@@ -813,26 +829,26 @@ def combine_at_time(dataset, config):
                 f"Secondary variables: {list(secondary_after.data_vars)}. "
                 f"Original error: {e}"
             ) from e
-        
+
     # Try to remove useless time dimension created by concat
     # 1. Remove time dimension from spatial variables:
     #   As grid can change between the two datasets, but the combined one
     # should have the shape of the two combined, we will keep the last version (last time step)
-    # and fill NaN values with the first version (first time step) for the time steps where 
-    # the grid is different, to avoid having NaN values for spatial variables in the 
+    # and fill NaN values with the first version (first time step) for the time steps where
+    # the grid is different, to avoid having NaN values for spatial variables in the
     # combined dataset.
     def merge_vars(ds, var):
         if ds[var].ndim > 1 and time_dim in ds[var].dims:
             ds[var] = ds[var][-1].fillna(ds[var][0])
         return ds
-    
+
     for var in [lon_var, lat_var, level_var]:
         if time_dim in combined_dataset[var].dims:
             combined_dataset = merge_vars(combined_dataset, var)
 
     # 2. Remove time dimension from scalar variables that have not changed
-    #   Scalar variables will also have been concatenated along the 
-    # time dimension, but if their value is the same in both 
+    #   Scalar variables will also have been concatenated along the
+    # time dimension, but if their value is the same in both
     # datasets, we can just keep one version, and so, remove
     # the time dimension added by concat
     for var in combined_dataset.data_vars:
@@ -943,15 +959,19 @@ def rename_variables(dataset, config):
     rename_map = {old: new for old, new in rename_map.items() if old in dataset}
     for old_name, new_name in rename_map.items():
         if old_name not in dataset:
-            print(
-                f"[KAZARR] Warning: Variable '{old_name}' not found in dataset for rename_variables process. Skipping."
+            logger.warning(
+                "Variable '%s' not found in dataset for rename_variables process. Skipping.",
+                old_name,
             )
         elif new_name in dataset:
-            print(
-                f"[KAZARR] Warning: Variable '{new_name}' already exists in dataset. Cannot rename '{old_name}' to '{new_name}'. Skipping."
+            logger.warning(
+                "Variable '%s' already exists in dataset. Cannot rename '%s' to '%s'. Skipping.",
+                new_name,
+                old_name,
+                new_name,
             )
         else:
-            print(f"[KAZARR] Renaming variable '{old_name}' to '{new_name}'")
+            logger.info("Renaming variable '%s' to '%s'", old_name, new_name)
 
     dataset = dataset.rename(rename_map)
     return dataset, config
@@ -1071,7 +1091,12 @@ def delta_time_to_datetime(dataset, config):
         # Try to deduce time dimension from time variable if time dimension is not provided
         # If time dimension is found, we create a coordinate "datetimes" along that dimension
         # If not, we create a new variable "datetimes"
-        if time_dim is None and time_var is not None and time_var in dataset and dataset[time_var].ndim >= 1:
+        if (
+            time_dim is None
+            and time_var is not None
+            and time_var in dataset
+            and dataset[time_var].ndim >= 1
+        ):
             time_dim = dataset[time_var].dims[0]
 
         time_deltas = dataset[time_var].values
@@ -1172,20 +1197,21 @@ def normalize_longitudes(dataset, config):
         )
     lon_max = float(dataset[lon_var].max())
     if lon_max <= 180:
-        print(
-            f"[KAZARR] Longitudes are already in [-180, 180] range (max={lon_max:.2f}). "
-            "No normalization needed."
+        logger.info(
+            "Longitudes are already in [-180, 180] range (max=%.2f). "
+            "No normalization needed.",
+            lon_max,
         )
         return dataset, config
-    print(
-        f"[KAZARR] Normalizing longitudes from [0, 360] to [-180, 180] (max={lon_max:.2f})..."
+    logger.info(
+        "Normalizing longitudes from [0, 360] to [-180, 180] (max=%.2f)...", lon_max
     )
     dataset = dataset.assign_coords({lon_var: (((dataset[lon_var] + 180) % 360) - 180)})
     # Sort by longitude to restore monotonically increasing order
     # after the wrap-around transformation
     if dataset[lon_var].ndim == 1:
         dataset = dataset.sortby(lon_var)
-    print("[KAZARR] Longitudes normalized successfully.")
+    logger.info("Longitudes normalized successfully.")
     return dataset, config
 
 
@@ -1200,14 +1226,14 @@ def simplify_grid(dataset, config):
         raise ValueError(
             f"Longitude '{lon_var}' or latitude '{lat_var}' variable not found in dataset for simplify_grid process."
         )
-    
+
     lons = dataset[lon_var]
     lats = dataset[lat_var]
     is_point_list = lons.ndim == 1 and lats.ndim == 1 and lons.dims == lats.dims
     is_one_point = lons.ndim == 0 and lats.ndim == 0
     if is_point_list or is_one_point:
-        print(
-            "[KAZARR] Grid is already regular (1D longitude and latitude with same dimension). No simplification needed."
+        logger.info(
+            "Grid is already regular (1D longitude and latitude with same dimension). No simplification needed."
         )
         return dataset, config
 
@@ -1232,8 +1258,8 @@ def simplify_grid(dataset, config):
     unused_dims = original_dims - simplified_dims
     if unused_dims:
         for dim in unused_dims:
-            print(
-                f"[KAZARR] Removing unused dimension '{dim}' after grid simplification."
+            logger.info(
+                "Removing unused dimension '%s' after grid simplification.", dim
             )
             dataset = dataset.squeeze(dim)
             if (
@@ -1253,8 +1279,8 @@ def simplify_grid(dataset, config):
             break
     if is_regular:
         config["mesh_type"] = "regular"
-        print(
-            "[KAZARR] Grid simplified to regular grid. Mesh type set to 'regular' in config."
+        logger.info(
+            "Grid simplified to regular grid. Mesh type set to 'regular' in config."
         )
 
     dataset, _ = assign_coords(dataset, {"assign_coords": new_coords})
@@ -1271,7 +1297,10 @@ def save(dataset, config):
             "path",
             error_message="Missing 'save_path' or 'path' config parameter for save process.",
         )
-        path = path.replace(".nc", "").replace(".grib2", "").replace(ZARR_EXTENSION, "") + ZARR_EXTENSION
+        path = (
+            path.replace(".nc", "").replace(".grib2", "").replace(ZARR_EXTENSION, "")
+            + ZARR_EXTENSION
+        )
     config["save_path"] = path  # Update config with actual save path
     version = get_dataset_config_value(dataset, config, "version", default=3)
     float64_to_float32 = get_dataset_config_value(
@@ -1283,7 +1312,13 @@ def save(dataset, config):
             if dataset[var].dtype == np.float64:
                 dataset[var] = dataset[var].astype(np.float32)
 
-    keep_keys = ["variables", "dimensions", "mesh_data_on_cells", "mesh_type", "description"]
+    keep_keys = [
+        "variables",
+        "dimensions",
+        "mesh_data_on_cells",
+        "mesh_type",
+        "description",
+    ]
     kazarr_metadata = {k: v for k, v in config.items() if k in keep_keys}
     kazarr_metadata = resolve_args(kazarr_metadata, config)
     dataset.attrs["kazarr"] = kazarr_metadata
@@ -1292,8 +1327,9 @@ def save(dataset, config):
     is_update = False
     write_path = final_path
     if "opened_datasets" in config and final_path in config["opened_datasets"]:
-        print(
-            f"[KAZARR] Dataset already opened from path '{final_path}'. Saving to a temporary path to avoid overwriting the original dataset."
+        logger.info(
+            "Dataset already opened from path '%s'. Saving to a temporary path to avoid overwriting the original dataset.",
+            final_path,
         )
         is_update = True
         tmp_suffix = f"_tmp_{uuid.uuid4().hex[:8]}"
@@ -1305,12 +1341,14 @@ def save(dataset, config):
             raise ValueError(f"{BUCKET_NAME_ENV_VAR} environment variable not set.")
         final_path = final_path.replace(S3_PREFIX, S3_PREFIX + bucket + "/")
         if is_update:
-            write_path = os.path.join(tempfile.gettempdir(), "kazarr" + tmp_suffix + ZARR_EXTENSION)
+            write_path = os.path.join(
+                tempfile.gettempdir(), "kazarr" + tmp_suffix + ZARR_EXTENSION
+            )
             write_path = write_path.replace("\\", "/")
         else:
             write_path = write_path.replace(S3_PREFIX, S3_PREFIX + bucket + "/")
 
-    print(f"[KAZARR] Saving dataset to Zarr format to {write_path}...")
+    logger.info("Saving dataset to Zarr format to %s...", write_path)
 
     dataset = rechunk_if_needed(dataset)
 
@@ -1325,17 +1363,22 @@ def save(dataset, config):
     if config.get("dask_dashboard_initialised", False):
         with performance_report(filename="dask-performance-report.html"):
             dataset.to_zarr(write_path, **zarr_kwargs)
-            path_report = Path(__file__).parent.resolve()
-            print("===============================================")
-            print(
-                f"[KAZARR] Dask performance report available at: file://{path_report}/dask-performance-report.html"
+            path_report = Path.cwd().resolve()
+            message = "Dask performance report generated at: "
+            separator = "=" * len(message)
+            logger.info(
+                "\n%s\nfile://%s/dask-performance-report.html\n%s",
+                separator,
+                path_report,
+                separator
             )
-            print("===============================================")
     else:
         dataset.to_zarr(write_path, **zarr_kwargs)
 
     if is_update:
-        print(f"[KAZARR] Moving temporary dataset from '{write_path}' to '{final_path}'...")
+        logger.info(
+            "Moving temporary dataset from '%s' to '%s'...", write_path, final_path
+        )
         if final_path.startswith(S3_PREFIX):
             fs = get_s3_filesystem(config, final_path)
             if fs.exists(final_path):

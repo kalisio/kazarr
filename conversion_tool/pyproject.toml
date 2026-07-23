@@ -1,4 +1,38 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
-name = "kazarr-conversion-tool"
+name = "kazarr"
 version = "0.1.0"
-description = "A tool to convert various data formats to Zarr datasets compatible with the kazarr service"
+description = "A tool to process various data formats to Zarr datasets compatible with the kazarr service"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+keywords = ["zarr", "netcdf", "grib", "xarray", "conversion", "kalisio"]
+
+dependencies = [
+    "xarray>=2026.4.0",
+    "zarr>=3.1.6",
+    "cfgrib>=0.9.15.1",
+    "h5py>=3.15.1",
+    "h5netcdf>=1.7.3",
+    "numpy>=2.3.4",
+    "pyproj>=3.7.2",
+    "dask[distributed]>=2026.3.0",
+    "s3fs>=2025.10.0",
+    "matplotlib>=3.10.7",
+    "pyvista>=0.46.4",
+    "platformdirs>=4.10.0",
+    "bokeh>=3.0.0",
+]
+
+[project.optional-dependencies]
+# Required to build the standalone executable (not needed at runtime)
+build = ["pyinstaller>=6.21.0"]
+
+[project.scripts]
+kazarr = "kazarr.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["kazarr"]

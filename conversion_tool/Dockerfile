@@ -10,19 +10,5 @@ ENV HOME=/app
 COPY . ${HOME}
 WORKDIR ${HOME}
 
-RUN pip install \
-  python-dotenv \
-  xarray \
-  zarr \
-  cfgrib \
-  h5py \
-  h5netcdf \
-  numpy \
-  pyproj \
-  dask distributed \
-  s3fs \
-  matplotlib \
-  pyvista \
-  pyinstaller
-
-RUN pyinstaller -F -n conversion_tool main.py
+# Install the package along with its runtime dependencies and pyinstaller
+RUN pip install ".[build]" && pyinstaller -F -n kazarr main.py

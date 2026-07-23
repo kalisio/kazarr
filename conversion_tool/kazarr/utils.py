@@ -1,6 +1,7 @@
 import os
 import time
 import json
+import logging
 from pathlib import Path
 import shutil
 from datetime import datetime
@@ -10,6 +11,9 @@ import numpy as np
 from botocore.exceptions import NoCredentialsError
 from dask import array as da
 import eccodes
+
+
+logger = logging.getLogger(__name__)
 
 
 def get_s3_storage_options(config, path=None):
@@ -59,7 +63,8 @@ def get_s3_filesystem(config, path=None):
 
 
 # Load JSON file
-def load_json(path="datasets.json", config={}):
+def load_json(path="datasets.json", config=None):
+    config = config or {}
     if path.startswith("s3://"):
         path = path[5:]
         fs = get_s3_filesystem(config, path)
@@ -151,9 +156,9 @@ def get_ci(d, key, default=None, message=None):
 
 
 # Print duration since start_time with message
-def print_duration(start_time, message):
+def log_duration(start_time, message):
     duration = time.time() - start_time
-    print("[KAZARR]{" + f"{duration:.2f}s" + "} " + message)
+    logger.info("{%s} %s", f"{duration:.2f}s", message)
 
 
 def get_optimal_chunks_for_zarr(data_array, target_size="100MB"):
@@ -205,7 +210,11 @@ def rechunk_if_needed(dataset, target_size_mb=100, tolerance=0.3):
 
 def add_to_clean_config(config, clean_type, paths):
     if "clean" not in config:
-        config["clean"] = {"used_paths": set(), "generated_paths": set(), "idx_folders": set()}
+        config["clean"] = {
+            "used_paths": set(),
+            "generated_paths": set(),
+            "idx_folders": set(),
+        }
         add_to_global_config_update(config, "clean")
 
     if clean_type not in ["used_paths", "generated_paths", "idx_folders"]:
@@ -216,7 +225,7 @@ def add_to_clean_config(config, clean_type, paths):
 
 
 def merge_grib(folder_path, output_filename, config, glob_search_pattern="*.grib2"):
-    print(f'[KAZARR] < Merging GRIB files in "{folder_path}" into "{output_filename}"')
+    logger.info('Merging GRIB files in "%s" into "%s"', folder_path, output_filename)
     if os.path.exists(os.path.join(folder_path, output_filename)):
         os.remove(os.path.join(folder_path, output_filename))
 
@@ -242,8 +251,8 @@ def merge_grib(folder_path, output_filename, config, glob_search_pattern="*.grib
     )
     config = add_to_clean_config(config, "idx_folders", folder_path)
 
-    print(
-        f'[KAZARR] > Completed merging GRIB files ({len(files)}) into "{output_filename}"'
+    logger.info(
+        '> Completed merging GRIB files (%d) into "%s"', len(files), output_filename
     )
 
     return config
@@ -300,8 +309,9 @@ def init_store_as_secondary(dataset, new_dataset, config):
             config["secondary_datasets"] = {}
             add_to_global_config_update(config, "secondary_datasets")
         if secondary_tag and secondary_tag in config["secondary_datasets"]:
-            print(
-                f"[KAZARR] Warning: Secondary dataset tag '{secondary_tag}' already exists in config. Overwriting it with the newly loaded dataset."
+            logger.warning(
+                "Secondary dataset tag '%s' already exists in config. Overwriting it with the newly loaded dataset.",
+                secondary_tag,
             )
         elif not secondary_tag:
             secondary_tag = f"secondary_{len(config.get('secondary_datasets', {})) + 1}"
@@ -368,7 +378,9 @@ def get_arg_value(config, key):
     if arg is not None:
         return arg
     else:
-        raise ValueError(f"Key '{key}' not found in ARGS. You can pass additional arguments using the --args option in the command line.")
+        raise ValueError(
+            f"Key '{key}' not found in ARGS. You can pass additional arguments using the --args option in the command line."
+        )
 
 
 def resolve_args(data, config):
@@ -461,8 +473,9 @@ def get_valid_template_args(template_args):
             try:
                 parsed_value = json.loads(value)
                 if isinstance(parsed_value, (list, dict)):
-                    print(
-                        f"[KAZARR] Warning: Template argument '{arg}' has a value that is a list or dictionary. This is not supported. Ignoring."
+                    logger.warning(
+                        "Template argument '%s' has a value that is a list or dictionary. This is not supported. Ignoring.",
+                        arg,
                     )
                     continue
             except (ValueError, TypeError):
@@ -470,7 +483,10 @@ def get_valid_template_args(template_args):
 
             valid_args[key] = value
         else:
-            print(f"[KAZARR] Warning: Invalid template argument '{arg}'. Expected format 'key=value'. Ignoring.")
+            logger.warning(
+                "Invalid template argument '%s'. Expected format 'key=value'. Ignoring.",
+                arg,
+            )
     return valid_args
 
 
@@ -482,7 +498,10 @@ def load_custom_eccodes(custom_codes_path=None):
 
     if custom_codes_path and not os.path.isdir(custom_codes_path):
         # Explicitly provided path does not exist or is not a directory, log a warning and ignore it
-        print(f"[KAZARR] Warning: Custom ecCodes path '{custom_codes_path}' does not exist or is not a directory. Ignoring.")
+        logger.warning(
+            "Custom ecCodes path '%s' does not exist or is not a directory. Ignoring.",
+            custom_codes_path,
+        )
         return
     elif not custom_codes_path:
         # Fallback to passive default custom codes path if env var not provided
@@ -502,7 +521,9 @@ def load_custom_eccodes(custom_codes_path=None):
             default_path = eccodes.codes_definition_path()
             codes_env_var_value = add_path_to_env_var(default_path, abs_custom_path)
         elif abs_custom_path not in codes_env_var_value.split(":"):
-            codes_env_var_value = add_path_to_env_var(codes_env_var_value, abs_custom_path)
+            codes_env_var_value = add_path_to_env_var(
+                codes_env_var_value, abs_custom_path
+            )
     if codes_env_var_value:
         os.environ[codes_env_var] = codes_env_var_value
         if hasattr(eccodes, "codes_set_definitions_path"):
