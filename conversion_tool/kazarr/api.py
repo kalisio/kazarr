@@ -17,6 +17,7 @@ def process(
     data_mapping="vertices",
     mesh_type="auto",
     dask_dashboard=False,
+    s3_storage_class="STANDARD",
 ):
     """Create a new Zarr dataset from the given input path.
 
@@ -33,6 +34,7 @@ def process(
         data_mapping (str, optional): Whether to map data on mesh "vertices" or "cells". Defaults to "vertices".
         mesh_type (str, optional): Type of mesh to generate ("auto", "regular", "rectilinear", "radial"). Defaults to "auto".
         dask_dashboard (bool, optional): Whether to start a Dask dashboard. Defaults to False.
+        s3_storage_class (str, optional): S3 storage class for the output dataset. Defaults to "STANDARD".
 
     Returns:
         tuple: The (dataset, config) result from the pipeline.
@@ -65,6 +67,8 @@ def process(
         pipeline_config["mesh_type"] = mesh_type
     if dask_dashboard:
         pipeline_config["enable_dask_dashboard"] = True
+    if s3_storage_class is not None:
+        pipeline_config["s3_storage_class"] = s3_storage_class
     return pipelines.pipeline(pipeline_config, pipeline_name)
 
 

@@ -125,6 +125,13 @@ other commands:
         action="store_true",
         help="Whether to start a Dask dashboard for monitoring the processing (default: False)",
     )
+    parser.add_argument(
+        "--s3-storage-class",
+        type=str,
+        choices=['STANDARD', 'REDUCED_REDUNDANCY', 'STANDARD_IA', 'ONEZONE_IA', 'INTELLIGENT_TIERING', 'GLACIER', 'DEEP_ARCHIVE', 'OUTPOSTS', 'GLACIER_IR', 'SNOW', 'EXPRESS_ONEZONE', 'FSX_OPENZFS'],
+        default='STANDARD',
+        help="S3 storage class for the output dataset (default: STANDARD)",
+    )
 
     args = parser.parse_args()
 
@@ -145,6 +152,7 @@ other commands:
         data_mapping=args.data_mapping,
         mesh_type=args.mesh_type,
         dask_dashboard=args.dask_dashboard,
+        s3_storage_class=args.s3_storage_class
     )
 
 
