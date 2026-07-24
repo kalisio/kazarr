@@ -88,6 +88,8 @@ class DatasetGenerator:
                     pass
             elif config.get("type") == "array" and "values" in config:
                 target_dims = config.get("dimensions", [])
+                if len(target_dims) == 0 and isinstance(config["values"], list):
+                    config["values"] = config["values"][0]  # Use the first value for scalar arrays
                 da = xr.DataArray(config["values"], dims=target_dims)
                 if len(target_dims) == len(da.dims):
                     for i, target_dim in enumerate(target_dims):
@@ -197,11 +199,11 @@ class DatasetGenerator:
         else:
             # Consider float by default
             if isinstance(size, tuple):
-                total_points = np.prod(size)
+                total_points = int(np.prod(size))
             elif size == 0:
                 return np.array([])
             else:
-                total_points = size
+                total_points = int(size)
 
             method = options.get("method", "linear")
             step = options.get("step")
@@ -236,7 +238,7 @@ def cleanup_test_files():
                 found_path = os.path.join(root, dirname)
                 shutil.rmtree(found_path, ignore_errors=True)
         for filename in files:
-            if filename.endswith(".nc"):
+            if filename.endswith((".nc", ".grib2")):
                 found_path = os.path.join(root, filename)
                 try:
                     os.remove(found_path)
@@ -245,7 +247,7 @@ def cleanup_test_files():
 
 
 def get_value(shape, method="linear", bounds={"min": 0, "max": 100}, periods=1):
-    total_points = np.prod(shape)
+    total_points = int(np.prod(shape))
     if method == "linear":
         return np.linspace(bounds["min"], bounds["max"], total_points).reshape(shape)
     else:  # method == "sin" or method == "cos"

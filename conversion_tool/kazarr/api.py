@@ -1,5 +1,5 @@
 import kazarr.pipelines as pipelines
-from kazarr.utils import load_json, merge, get_valid_template_args
+from kazarr.utils import load_json, merge, get_valid_template_args, load_custom_eccodes
 
 TEMPLATE_DEFAULT_PATH = "templates.json"
 
@@ -16,6 +16,7 @@ def process(
     templates_path=TEMPLATE_DEFAULT_PATH,
     data_mapping="vertices",
     mesh_type="auto",
+    custom_eccodes_path=None,
     dask_dashboard=False,
     s3_storage_class="STANDARD",
 ):
@@ -39,6 +40,9 @@ def process(
     Returns:
         tuple: The (dataset, config) result from the pipeline.
     """
+    # Before doing anything, load custom codes (ecCodes) if any
+    load_custom_eccodes(custom_eccodes_path)
+
     config = config or {}
     template_args = template_args or []
     pipeline_config = {}

@@ -66,6 +66,11 @@ class TestRectilinearGrid:
                 "variable": "CoordX0",
                 "dimensions": ["DimK", "DimJ", "DimI"],
             },
+            "time": { # Add a time scalar variable to ensure that the "time" parameter will not conflict with this variable
+                "type": "array",
+                "dimensions": [],
+                "values": [123.45],
+            },
         }
         dataset = utils.DatasetGenerator(description=description).generate()
         dataset.save(DATASET_NAME, to_netcdf=True)

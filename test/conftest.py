@@ -72,6 +72,7 @@ def convert():
         templates_path=None,
         data_mapping=None,
         mesh_type=None,
+        custom_eccodes_path=None,
         dask_dashboard=False,
     ) -> str:
         # This function use subprocess to run the conversion tool
@@ -90,6 +91,7 @@ def convert():
             "templates_path": templates_path,
             "data_mapping": data_mapping,
             "mesh_type": mesh_type,
+            "custom_eccodes_path": custom_eccodes_path,
             "dask_dashboard": dask_dashboard,
         }
         for arg_name, arg_value in opt_args.items():

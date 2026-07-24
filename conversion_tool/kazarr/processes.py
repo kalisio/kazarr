@@ -263,7 +263,7 @@ def load_from_grib(dataset, config):
                     full_variables.update(ds.data_vars)
                     full_variables.update(ds.coords)
 
-                duplicate_vars_indexes = {var: 0 for var in duplicate_vars}
+                duplicate_vars_indexes = dict.fromkeys(duplicate_vars, 0)
 
                 if len(datasets) == 1:
                     new_dataset = datasets[0].chunk("auto")

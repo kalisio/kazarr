@@ -121,6 +121,11 @@ other commands:
         help="Type of mesh to generate (default: auto, which infers from data between regular and rectilinear but not able to handle radial meshes)",
     )
     parser.add_argument(
+        "--custom-eccodes-path",
+        type=str,
+        help="Path to a directory containing custom ecCodes (local) to be used for processing",
+    )
+    parser.add_argument(
         "--dask-dashboard",
         action="store_true",
         help="Whether to start a Dask dashboard for monitoring the processing (default: False)",
@@ -128,8 +133,21 @@ other commands:
     parser.add_argument(
         "--s3-storage-class",
         type=str,
-        choices=['STANDARD', 'REDUCED_REDUNDANCY', 'STANDARD_IA', 'ONEZONE_IA', 'INTELLIGENT_TIERING', 'GLACIER', 'DEEP_ARCHIVE', 'OUTPOSTS', 'GLACIER_IR', 'SNOW', 'EXPRESS_ONEZONE', 'FSX_OPENZFS'],
-        default='STANDARD',
+        choices=[
+            "STANDARD",
+            "REDUCED_REDUNDANCY",
+            "STANDARD_IA",
+            "ONEZONE_IA",
+            "INTELLIGENT_TIERING",
+            "GLACIER",
+            "DEEP_ARCHIVE",
+            "OUTPOSTS",
+            "GLACIER_IR",
+            "SNOW",
+            "EXPRESS_ONEZONE",
+            "FSX_OPENZFS",
+        ],
+        default="STANDARD",
         help="S3 storage class for the output dataset (default: STANDARD)",
     )
 
@@ -151,14 +169,17 @@ other commands:
         templates_path=args.templates_path,
         data_mapping=args.data_mapping,
         mesh_type=args.mesh_type,
+        custom_eccodes_path=args.custom_eccodes_path,
         dask_dashboard=args.dask_dashboard,
-        s3_storage_class=args.s3_storage_class
+        s3_storage_class=args.s3_storage_class,
     )
 
 
 def main():
     """CLI entry point with formatted error display."""
-    logging.basicConfig(level=logging.INFO, format="[KAZARR] {%(levelname)s} %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="[KAZARR] {%(levelname)s} %(message)s"
+    )
 
     logger = logging.getLogger(__name__)
     try:
@@ -170,7 +191,9 @@ def main():
         except Exception:
             terminal_width = 16
         separator_length = min(error_message_length, terminal_width)
-        logger.exception("\n%s\n%s\n%s", "=" * separator_length, e, "=" * separator_length)
+        logger.exception(
+            "\n%s\n%s\n%s", "=" * separator_length, e, "=" * separator_length
+        )
         sys.exit(1)
 
 

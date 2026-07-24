@@ -202,6 +202,20 @@ class TestRegularGrid3D:
         # 2 levels × LATS × LONS
         assert len(data["values"]["Value"]) == 2 * LATS * LONS
 
+    def test_extract_3d_level_and_bbox_conflicts(self, client: TestClient):
+        """Specifying level along with level_min and level_max should return only the specified level, even if it is outside of level_min/level_max range."""
+        level_min = LEVEL_START + LEVEL_STEP
+        level_max = LEVEL_START + LEVEL_STEP * 2
+        response = client.get(
+            f"/datasets/{DATASET_REGULAR}/extract"
+            f"?variable=Value&time=2026-01-01&is_3d=true"
+            f"&level={LEVEL_START}&level_min={level_min}&level_max={level_max}"
+        )
+        assert response.status_code == 200
+        data = response.json()
+        levels = data["levels"]
+        assert all(level == LEVEL_START for level in levels)
+
     def test_extract_3d_level_bbox_out_of_range(self, client: TestClient):
         """Level bounding box outside dataset extent should return an error."""
         response = client.get(
@@ -891,7 +905,9 @@ class TestSimplifyGrid3D:
         assert "values" in data
         assert "longitudes" in data
         assert "latitudes" in data
-        assert "levels" not in data  # 2D slice: no level in output as selected with dimension | TODO: get corresponding level value to add in output data
+        assert (
+            "levels" not in data
+        )  # 2D slice: no level in output as selected with dimension | TODO: get corresponding level value to add in output data
         assert len(data["values"]["Value"]) == NR_LONS * NR_LATS
 
     def test_extract_2d_missing_level_fails(self, client: TestClient):
@@ -1142,8 +1158,8 @@ class TestDataset3DMultiLevel:
                         "name": "isobaricInhPa",
                         "type": "float",
                         "size": LEVELS,
-                        "start": 100.0,
-                        "step": 100.0,
+                        "start": 1000.0,
+                        "step": -100.0,
                     },
                     {
                         "name": "lat",
@@ -1352,11 +1368,11 @@ class TestDataset3DMultiLevel:
         assert data["id"] == DATASET_MULTILEVEL
         assert "vertical_axis" in data
         assert "isobaricInhPa" in data["vertical_axis"]
-        assert data["vertical_axis"]["isobaricInhPa"]["min"] == 100.0
         assert (
-            data["vertical_axis"]["isobaricInhPa"]["max"]
-            == 100.0 + (LEVELS - 1) * 100.0
+            data["vertical_axis"]["isobaricInhPa"]["min"]
+            == 1000.0 + (LEVELS - 1) * -100.0
         )
+        assert data["vertical_axis"]["isobaricInhPa"]["max"] == 1000.0
         assert "heightAboveGround" in data["vertical_axis"]
         assert data["vertical_axis"]["heightAboveGround"]["min"] == 2.0
         assert data["vertical_axis"]["heightAboveGround"]["max"] == 2.0 + 8.0

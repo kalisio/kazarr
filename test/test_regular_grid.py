@@ -397,6 +397,51 @@ class TestRegularGrid:
         assert data["values"]["Value"][0] == 150
         assert data["values"]["Value"][2] == 450
 
+    def test_probe_time_ranges_overlap(self, client: TestClient):
+        """Probe with overlapping time ranges returns unique timesteps."""
+        response = client.get(
+            f"/datasets/{DATASET_NAME}/probe"
+            "?variable=Value&times=2026-01-01/2026-01-03"
+            f"&times=2026-01-02/2026-01-04&lon={LON_START}&lat={LAT_START}"
+        )
+        assert response.status_code == 200
+        data = response.json()
+        # Should return from 01 to 04
+        assert len(data["values"]["Value"]) == 4
+
+    def test_probe_multiple_times(self, client: TestClient):
+        """Probe with multiple times returns a time series over the requested timesteps."""
+        lon = LON_START
+        lat = LAT_START
+        response = client.get(
+            f"/datasets/{DATASET_NAME}/probe?variables=Value&lon={lon}&lat={lat}&times=2026-01-01/2026-01-03&times=2026-01-05"
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "times" in data
+        assert len(data["times"]) == 4
+        assert "values" in data
+        assert len(data["values"]["Value"]) == 4
+        assert data["values"]["Value"] == [0, 150, 300, 600]
+
+    def test_probe_multiple_times_interpolation(self, client: TestClient):
+        """Probe with multiple times and interpolation returns interpolated values."""
+        lon = LON_START
+        lat = LAT_START
+        response = client.get(
+            f"/datasets/{DATASET_NAME}/probe?variables=Value&lon={lon}&lat={lat}"
+            "&times=2026-01-01T09:30:00&times=2026-01-04T13:45:00"
+            "&interp_time=true&interp_vars_method=linear"
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "times" in data
+        assert len(data["times"]) == 2
+        assert "values" in data
+        assert len(data["values"]["Value"]) == 2
+
     def test_probes_multiple_points(self, client: TestClient):
         """Probe multiple points returns a list of probe results."""
         payload = {
@@ -474,6 +519,34 @@ class TestRegularGrid:
         assert all(
             isinstance(v, list) and len(v) == 2 for v in values
         )
+
+    def test_probes_multiple_points_multiple_times_geojson(self, client: TestClient):
+        """Probe multiple points with multiple times in GeoJSON format."""
+        payload = {
+            "type": "FeatureCollection",
+            "features": [
+                {
+                    "type": "Feature",
+                    "geometry": {"type": "Point", "coordinates": [LON_START, LAT_START]},
+                },
+                {
+                    "type": "Feature",
+                    "geometry": {"type": "Point", "coordinates": [LON_START + LON_STEP, LAT_START + LAT_STEP]},
+                },
+            ],
+            "times": ["2026-01-01/2026-01-02", "2026-01-04"],
+        }
+        response = client.post(
+            f"/datasets/{DATASET_NAME}/probes?variables=Value", json=payload
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "times" in data
+        assert len(data["times"]) == 3
+        assert "values" in data
+        assert len(data["values"]["Value"]) == 3
+        assert len(data["values"]["Value"][0]) == 2
 
     # ------------------------------------------------------------------
     # Select
