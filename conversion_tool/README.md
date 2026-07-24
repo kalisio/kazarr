@@ -4,7 +4,17 @@ A tool to create Zarr datasets from NetCDF or GRIB2 files.
 
 ## Installation
 
-### Docker
+### As a library
+
+The tool requires Python 3.10+. You can install it by using pip:
+
+```bash
+pip install .
+```
+
+### As an executable
+
+#### With Docker
 
 You can build the Docker image using the provided `Dockerfile`.
 
@@ -18,21 +28,23 @@ To run the container, make sure to mount your data volumes.
 docker run -rm -v /path/to/data:/data -e BUCKET_NAME=my-bucket kazarr-conversion-tool [COMMAND]
 ```
 
-In this image, you can find the conversion tool in `/app/dist/conversion_tool`
+In this image, you can find the conversion tool in `/app/dist/kazarr`
 
-### Python
+#### By building the executable using PyInstaller
 
-The tool requires Python 3.11+. You can install the dependencies using pip:
-
-```bash
-pip install python-dotenv xarray zarr cfgrib h5py h5netcdf numpy pyproj dask distributed s3fs matplotlib pyvista pyinstaller
-```
-
-And you can build the executable using PyInstaller as done in the Dockerfile:
+Firstly, install all dependencies with:
 
 ```bash
-pyinstaller -F -n conversion_tool main.py
+pip install .[build]
 ```
+
+Then, you can build the executable using PyInstaller as done in the Dockerfile:
+
+```bash
+pyinstaller -F -n kazarr main.py
+```
+
+You will find the executable in the folder `./dist`
 
 ### S3 Configuration
 
@@ -41,14 +53,34 @@ Standard AWS environment variables are used for authentication (`AWS_ACCESS_KEY_
 
 ## Usage
 
-The tool is a command-line interface with the following subcommands.
+### Create a new dataset
 
-### `new-dataset`
+#### As a library
 
-Create a new zarr dataset from an input source.
+```python
+from kazarr import process
+
+dataset, config = process(
+  "path/to/my/input/dataset",
+  template="MyTemplate",
+  config={"version": 2},
+  config_file=None,
+  template_args=None,
+  description="The description of my newly created Zarr dataset",
+  output_path="path/to/output/dataset",
+  pipeline_name="preprocess",
+  templates_path="./templates.json",
+  data_mapping="vertices",
+  mesh_type="auto",
+  dask_dashboard=False,
+  s3_storage_class="STANDARD",
+)
+```
+
+#### With a command line interface
 
 ```bash
-conversion_tool new-dataset [OPTIONS] INPUT_PATH
+kazarr [OPTIONS] INPUT_PATH
 ```
 
 **Arguments:**
@@ -80,7 +112,7 @@ choices: `STANDARD`, `REDUCED_REDUNDANCY`, `STANDARD_IA`, `ONEZONE_IA`, `INTELLI
 List available templates for new datasets.
 
 ```bash
-conversion_tool list-templates [--templates-path PATH]
+kazarr list-templates [--templates-path PATH]
 ```
 
 ## Config
