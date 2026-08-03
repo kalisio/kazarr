@@ -281,26 +281,26 @@ def extract(
             vals = vals[point_indices]
     elif is_3d_grid and not is_regular_grid:
         if has_regular_level:
-            vals = vals_da.values[
+            vals = vals_da[
                 ...,
                 level_min : level_max + 1 : step_level,
                 row_min : row_max + 1 : step_row,
                 col_min : col_max + 1 : step_col,
-            ]
+            ].values
         else:
-            vals = vals_da.values[
+            vals = vals_da[
                 ...,
                 :,
                 row_min : row_max + 1 : step_row,
                 col_min : col_max + 1 : step_col,
-            ]
+            ].values
     elif is_3d_grid and is_regular_grid:
         if vals_da.ndim >= 3:
-            vals = vals_da.values[
+            vals = vals_da[
                 level_min : level_max + 1 : step_level,
                 row_min : row_max + 1 : step_row,
                 col_min : col_max + 1 : step_col,
-            ]
+            ].values
         else:
             vals = vals_da[
                 ..., row_min : row_max + 1 : step_row, col_min : col_max + 1 : step_col

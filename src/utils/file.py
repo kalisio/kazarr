@@ -11,6 +11,7 @@ from botocore.exceptions import NoCredentialsError
 from zarr.abc.store import Store
 from zarr.core.buffer import Buffer, BufferPrototype
 import zarr
+import asyncio
 
 from loguru import logger as log
 import src.exceptions as exceptions
@@ -287,7 +288,7 @@ class S3CachedStore(Store):
     def _cache_key(self, key: str) -> str:
         return f"{self.dataset_id}/{key}" if self.dataset_id else key
 
-    def _fetch(self, key: str) -> bytes:
+    async def _fetch(self, key: str) -> bytes:
         c_key = self._cache_key(key)
         data = self.cache.get(c_key)
 
@@ -295,7 +296,7 @@ class S3CachedStore(Store):
             log.debug("[Kazarr - Cache] MISS for key: {key}", key=c_key)
             s3_path = f"{self.s3_root}/{key}"
             try:
-                data = self.s3.cat(s3_path)
+                data = await asyncio.to_thread(self.s3.cat, s3_path)
             except FileNotFoundError:
                 raise KeyError(key)
 
@@ -317,7 +318,7 @@ class S3CachedStore(Store):
         self, key: str, prototype: BufferPrototype, byte_range=None
     ) -> Buffer | None:
         try:
-            data = self._fetch(key)
+            data = await self._fetch(key)
             if byte_range is not None:
                 start = byte_range.start or 0
                 end = byte_range.stop or len(data)
@@ -327,10 +328,8 @@ class S3CachedStore(Store):
             return None
 
     async def get_partial_values(self, prototype: BufferPrototype, key_ranges):
-        results = []
-        for key, byte_range in key_ranges:
-            results.append(await self.get(key, prototype, byte_range))
-        return results
+        tasks = [self.get(key, prototype, byte_range) for key, byte_range in key_ranges]
+        return list(await asyncio.gather(*tasks))
 
     async def set(self, key: str, value: Buffer, byte_range=None) -> None:
         raise NotImplementedError("Read-only store")

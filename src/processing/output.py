@@ -28,12 +28,11 @@ def prepare_mesh_output(
 
     grid.point_data[variable] = vals_flat
 
-    valid_mask = np.ones_like(vals_flat)
+    valid_mask = ~np.isnan(vals_flat)
     if mask_cropped is not None:
-        valid_mask *= np.ravel(mask_cropped, order="F").astype(float)
+        valid_mask &= np.ravel(mask_cropped, order="F")
 
-    valid_mask[np.isnan(vals_flat)] = 0.0
-    grid.point_data["valid_mask"] = valid_mask
+    grid.point_data["valid_mask"] = valid_mask.astype(np.uint8)
 
     try:
         thresholded = grid.threshold(0.5, scalars="valid_mask")
@@ -57,7 +56,7 @@ def prepare_mesh_output(
 
     values = tri_grid.point_data[variable]
 
-    clean_values = [float(v) if np.isfinite(v) else None for v in values]
+    clean_values = np.where(np.isnan(values), None, values).tolist()
     valid_numbers = values[np.isfinite(values)]
 
     if valid_numbers.size == 0:
@@ -228,63 +227,63 @@ def prepare_geojson_output(
         is_path=is_path,
     )
 
-    features = []
-    path = {"geometry": [], "values": {}} if is_path else None
-    for i in range(len(flat_lons)):
-        out_vals = {}
-        for var_name, var_vals in vals_dict.items():
-            if has_one_point and len(var_vals) > 1:
-                # Time series or multiple values for a single point
-                out_vals[var_name] = var_vals
-            elif has_time_dimension and not is_path:
-                # Time series for multiple points
-                out_vals[var_name] = [var_vals[j][i] for j in range(len(var_vals))]
-            else:
-                # Spatial data (one value per point) or single scalar
-                out_vals[var_name] = var_vals[i]
-            if is_path:
-                if var_name not in path["values"]:
-                    path["values"][var_name] = []
-                path["values"][var_name].append(
-                    out_vals[var_name]
-                    if not isinstance(out_vals[var_name], list)
-                    else out_vals[var_name][0]
-                )
+    # 1. Fast coordinates assembly
+    if flat_levels is not None:
+        coords = [
+            [lon, lat, lvl] if lvl is not None and not np.isnan(lvl) else [lon, lat]
+            for lon, lat, lvl in zip(flat_lons, flat_lats, flat_levels)
+        ]
+    else:
+        coords = [[lon, lat] for lon, lat in zip(flat_lons, flat_lats)]
 
-        coordinates = [float(flat_lons[i]), float(flat_lats[i])]
-        if (
-            flat_levels is not None
-            and flat_levels[i] is not None
-            and not np.isnan(flat_levels[i])
-        ):
-            coordinates.append(float(flat_levels[i]))
-
-        if is_path:
-            path["geometry"].append(coordinates)
+    # 2. Fast point-wise values restructuring
+    point_values = {}
+    for var_name, var_vals in vals_dict.items():
+        if has_one_point and len(var_vals) > 1:
+            # Time series or multiple values for a single point
+            point_values[var_name] = [var_vals]
+        elif has_time_dimension and not is_path:
+            # Time series for multiple points (transpose matrix in C/fast python)
+            point_values[var_name] = list(zip(*var_vals))
         else:
-            features.append(
-                {
-                    "type": "Feature",
-                    "geometry": {
-                        "type": "Point",
-                        "coordinates": coordinates,
-                    },
-                    "properties": {"id": i, **out_vals},
-                }
-            )
+            # Spatial data or single scalar
+            point_values[var_name] = var_vals
 
+    var_names_list = list(point_values.keys())
+    var_values_list = list(point_values.values())
+
+    features = []
     if is_path:
+        path_values = {}
+        for var_name, p_vals in point_values.items():
+            path_values[var_name] = [
+                v if not isinstance(v, list) else v[0] for v in p_vals
+            ]
+
         line_string_props = line_string_props or {}
         features.append(
             {
                 "type": "Feature",
                 "geometry": {
                     "type": "LineString",
-                    "coordinates": path["geometry"],
+                    "coordinates": coords,
                 },
-                "properties": {"id": 0, **path["values"], **line_string_props},
+                "properties": {"id": 0, **path_values, **line_string_props},
             }
         )
+    else:
+        # Create all Point features efficiently
+        features = [
+            {
+                "type": "Feature",
+                "geometry": {
+                    "type": "Point",
+                    "coordinates": coord,
+                },
+                "properties": {"id": i, **dict(zip(var_names_list, point_vals))},
+            }
+            for i, (coord, point_vals) in enumerate(zip(coords, zip(*var_values_list)))
+        ]
 
     return {
         "type": "FeatureCollection",
