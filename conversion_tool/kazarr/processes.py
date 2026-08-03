@@ -13,6 +13,7 @@ import s3fs
 from pyproj import Transformer
 import cfgrib
 from platformdirs import user_cache_dir
+import zarr
 
 from dask.distributed import Client, performance_report
 
@@ -361,20 +362,29 @@ def load_from_zarr(dataset, config):
         config["opened_datasets"] = [path]
     add_to_global_config_update(config, "opened_datasets")
 
-    if path.startswith(S3_PREFIX):
-        bucket = os.getenv(BUCKET_NAME_ENV_VAR)
-        if bucket is None:
-            raise ValueError(f"{BUCKET_NAME_ENV_VAR} environment variable not set.")
-        path = path.replace(S3_PREFIX, "")
-        path = os.path.join(bucket, path)
+    try:
+        if path.startswith(S3_PREFIX):
+            bucket = os.getenv(BUCKET_NAME_ENV_VAR)
+            if bucket is None:
+                raise ValueError(f"{BUCKET_NAME_ENV_VAR} environment variable not set.")
+            path = path.replace(S3_PREFIX, "")
+            path = os.path.join(bucket, path)
 
-        # check=false to avoid checking (1 more request) for existence of root in the store
-        s3_store = s3fs.S3Map(
-            root=path, s3=get_s3_filesystem(config, path), check=False
-        )
-        new_dataset = xr.open_zarr(s3_store, chunks="auto")
-    else:
-        new_dataset = xr.open_zarr(path, chunks="auto")
+            # check=false to avoid checking (1 more request) for existence of root in the store
+            s3_store = s3fs.S3Map(
+                root=path, s3=get_s3_filesystem(config, path), check=False
+            )
+            new_dataset = xr.open_zarr(s3_store, chunks="auto")
+        else:
+            new_dataset = xr.open_zarr(path, chunks="auto")
+    except zarr.errors.GroupNotFoundError as e:
+        raise ValueError(
+            f"Unable to load Zarr dataset from path: {path}. The specified path does not contain a valid Zarr store."
+        ) from e
+    except Exception as e:
+        raise ValueError(
+            f"Unable to load Zarr dataset from path: {path}. Error: {e}"
+        ) from e
     return init_store_as_secondary(dataset, new_dataset, config)
 
 

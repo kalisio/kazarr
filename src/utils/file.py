@@ -10,6 +10,7 @@ import xarray as xr
 from botocore.exceptions import NoCredentialsError
 from zarr.abc.store import Store
 from zarr.core.buffer import Buffer, BufferPrototype
+import zarr
 
 from loguru import logger as log
 import src.exceptions as exceptions
@@ -90,6 +91,8 @@ def _load_versioned(path, version):
         dataset = xr.open_zarr(store, chunks="auto")
     except NoCredentialsError:
         raise exceptions.GenericInternalError("S3 credentials not found.")
+    except zarr.errors.GroupNotFoundError:
+        raise exceptions.DatasetNotFound(path.replace(ZARR_EXTENSION, ""))
     except Exception as e:
         raise exceptions.GenericInternalError("Unable to access S3: " + str(e))
     return dataset
@@ -204,6 +207,11 @@ def get_dataset_last_modified(dataset_id: str) -> os.stat_result | str | None:
         # Fallback to the directory itself
         info = s3_store.info(s3_path)
         return info.get("LastModified")
+    except FileNotFoundError:
+        log.info(
+            f"[Kazarr] Could not get last modified date for {dataset_id}: dataset not found on S3."
+        )
+        return None
     except Exception as e:
         log.warning(f"[Kazarr] Could not get last modified date for {dataset_id}: {e}")
         return None

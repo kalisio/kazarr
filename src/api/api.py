@@ -96,6 +96,13 @@ async def user_input_exception_handler(
     return JSONResponse(status_code=400, content={"detail": exc.get()})
 
 
+@app.exception_handler(exceptions.ResourceNotFound)
+async def resource_not_found_exception_handler(
+    request: Request, exc: exceptions.ResourceNotFound
+):
+    return JSONResponse(status_code=404, content={"detail": exc.get()})
+
+
 @app.exception_handler(exceptions.RequestCancelled)
 async def request_cancelled_handler(request: Request, exc: exceptions.RequestCancelled):
     log.info("[KAZARR] Request cancelled by client: {message}", message=str(exc))

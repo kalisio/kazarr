@@ -25,6 +25,13 @@ class UserInputBasedException(KazarrException):
     pass
 
 
+class ResourceNotFound(KazarrException):
+    def __init__(self, resource_name, error_code="RESOURCE_NOT_FOUND", message=None):
+        if message is None:
+            message = f"Resource '{resource_name}' not found."
+        super().__init__(error_code, message, resource_name)
+
+
 class MissingConfigurationElement(ConfigurationBasedException):
     def __init__(self, element_name):
         super().__init__(
@@ -87,10 +94,10 @@ class VariableCannotBeUsedForSelection(ConfigurationBasedException):
             {"variable_name": variable_name},
         )
 
-class DatasetNotFound(UserInputBasedException):
+class DatasetNotFound(ResourceNotFound):
     def __init__(self, dataset_id):
         super().__init__(
-            "DATASET_NOT_FOUND", f"Dataset '{dataset_id}' not found.", dataset_id
+            dataset_id, "DATASET_NOT_FOUND", f"Dataset '{dataset_id}' not found."
         )
 
 

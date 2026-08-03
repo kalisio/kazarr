@@ -325,6 +325,10 @@ def sel(
         ) from e
     except IndexError as e:
         raise exceptions.BadSelection(f"Data selection failed (IndexError): {e}") from e
+    except pd.errors.InvalidIndexError as e:
+        raise exceptions.BadSelection(
+            f"Data selection failed (InvalidIndexError). This error may occur when a dataset is still being uploaded. Check query params: {e}"
+        ) from e
     except Exception as e:
         raise exceptions.GenericInternalError(f"Data selection failed: {e}") from e
 
