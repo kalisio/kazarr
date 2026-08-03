@@ -1,16 +1,16 @@
-import time
 import copy
 import logging
+import time
 
-from kazarr.utils import (
-    load_dataset_config,
-    dget,
-    log_duration,
-    camel_to_snake,
-    merge,
-    init_store_as_secondary,
-)
 from kazarr import processes as proc
+from kazarr.utils import (
+    camel_to_snake,
+    dget,
+    init_store_as_secondary,
+    load_dataset_config,
+    log_duration,
+    merge,
+)
 
 logger = logging.getLogger(__name__)
 

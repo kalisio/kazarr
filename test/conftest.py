@@ -6,17 +6,17 @@ It handles sys.path manipulation for both the main project and the
 conversion_tool subproject, eliminating the need to do so in each test file.
 """
 
-import os
-import sys
-import subprocess
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
-from src.utils.file import _load_versioned as load
 from src.api.api import app
+from src.utils.file import _load_versioned as load
 
 _root_dir = Path(__file__).resolve().parent.parent
 _tool_dir = _root_dir / "conversion_tool"

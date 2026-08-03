@@ -1,13 +1,14 @@
 from dataclasses import dataclass
-from typing import List, Literal, Optional
-from fastapi import Query, Path
+from typing import Literal, Optional
+
+from fastapi import Path, Query
 from pydantic import BaseModel, model_validator
 
 from src.exceptions import (
-    PathMissingTimes,
-    PathInvalidTimesLength,
-    PathDoesNotSupportTimeRanges,
     MultiProbeBodyMissingPoint,
+    PathDoesNotSupportTimeRanges,
+    PathInvalidTimesLength,
+    PathMissingTimes,
 )
 
 
@@ -164,7 +165,7 @@ class GeoJSONGeometry(BaseModel):
             level=self.coordinates[2] if len(self.coordinates) > 2 else None,
         )
 
-    def as_probe_points(self) -> "List[ProbePoint]":
+    def as_probe_points(self) -> "list[ProbePoint]":
         """Convert a LineString geometry to a list of ProbePoints."""
         return [
             ProbePoint(
@@ -189,9 +190,9 @@ class GeoJSONFeatureCollection(BaseModel):
 
 class MultiProbeBody(BaseModel):
     # ad hoc format — normal mode (all times for each point)
-    points: List[ProbePoint] | None = None
+    points: list[ProbePoint] | None = None
     # ad hoc format — trajectory mode (time i for point i)
-    path: List[ProbePoint] | None = None
+    path: list[ProbePoint] | None = None
     times: list[str] | None = None
     # GeoJSON FeatureCollection format
     type: str | None = None
@@ -202,8 +203,8 @@ class MultiProbeBody(BaseModel):
     @model_validator(mode="after")
     def resolve_points(self) -> "MultiProbeBody":
         if self.type == "FeatureCollection" and self.features is not None:
-            line_string_points: List[ProbePoint] = []
-            point_points: List[ProbePoint] = []
+            line_string_points: list[ProbePoint] = []
+            point_points: list[ProbePoint] = []
             for f in self.features:
                 if f.geometry.type == "LineString":
                     line_string_points.extend(f.geometry.as_probe_points())

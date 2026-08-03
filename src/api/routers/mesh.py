@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Query, Path, Request
-from starlette.concurrency import run_in_threadpool
 import asyncio
 import threading
 
-from src.utils.requests import watch_disconnection
+from fastapi import APIRouter, Path, Query, Request
+from starlette.concurrency import run_in_threadpool
+
 from src.services import mesh as mesh_service
+from src.utils.requests import watch_disconnection
 
 router = APIRouter(tags=["Mesh"])
 

@@ -1,25 +1,15 @@
 import os
 import sys
-# import logging
-# import time
 
 from fastapi import FastAPI, Request
-
-from loguru import logger as log
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.middleware.cors import CORSMiddleware
+from loguru import logger as log
 from starlette.middleware.gzip import GZipMiddleware
 
 import src.exceptions as exceptions
-from src.api.routers import dataset, extract, probe, isoline, mesh, select
-
-# logging.basicConfig(
-#     level=logging.INFO,
-#     format="%(asctime)s - [Worker %(process)d] - %(levelname)s - %(message)s",
-#     datefmt="%H:%M:%S",
-# )
-# logger = logging.getLogger(__name__)
+from src.api.routers import dataset, extract, isoline, mesh, probe, select
 
 app = FastAPI(
     title="kazarr API",

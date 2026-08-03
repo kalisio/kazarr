@@ -1,9 +1,9 @@
-import os
 import argparse
-
-from src.utils.logging import configure_logging
+import os
 
 import uvicorn
+
+from src.utils.logging import configure_logging
 
 # Get host and port from environment variables or use defaults
 HOST = os.getenv("HOST", "127.0.0.1")

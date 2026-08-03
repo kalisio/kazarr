@@ -1,17 +1,16 @@
-import os
-import time
 import json
 import logging
-from pathlib import Path
+import os
 import shutil
+import time
 from datetime import datetime
+from pathlib import Path
 
-import s3fs
+import eccodes
 import numpy as np
+import s3fs
 from botocore.exceptions import NoCredentialsError
 from dask import array as da
-import eccodes
-
 
 logger = logging.getLogger(__name__)
 

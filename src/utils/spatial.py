@@ -1,12 +1,12 @@
 import hashlib
 import os
+from typing import Optional
+
 import numpy as np
-from scipy.spatial import cKDTree
-from typing import Dict, Tuple, Optional
-
 from loguru import logger as log
+from scipy.spatial import cKDTree
 
-_spatial_index_cache: Dict[Tuple, cKDTree] = {}
+_spatial_index_cache: dict[tuple, cKDTree] = {}
 MAX_CACHE_SIZE = os.getenv("KDTREE_MAX_CACHE_SIZE", 10)
 
 
@@ -27,7 +27,7 @@ def _get_array_hash(arr: np.ndarray) -> str:
 def get_cached_ckdtree(
     points: np.ndarray,
     dataset_id: Optional[str] = None,
-    coord_vars: Optional[Tuple[str, ...]] = None,
+    coord_vars: Optional[tuple[str, ...]] = None,
 ) -> cKDTree:
     """Retrieve or build a cKDTree for the given points.
 

@@ -1,33 +1,34 @@
+from typing import Any, Optional, Union
+
 from fastapi import Request
-from typing import Any, Dict, List, Optional, Union
 
 from src import exceptions
+from src.processing.isoline import (
+    format_isoline_geojson,
+    format_isoline_raw,
+    generate_isolines,
+)
 from src.schemas.config import ExtractionConfig
 from src.utils.data import (
     dget,
     dgets,
-    sel,
-    get_required_dims_and_coords,
     get_bounded_time,
+    get_required_dims_and_coords,
+    sel,
 )
 from src.utils.file import load_dataset
 from src.utils.logging import StepDurationLogger
-from src.processing.isoline import (
-    generate_isolines,
-    format_isoline_raw,
-    format_isoline_geojson,
-)
 
 
 def isoline(
     request: Request,
     dataset_id: str,
     variable: str,
-    levels: List[float],
+    levels: list[float],
     time: Optional[str] = None,
     format: str = "raw",
-    config: Union[Dict[str, Any], ExtractionConfig, None] = None,
-) -> Dict[str, Any]:
+    config: Union[dict[str, Any], ExtractionConfig, None] = None,
+) -> dict[str, Any]:
     if not isinstance(config, ExtractionConfig):
         config = ExtractionConfig.model_validate(config or {})
     step_logger = StepDurationLogger(

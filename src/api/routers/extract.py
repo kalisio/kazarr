@@ -1,13 +1,14 @@
+import asyncio
+import threading
+
 from fastapi import APIRouter, Depends, Query, Request
 from starlette.concurrency import run_in_threadpool
-import threading
-import asyncio
 
 import src.schemas.requests as models
+from src import exceptions
 from src.services import extraction
 from src.utils.data import parse_query_dict
 from src.utils.requests import watch_disconnection
-import src.exceptions as exceptions
 
 router = APIRouter(tags=["Extraction"])
 

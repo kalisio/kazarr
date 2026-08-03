@@ -1,9 +1,10 @@
 from dataclasses import dataclass
 from typing import Optional
+
 import numpy as np
 import pandas as pd
 
-from src.exceptions import InvalidTimeRange, InvalidDatetimeFormat
+from src.exceptions import InvalidDatetimeFormat, InvalidTimeRange
 
 
 @dataclass

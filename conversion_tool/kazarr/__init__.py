@@ -16,6 +16,6 @@ Usage as a library::
     )
 """
 
-from kazarr.api import process, list_templates
+from kazarr.api import list_templates, process
 
-__all__ = ["process", "list_templates"]
+__all__ = ["list_templates", "process"]

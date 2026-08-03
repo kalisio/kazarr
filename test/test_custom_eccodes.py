@@ -1,8 +1,8 @@
 import os
 
-import pytest
 import eccodes
 import numpy as np
+import pytest
 from fastapi.testclient import TestClient
 
 import utils

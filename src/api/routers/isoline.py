@@ -2,10 +2,9 @@ from fastapi import APIRouter, Depends, Query, Request
 from starlette.concurrency import run_in_threadpool
 
 import src.schemas.requests as models
+from src import exceptions
 from src.services import isoline as isoline_service
 from src.utils.data import parse_query_dict
-import src.exceptions as exceptions
-
 
 router = APIRouter(tags=["Isoline"])
 

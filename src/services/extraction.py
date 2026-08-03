@@ -1,28 +1,28 @@
+import threading
+from typing import Any, Optional, Union
+
 import numpy as np
 import xarray as xr
 from fastapi import Request
-from typing import Any, Dict, List, Optional, Union
-import threading
 
 from src import exceptions
+from src.processing import bbox, interpolation, output
+from src.processing.contexts import BBoxContext, MultiTimeRange, TimeRange
 from src.schemas.config import ExtractionConfig
 from src.utils.data import (
     dget,
     dgets,
-    get_level_var,
-    get_dataset_level_vars,
-    sel,
-    get_required_dims_and_coords,
     get_bounded_time,
+    get_dataset_level_vars,
+    get_level_var,
+    get_required_dims_and_coords,
     get_times_in_range,
+    sel,
 )
-from src.utils.requests import get_from_query
 from src.utils.file import load_dataset
 from src.utils.logging import StepLoggerAndAborter
+from src.utils.requests import get_from_query
 from src.utils.spatial import get_cached_ckdtree
-from src.processing import bbox, interpolation, output
-from src.processing.contexts import BBoxContext, TimeRange, MultiTimeRange
-
 
 FIXED_DIMENSIONS_KEY = "dimensions.fixed"
 FIXED_VARIABLES_KEY = "variables.fixed"
@@ -38,9 +38,9 @@ def extract(
     time_range: Optional[str] = None,
     level: Optional[float] = None,
     format: str = "raw",
-    config: Union[Dict[str, Any], ExtractionConfig, None] = None,
+    config: Union[dict[str, Any], ExtractionConfig, None] = None,
     cancel_event: Optional[threading.Event] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     if not isinstance(config, ExtractionConfig):
         config = ExtractionConfig.model_validate(config or {})
 
@@ -569,15 +569,15 @@ def extract(
 def probe(
     request: Request,
     dataset_id: str,
-    variables: Union[str, List[str]],
+    variables: Union[str, list[str]],
     lon: float,
     lat: float,
     level: Optional[float] = None,
     time_range: Optional[str] = None,
     format: str = "raw",
-    config: Union[Dict[str, Any], ExtractionConfig, None] = None,
+    config: Union[dict[str, Any], ExtractionConfig, None] = None,
     cancel_event: Optional[threading.Event] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     if not isinstance(config, ExtractionConfig):
         config = ExtractionConfig.model_validate(config or {})
     step_logger = StepLoggerAndAborter(
@@ -848,12 +848,12 @@ def probe(
 def multi_probe(
     request: Request,
     dataset_id: str,
-    variables: Union[str, List[str]],
-    points: List[Dict[str, float]],
+    variables: Union[str, list[str]],
+    points: list[dict[str, float]],
     time_range: Optional[str] = None,
     is_path: bool = False,
     format: str = "raw",
-    config: Union[Dict[str, Any], ExtractionConfig, None] = None,
+    config: Union[dict[str, Any], ExtractionConfig, None] = None,
     cancel_event: Optional[threading.Event] = None,
 ):
     variables = variables if isinstance(variables, list) else [variables]
@@ -927,9 +927,9 @@ def free_selection(
     request: Request,
     dataset_id: str,
     variable: str,
-    config: Union[Dict[str, Any], ExtractionConfig, None] = None,
+    config: Union[dict[str, Any], ExtractionConfig, None] = None,
     cancel_event: Optional[threading.Event] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     if not isinstance(config, ExtractionConfig):
         config = ExtractionConfig.model_validate(config or {})
     step_logger = StepLoggerAndAborter(

@@ -7,13 +7,12 @@ collection of individual stations or observation points (no grid structure).
 """
 
 import os
+
+import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
-import numpy as np
-
 import utils
-
 
 # ---------------------------------------------------------------------------
 # Dataset parameters

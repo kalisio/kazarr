@@ -1,16 +1,17 @@
+from typing import Any, Optional
+
 import numpy as np
-from typing import Any, Dict, Optional
 
-from src.utils.data import dgets, dget, get_dataset_level_vars
-from src.utils.file import load_datasets, load_dataset
+from src.utils.data import dget, dgets, get_dataset_level_vars
+from src.utils.file import load_dataset, load_datasets
 
 
-def list_datasets(search_path: Optional[str] = None) -> Dict[str, Any]:
+def list_datasets(search_path: Optional[str] = None) -> dict[str, Any]:
     datasets = load_datasets(search_path)
     return {"datasets": datasets}
 
 
-def dataset_metadata(dataset_id: str) -> Dict[str, Any]:
+def dataset_metadata(dataset_id: str) -> dict[str, Any]:
     dataset, config = load_dataset(dataset_id)
     variables = {}
     coords = {}

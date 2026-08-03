@@ -7,11 +7,11 @@ This is the simplest and most common case (e.g. ERA5-style data).
 """
 
 import os
+
 import pytest
 from fastapi.testclient import TestClient
 
 import utils
-
 
 # ---------------------------------------------------------------------------
 # Dataset parameters — used both for generation and for assertions

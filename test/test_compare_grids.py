@@ -10,7 +10,6 @@ from fastapi.testclient import TestClient
 
 import utils
 
-
 LATS = 91
 LONS = 137
 

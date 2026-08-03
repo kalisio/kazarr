@@ -1,12 +1,12 @@
-import os
-import sys
 import json
 import logging
+import os
+import sys
 import time
 
-from src import exceptions
-
 from loguru import logger as log
+
+from src import exceptions
 
 
 def configure_logging(debug=False, log_level="INFO"):

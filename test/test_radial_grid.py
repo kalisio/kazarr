@@ -7,11 +7,11 @@ The mesh_type must be set to "radial" in the dataset configuration.
 """
 
 import os
+
 import pytest
 from fastapi.testclient import TestClient
 
 import utils
-
 
 # ---------------------------------------------------------------------------
 # Dataset parameters

@@ -1,12 +1,11 @@
 import numpy as np
 import pyvista as pv
-from scipy.interpolate import (
-    griddata,
-    RegularGridInterpolator,
-    RBFInterpolator,
-)
-
 from loguru import logger as log
+from scipy.interpolate import (
+    RBFInterpolator,
+    RegularGridInterpolator,
+    griddata,
+)
 
 from src import exceptions
 from src.processing.contexts import BBoxContext

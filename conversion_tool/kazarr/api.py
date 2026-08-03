@@ -1,5 +1,5 @@
-import kazarr.pipelines as pipelines
-from kazarr.utils import load_json, merge, get_valid_template_args, load_custom_eccodes
+from kazarr import pipelines
+from kazarr.utils import get_valid_template_args, load_custom_eccodes, load_json, merge
 
 TEMPLATE_DEFAULT_PATH = "templates.json"
 

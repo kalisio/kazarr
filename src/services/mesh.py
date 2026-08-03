@@ -1,28 +1,28 @@
+import threading
+from typing import Any, Optional, Union
+
 import numpy as np
 import pyvista as pv
 
 from src import exceptions
+from src.processing.bbox import (
+    apply_level_bounding_box_irregular_grid,
+    apply_level_bounding_box_regular_grid,
+)
+from src.processing.contexts import BBoxContext
+from src.processing.interpolation import extrapolate_edges_from_cell_data
 from src.schemas.config import MeshExtractionConfig
 from src.utils.data import dget, dgets, get_dataset_level_vars, get_level_var
 from src.utils.file import load_dataset
 from src.utils.logging import StepLoggerAndAborter
-from src.processing.interpolation import extrapolate_edges_from_cell_data
-from src.processing.contexts import BBoxContext
-from src.processing.bbox import (
-    apply_level_bounding_box_regular_grid,
-    apply_level_bounding_box_irregular_grid,
-)
-
-from typing import Any, Dict, Union, Optional
-import threading
 
 
 def get_mesh(
     dataset_id: str,
     format: str = "mesh",
-    config: Union[Dict[str, Any], MeshExtractionConfig, None] = None,
+    config: Union[dict[str, Any], MeshExtractionConfig, None] = None,
     cancel_event: Optional[threading.Event] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
 
     if not isinstance(config, MeshExtractionConfig):
         config = MeshExtractionConfig.model_validate(config or {})
