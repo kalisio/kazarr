@@ -275,6 +275,7 @@ For the `extract` and `probe` endpoints, you can pass interpolation options usin
 | DATASETS_PATH         | Path to the JSON file containing datasets description                                                     | datasets.json |
 | CACHE_DIR             | Path to the directory where cache will be stored. Cache will not be used if this variable is not provided |               |
 | CACHE_SIZE            | Max size of cache folder (e.g. 1024KB, 512MB, 4GB)                                                        | 512MB         |
+| LRU_CACHE_SIZE        | Max number of datasets kept in the in-memory `lru_cache`                                                  | 5             |
 | KDTREE_MAX_CACHE_SIZE | Max number of cKDTree cached                                                                              | 10            |
 
 > [!IMPORTANT]

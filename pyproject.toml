@@ -12,6 +12,7 @@ markers = [
   "RadialGrid: Tests for radial grid datasets",
   "PointList: Tests for point list datasets",
   "Dataset3D: Tests for 3D datasets",
+  "CustomEccodes: Tests for custom ECCODES functionalities",
   "CombineDatasets: Tests for combining datasets",
 ]
 
