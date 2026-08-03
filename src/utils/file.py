@@ -20,6 +20,16 @@ ZARR_EXTENSION = ".zarr"
 S3_PREFIX = "s3://"
 BUCKET_NAME_ENV_VAR = "BUCKET_NAME"
 CACHE_LIMIT_MARGIN = 0.9  # 90% of the specified cache size limit
+LRU_CACHE_SIZE_ENV_VAR = "LRU_CACHE_SIZE"
+DEFAULT_LRU_CACHE_SIZE = 5
+
+
+def get_lru_cache_size():
+    cache_size = os.getenv(LRU_CACHE_SIZE_ENV_VAR, str(DEFAULT_LRU_CACHE_SIZE))
+    try:
+        return max(0, int(cache_size))
+    except ValueError:
+        return DEFAULT_LRU_CACHE_SIZE
 
 
 def get_datasets_path():
@@ -43,7 +53,7 @@ def s3_credentials_exists():
 # Internal cached loader — keyed by (path, version) so that updating a dataset
 # on S3 (which changes its last_modified timestamp) automatically creates a new
 # lru_cache entry and discards the stale xarray Dataset object.
-@lru_cache(maxsize=5)
+@lru_cache(maxsize=get_lru_cache_size())
 def _load_versioned(path, version):
     if not s3_credentials_exists():
         try:
