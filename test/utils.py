@@ -1,3 +1,4 @@
+import logging
 import os
 import shutil
 
@@ -5,6 +6,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
+logger = logging.getLogger(__name__)
 
 class Dataset:
     def __init__(self, ds):
@@ -85,8 +87,7 @@ class DatasetGenerator:
                         # Missing variable
                         pass
                 except Exception:
-                    # Can't open dataset
-                    pass
+                    logger.exception("Error loading dataset from sample file: %s", file_path)
             elif config.get("type") == "array" and "values" in config:
                 target_dims = config.get("dimensions", [])
                 if len(target_dims) == 0 and isinstance(config["values"], list):
@@ -113,9 +114,8 @@ class DatasetGenerator:
                 size = 10
                 if isinstance(size_ref, int):
                     size = size_ref
-                elif isinstance(size_ref, str):
-                    if size_ref in dims_sizes:
-                        size = dims_sizes[size_ref]
+                elif isinstance(size_ref, str) and size_ref in dims_sizes:
+                    size = dims_sizes[size_ref]
 
                 dims_sizes[dim_name] = size
 
@@ -247,7 +247,9 @@ def cleanup_test_files():
                     pass
 
 
-def get_value(shape, method="linear", bounds={"min": 0, "max": 100}, periods=1):
+def get_value(shape, method="linear", bounds=None, periods=1):
+    if bounds is None:
+        bounds = {"min": 0, "max": 100}
     total_points = int(np.prod(shape))
     if method == "linear":
         return np.linspace(bounds["min"], bounds["max"], total_points).reshape(shape)

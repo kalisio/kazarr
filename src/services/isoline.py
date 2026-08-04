@@ -1,4 +1,4 @@
-from typing import Any, Optional, Union
+from typing import Any
 
 from fastapi import Request
 
@@ -25,9 +25,9 @@ def isoline(
     dataset_id: str,
     variable: str,
     levels: list[float],
-    time: Optional[str] = None,
+    time: str | None = None,
     format: str = "raw",
-    config: Union[dict[str, Any], ExtractionConfig, None] = None,
+    config: dict[str, Any] | ExtractionConfig | None = None,
 ) -> dict[str, Any]:
     if not isinstance(config, ExtractionConfig):
         config = ExtractionConfig.model_validate(config or {})

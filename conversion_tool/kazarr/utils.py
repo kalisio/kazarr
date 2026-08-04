@@ -3,7 +3,7 @@ import logging
 import os
 import shutil
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import eccodes
@@ -30,19 +30,6 @@ def get_s3_storage_options(config, path=None):
     config_kwargs.setdefault("connect_timeout", connect_timeout)
     config_kwargs.setdefault("read_timeout", read_timeout)
     storage_options["config_kwargs"] = config_kwargs
-
-    # Handle OVH specific configuration
-    # endpoint_url = os.getenv("AWS_ENDPOINT_URL", "")
-    # if "cloud.ovh.net" in endpoint_url or "cloud.ovh.net" in (path or ""):
-    #     config_kwargs = storage_options.get("config_kwargs", {})
-    #     config_kwargs.setdefault("signature_version", "s3v4")
-
-    #     s3_config = config_kwargs.get("s3", {})
-    #     s3_config.setdefault("addressing_style", "path")
-    #     s3_config.setdefault("payload_signing_enabled", False)
-    #     config_kwargs["s3"] = s3_config
-
-    #     storage_options["config_kwargs"] = config_kwargs
 
     # Ensure authentication
     if "anon" not in storage_options:
@@ -272,17 +259,16 @@ def timestamp_to_datetime(timestamp):
     else:
         divisor = 1e9  # Nanoseconds
 
-    return datetime.fromtimestamp(ts / divisor)
+    return datetime.fromtimestamp(ts / divisor, tz=timezone.utc)
 
 
 def parse_datetime(date_input, date_format=None):
     if isinstance(date_input, np.datetime64):
         return date_input
 
-    if isinstance(date_input, (int, float)):
-        if date_format is None or date_format == "timestamp":
-            dt_obj = timestamp_to_datetime(date_input)
-            return np.datetime64(dt_obj)
+    if isinstance(date_input, (int, float)) and (date_format is None or date_format == "timestamp"):
+        dt_obj = timestamp_to_datetime(date_input)
+        return np.datetime64(dt_obj)
 
     if isinstance(date_input, datetime):
         return np.datetime64(date_input)
@@ -295,7 +281,7 @@ def parse_datetime(date_input, date_format=None):
     else:
         date_input = str(date_input)
 
-    dt_obj = datetime.strptime(date_input, date_format)
+    dt_obj = datetime.strptime(date_input, date_format).replace(tzinfo=timezone.utc)
     return np.datetime64(dt_obj)
 
 
@@ -350,7 +336,7 @@ def get_redundant_dimensions(dataset, variable, tolerance=1e-6):
 
 def get_attr_value(dataset, key, variable=None):
     if not isinstance(key, str):
-        raise ValueError("Attribute key must be a string.")
+        raise TypeError("Attribute key must be a string.")
 
     if not key.startswith("ATTRS.") and not key.startswith("ATTRIBUTES."):
         return key
@@ -368,7 +354,7 @@ def get_attr_value(dataset, key, variable=None):
 
 def get_arg_value(config, key):
     if not isinstance(key, str):
-        raise ValueError("Argument key must be a string.")
+        raise TypeError("Argument key must be a string.")
 
     if not key.startswith("ARGS."):
         return key
@@ -396,7 +382,7 @@ def get_dataset_config_value(
     dataset, config, key, default=None, error_message=None, variable=None
 ):
     if not isinstance(key, str):
-        raise ValueError("Config key must be a string.")
+        raise TypeError("Config key must be a string.")
 
     value = get_ci(config, key, default=default, message=error_message)
     if value is not None and isinstance(value, str):
@@ -413,7 +399,7 @@ def get_spatial_variables(dataset, config):
     spatial_vars = set()
     for var in [lon_var, lat_var, level_var]:
         if isinstance(var, str):
-            if var.startswith("ATTRS.") or var.startswith("ATTRIBUTES."):
+            if var.startswith(("ATTRS.", "ATTRIBUTES.")):
                 try:
                     target = get_attr_value(dataset, var)
                     spatial_vars.add(target)
@@ -426,7 +412,7 @@ def get_spatial_variables(dataset, config):
                     f"Spatial variable '{var}' not found in dataset variables."
                 )
         else:
-            raise ValueError(
+            raise TypeError(
                 f"Spatial variable '{var}' must be a string referencing a variable name or an attribute (e.g., 'ATTRS.lon') in the dataset."
             )
     return spatial_vars

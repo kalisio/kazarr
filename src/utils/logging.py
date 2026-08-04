@@ -41,7 +41,8 @@ class KazarrLoggerHandler(logging.Handler):
                     bucket=data.get("Bucket"),
                     key=data.get("Key"),
                 )
-            except Exception:
+            except Exception: # noqa: S110
+                # Do not need to log the error, as it is just used for debugging purposes
                 pass
 
 

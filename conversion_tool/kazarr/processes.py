@@ -301,8 +301,8 @@ def load_from_grib(dataset, config):
                                 "         ! The following variables were removed during merge due to conflicts: %s",
                                 removed_variables,
                             )
-                    except Exception as e:
-                        logger.exception("Error occurred while merging datasets: %s", e)
+                    except Exception:
+                        logger.exception("Error occurred while merging datasets.")
         elif os.path.isdir(path):
             concat_dim = get_dataset_config_value(
                 dataset,
@@ -439,7 +439,7 @@ def load_and_merge_from_grib(dataset, config):
                     dataset,
                     merge({"load_path": os.path.join(path, concat_filename)}, config),
                 )
-        except Exception:
+        except Exception:  # noqa: S112
             # Don't fail if a discriminator doesn't match any file, just skip it
             continue
 
@@ -554,20 +554,16 @@ def combine_at_time(dataset, config):
 
     if len(primary_before[time_var]) == 0:
         raise ValueError(
-            (
-                f"'combine_time' value '{combine_time}' is earlier than or equal to all timestamps "
-                f"in the primary dataset (earliest: {dataset[time_var].values[0] if len(dataset[time_var]) > 0 else 'N/A'}). "
-                f"The primary dataset contributes no data to the combined result."
-            )
+            f"'combine_time' value '{combine_time}' is earlier than or equal to all timestamps "
+            f"in the primary dataset (earliest: {dataset[time_var].values[0] if len(dataset[time_var]) > 0 else 'N/A'}). "
+            f"The primary dataset contributes no data to the combined result."
         )
     if len(secondary_after[time_var]) == 0:
         raise ValueError(
-            (
-                f"'combine_time' value '{combine_time}' is later than or equal to all timestamps "
-                f"in the secondary dataset '{combine_dataset_tag}' "
-                f"(latest: {combine_dataset[time_var].values[-1] if len(combine_dataset[time_var]) > 0 else 'N/A'}). "
-                f"The secondary dataset contributes no data to the combined result."
-            )
+            f"'combine_time' value '{combine_time}' is later than or equal to all timestamps "
+            f"in the secondary dataset '{combine_dataset_tag}' "
+            f"(latest: {combine_dataset[time_var].values[-1] if len(combine_dataset[time_var]) > 0 else 'N/A'}). "
+            f"The secondary dataset contributes no data to the combined result."
         )
 
     # For list point case, we need to find a variable to discriminate points, and set index of this variable
@@ -620,11 +616,9 @@ def combine_at_time(dataset, config):
                         "or check that the dataset contains a string variable with the same dimensions as the spatial variables."
                     )
                 raise ValueError(
-                    (
-                        "This dataset was detected as a point list. To combine two datasets"
-                        ", this process need a variable to discriminate points (names), "
-                        f"but {message_end}"
-                    )
+                    "This dataset was detected as a point list. To combine two datasets"
+                    ", this process need a variable to discriminate points (names), "
+                    f"but {message_end}"
                 )
 
             index_target_var = corresponding_vars[0]
@@ -638,16 +632,14 @@ def combine_at_time(dataset, config):
 
         if len(primary_before[index_target_var].dims) == 0:
             raise ValueError(
-                (
-                    f"Variable '{index_target_var}' selected as point discriminator "
-                    "is a scalar variable in the primary dataset, but it needs to be"
-                    " an array variable with the same dimensions as the spatial "
-                    "variables to be used as an index for combining the datasets. "
-                    "Please specify a valid variable to discriminate points "
-                    "('combine_point_discriminator_var' config parameter) that is "
-                    "an array variable with the same dimensions as the spatial "
-                    "variables."
-                )
+                f"Variable '{index_target_var}' selected as point discriminator "
+                "is a scalar variable in the primary dataset, but it needs to be"
+                " an array variable with the same dimensions as the spatial "
+                "variables to be used as an index for combining the datasets. "
+                "Please specify a valid variable to discriminate points "
+                "('combine_point_discriminator_var' config parameter) that is "
+                "an array variable with the same dimensions as the spatial "
+                "variables."
             )
 
         index_dim_name = primary_before[index_target_var].dims[0]
@@ -734,8 +726,7 @@ def combine_at_time(dataset, config):
                         symbolic_name = value
                         index_map[symbolic_name] = index_str
                         try:
-                            if int(index_str) > max_index:
-                                max_index = int(index_str)
+                            max_index = max(max_index, int(index_str))
                         except ValueError:
                             pass
                 return index_map, max_index
@@ -931,14 +922,17 @@ def assign_coords(dataset, config):
         # Decode binary strings if needed
         if values.dtype.kind == "S":  # Fixed-length bytes
             values = values.astype(str)
-        elif values.dtype == object:  # Variable-length bytes or other objects
-            if values.size > 0 and isinstance(values.flat[0], bytes):
-                values = np.array(
-                    [
-                        v.decode("utf-8") if isinstance(v, bytes) else v
-                        for v in values.ravel()
-                    ]
-                ).reshape(values.shape)
+        elif (
+            values.dtype == object
+            and values.size > 0
+            and isinstance(values.flat[0], bytes)
+        ):  # Variable-length bytes or other objects
+            values = np.array(
+                [
+                    v.decode("utf-8") if isinstance(v, bytes) else v
+                    for v in values.ravel()
+                ]
+            ).reshape(values.shape)
         assign_dict[var] = (dim, values, dataset[var].attrs)
 
     dataset = dataset.assign_coords(assign_dict)
@@ -1379,7 +1373,7 @@ def save(dataset, config):
                 "\n%s\nfile://%s/dask-performance-report.html\n%s",
                 separator,
                 path_report,
-                separator
+                separator,
             )
     else:
         dataset.to_zarr(write_path, **zarr_kwargs)

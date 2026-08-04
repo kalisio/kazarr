@@ -1,5 +1,6 @@
 import asyncio
 import threading
+from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, Query, Request
 from starlette.concurrency import run_in_threadpool
@@ -19,12 +20,14 @@ router = APIRouter(tags=["Probe"])
 )
 async def probe_data(
     request: Request,
-    base: models.MultipleVariablesParams = Depends(),
-    lon: float = Query(..., description="The longitude coordinate to probe"),
-    lat: float = Query(..., description="The latitude coordinate to probe"),
-    level: float | None = Query(None, description="The level coordinate to probe"),
-    time: models.MultiTimeParams = Depends(),
-    spatial_interp: models.SpatialInterpolationParams = Depends(),
+    base: Annotated[models.MultipleVariablesParams, Depends()],
+    time: Annotated[models.MultiTimeParams, Depends()],
+    spatial_interp: Annotated[models.SpatialInterpolationParams, Depends()],
+    lon: Annotated[float, Query(description="The longitude coordinate to probe")],
+    lat: Annotated[float, Query(description="The latitude coordinate to probe")],
+    level: Annotated[
+        float | None, Query(description="The level coordinate to probe")
+    ] = None,
 ):
     interp_vars_params = base.interp_vars_params
     if interp_vars_params is not None and ":" in interp_vars_params:
@@ -86,10 +89,10 @@ async def probe_data(
 )
 async def probe_data_multi(
     request: Request,
-    base: models.MultipleVariablesParams = Depends(),
-    body: models.MultiProbeBody = Body(...),
-    time: models.MultiTimeParams = Depends(),
-    spatial_interp: models.SpatialInterpolationParams = Depends(),
+    base: Annotated[models.MultipleVariablesParams, Depends()],
+    body: Annotated[models.MultiProbeBody, Body()],
+    time: Annotated[models.MultiTimeParams, Depends()],
+    spatial_interp: Annotated[models.SpatialInterpolationParams, Depends()],
 ):
     interp_vars_params = base.interp_vars_params
     if interp_vars_params is not None and ":" in interp_vars_params:

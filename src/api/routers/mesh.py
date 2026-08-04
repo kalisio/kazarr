@@ -1,5 +1,6 @@
 import asyncio
 import threading
+from typing import Annotated
 
 from fastapi import APIRouter, Path, Query, Request
 from starlette.concurrency import run_in_threadpool
@@ -15,27 +16,37 @@ router = APIRouter(tags=["Mesh"])
 )
 async def mesh(
     request: Request,
-    dataset: str = Path(..., description="The path to the dataset"),
-    format: str = Query(
-        "mesh",
-        description="The format of the extracted data (Currently supported: 'mesh', 'geojson')",
-    ),
-    mesh_data_mapping: str | None = Query(
-        None,
-        description="Whether the data of the mesh is on cells or on vertices. This will override the dataset configuration. (Supported values: 'vertices', 'cells')",
-    ),
-    is_3d: bool = Query(
-        False,
-        description="If True, generates a 3D volumetric mesh using the vertical coordinate defined in the dataset configuration if the dataset use a unique one, otherwise, see 'variable' and 'level_variable' parameters.",
-    ),
-    variable: str | None = Query(
-        None,
-        description="The variable to base the mesh geometry on. Not mandatory if the dataset use a unique vertical coordinate.",
-    ),
-    level_variable: str | None = Query(
-        None,
-        description="The variable to use as level coordinate for the mesh geometry. This will override the dataset configuration and the 'variable' parameter.",
-    ),
+    dataset: Annotated[str, Path(description="The path to the dataset")],
+    format: Annotated[
+        str,
+        Query(
+            description="The format of the extracted data (Currently supported: 'mesh', 'geojson')"
+        ),
+    ] = "mesh",
+    mesh_data_mapping: Annotated[
+        str | None,
+        Query(
+            description="Whether the data of the mesh is on cells or on vertices. This will override the dataset configuration. (Supported values: 'vertices', 'cells')",
+        ),
+    ] = None,
+    is_3d: Annotated[
+        bool,
+        Query(
+            description="If True, generates a 3D volumetric mesh using the vertical coordinate defined in the dataset configuration if the dataset use a unique one, otherwise, see 'variable' and 'level_variable' parameters.",
+        ),
+    ] = False,
+    variable: Annotated[
+        str | None,
+        Query(
+            description="The variable to base the mesh geometry on. Not mandatory if the dataset use a unique vertical coordinate."
+        ),
+    ] = None,
+    level_variable: Annotated[
+        str | None,
+        Query(
+            description="The variable to use as level coordinate for the mesh geometry. This will override the dataset configuration and the 'variable' parameter.",
+        ),
+    ] = None,
 ):
     config = {
         "is_3d": is_3d,

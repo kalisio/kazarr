@@ -124,7 +124,7 @@ def generate_meshgrid_and_interpolate(
                 interpolated_vals = rgi(pts).reshape(xi_mesh.shape)
             except Exception as e:
                 raise exceptions.GenericInternalError(
-                    f"3D Interpolation failed: {str(e)}"
+                    f"3D Interpolation failed: {e!s}"
                 )
         elif levels_1d is None:
             # Irregular 3D grid: lat/lon/levels are all 3D arrays.
@@ -143,7 +143,7 @@ def generate_meshgrid_and_interpolate(
                 )
             except Exception as e:
                 raise exceptions.GenericInternalError(
-                    f"3D Interpolation failed: {str(e)}"
+                    f"3D Interpolation failed: {e!s}"
                 )
         else:
             # Spatially irregular but Z-regular: 2D spatial interpolation per level.
@@ -159,7 +159,7 @@ def generate_meshgrid_and_interpolate(
                 )
             except Exception as e:
                 raise exceptions.GenericInternalError(
-                    f"3D Interpolation failed: {str(e)}"
+                    f"3D Interpolation failed: {e!s}"
                 )
 
         mask_cropped = np.isfinite(interpolated_vals)
@@ -188,7 +188,7 @@ def generate_meshgrid_and_interpolate(
                 pts = np.stack([yi_mesh.ravel(), xi_mesh.ravel()], axis=-1)
                 interpolated_vals = rgi(pts).reshape(xi_mesh.shape)
             except Exception as e:
-                raise exceptions.GenericInternalError(f"Interpolation failed: {str(e)}")
+                raise exceptions.GenericInternalError(f"Interpolation failed: {e!s}")
         else:
             try:
                 interpolated_vals = apply_spatial_interpolation_irregular_grid(
@@ -201,7 +201,7 @@ def generate_meshgrid_and_interpolate(
                     **interp_spatial_params,
                 )
             except Exception as e:
-                raise exceptions.GenericInternalError(f"Interpolation failed: {str(e)}")
+                raise exceptions.GenericInternalError(f"Interpolation failed: {e!s}")
 
         mask_cropped = np.isfinite(interpolated_vals)
         return xi_mesh, yi_mesh, None, interpolated_vals, mask_cropped

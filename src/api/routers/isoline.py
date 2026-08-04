@@ -1,3 +1,5 @@
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, Query, Request
 from starlette.concurrency import run_in_threadpool
 
@@ -15,11 +17,11 @@ router = APIRouter(tags=["Isoline"])
 )
 async def isoline_data(
     request: Request,
-    base: models.BaseParams = Depends(),
-    time: models.TimeParams = Depends(),
-    levels: list[float] = Query(
-        ..., description="List of levels for isoline generation"
-    ),
+    base: Annotated[models.BaseParams, Depends()],
+    time: Annotated[models.TimeParams, Depends()],
+    levels: Annotated[
+        list[float], Query(description="List of levels for isoline generation")
+    ],
 ):
     interp_vars_params = base.interp_vars_params
     if interp_vars_params is not None and ":" in interp_vars_params:

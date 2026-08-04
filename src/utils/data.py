@@ -270,10 +270,13 @@ def sel(
     fixed_coords = fixed_coords.copy()
 
     for var in interp_vars:
-        if var in dataset.coords and var not in dataset.dims:
-            if len(dataset[var].dims) == 1:
-                current_dim = dataset[var].dims[0]
-                dataset = dataset.swap_dims({current_dim: var})
+        if (
+            var in dataset.coords
+            and var not in dataset.dims
+            and len(dataset[var].dims) == 1
+        ):
+            current_dim = dataset[var].dims[0]
+            dataset = dataset.swap_dims({current_dim: var})
 
     # Ensure xindexes are set for all fixed coords
     for coord in fixed_coords:
@@ -393,7 +396,7 @@ def sel(
                     )
                 except ValueError as e:
                     raise exceptions.BadSelection("Data interpolation failed.") from e
-                
+
             # Re-apply NaN for positions that were fully null before interpolation.
             # This ensures that a point added after a certain date keeps NaN
             # (not 0) for all timesteps before its creation.
@@ -428,7 +431,7 @@ def dgets(d, keys, default=None):
 def get_dataset_level_vars(dataset, config):
     level_var = dget(config, "variables.level")
     if level_var is not None and (
-        level_var.startswith(ATTRS_KEY) or level_var.startswith(ATTRIBUTES_KEY)
+        level_var.startswith((ATTRS_KEY, ATTRIBUTES_KEY))
     ):
         level_var_name = level_var.replace(ATTRS_KEY, "").replace(ATTRIBUTES_KEY, "")
         level_vars = {}
@@ -442,16 +445,14 @@ def get_dataset_level_vars(dataset, config):
         if len(level_vars) == 0:
             return None
         elif len(level_vars) == 1:
-            return list(level_vars.keys())[0]
+            return next(iter(level_vars.keys())) # Get first key
         return level_vars
     return level_var
 
 
 def get_level_var(dataset, config, variable):
     level_var = dget(config, "variables.level")
-    if level_var is not None and (
-        level_var.startswith(ATTRS_KEY) or level_var.startswith(ATTRIBUTES_KEY)
-    ):
+    if level_var is not None and (level_var.startswith((ATTRS_KEY, ATTRIBUTES_KEY))):
         level_var = dataset[variable].attrs.get(
             level_var.replace(ATTRS_KEY, "").replace(ATTRIBUTES_KEY, ""), None
         )

@@ -1,5 +1,5 @@
 import threading
-from typing import Any, Optional, Union
+from typing import Any
 
 import numpy as np
 import pyvista as pv
@@ -20,8 +20,8 @@ from src.utils.logging import StepLoggerAndAborter
 def get_mesh(
     dataset_id: str,
     format: str = "mesh",
-    config: Union[dict[str, Any], MeshExtractionConfig, None] = None,
-    cancel_event: Optional[threading.Event] = None,
+    config: dict[str, Any] | MeshExtractionConfig | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> dict[str, Any]:
 
     if not isinstance(config, MeshExtractionConfig):

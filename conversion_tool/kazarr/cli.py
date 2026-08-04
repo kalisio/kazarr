@@ -1,13 +1,13 @@
-import os
-import sys
+import argparse
 import json
 import logging
-import argparse
+import os
+import sys
 
 from kazarr.api import (
-    process,
-    list_templates,
     TEMPLATE_DEFAULT_PATH,
+    list_templates,
+    process,
 )
 
 
@@ -188,11 +188,11 @@ def main():
         error_message_length = len(str(e))
         try:
             terminal_width = os.get_terminal_size().columns
-        except Exception:
+        except OSError:
             terminal_width = 16
         separator_length = min(error_message_length, terminal_width)
         logger.exception(
-            "\n%s\n%s\n%s", "=" * separator_length, e, "=" * separator_length
+            "\n%s\n%s\n%s", "=" * separator_length, e, "=" * separator_length # noqa: TRY401
         )
         sys.exit(1)
 

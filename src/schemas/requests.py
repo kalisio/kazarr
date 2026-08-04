@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Literal, Optional
+from typing import Literal
 
 from fastapi import Path, Query
 from pydantic import BaseModel, model_validator
@@ -20,7 +20,7 @@ class BaseParams:
         "raw",
         description="The format of the extracted data (Currently supported: 'raw', 'geojson')",
     )
-    interp_vars: list[str] = Query(
+    interp_vars: list[str] = Query(  # noqa: RUF009 - The ruff error "Do not perform function call `Query` in dataclass defaults" will not be a problem with FastAPI
         [],
         description="List of variables to interpolate",
     )
@@ -46,7 +46,7 @@ class BaseParams:
         None,
         description='Interpolation configuration. Must be defined with : "interpolation=optparam1:VALUE1,optparam2:VALUE2,..." where optparam are optional parameters depending on the method.',
     )
-    as_dims: list[str] = Query(
+    as_dims: list[str] = Query(  # noqa: RUF009 - The ruff error "Do not perform function call `Query` in dataclass defaults" will not be a problem with FastAPI
         [],
         description="If some variables have the same name as dimensions, will force them to be treated as dimensions",
     )
@@ -58,7 +58,7 @@ class MultipleVariablesParams(BaseParams):
         None,
         description="Name of the variable to query. One of 'variable' or 'variables' must be provided",
     )
-    variables: list[str] = Query(
+    variables: list[str] = Query(  # noqa: RUF009 - The ruff error "Do not perform function call `Query` in dataclass defaults" will not be a problem with FastAPI
         None,
         description="List of variables to query. One of 'variable' or 'variables' must be provided",
     )
@@ -117,7 +117,7 @@ class TimeParams:
 
 @dataclass
 class MultiTimeParams(TimeParams):
-    times: list[str] | None = Query(
+    times: list[str] | None = Query(  # noqa: RUF009 - The ruff error "Do not perform function call `Query` in dataclass defaults" will not be a problem with FastAPI
         None,
         description="List of times for which to retrieve data.",
     )
@@ -150,7 +150,7 @@ class SpatialInterpolationParams:
 class ProbePoint(BaseModel):
     lon: float
     lat: float
-    level: Optional[float] = None
+    level: float | None = None
 
 
 class GeoJSONGeometry(BaseModel):
@@ -180,7 +180,7 @@ class GeoJSONGeometry(BaseModel):
 class GeoJSONFeature(BaseModel):
     type: str
     geometry: GeoJSONGeometry
-    properties: Optional[dict] = None
+    properties: dict | None = None
 
 
 class GeoJSONFeatureCollection(BaseModel):

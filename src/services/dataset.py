@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
 
@@ -6,7 +6,7 @@ from src.utils.data import dget, dgets, get_dataset_level_vars
 from src.utils.file import load_dataset, load_datasets
 
 
-def list_datasets(search_path: Optional[str] = None) -> dict[str, Any]:
+def list_datasets(search_path: str | None = None) -> dict[str, Any]:
     datasets = load_datasets(search_path)
     return {"datasets": datasets}
 

@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -120,7 +119,7 @@ class TimeRange:
 
 @dataclass
 class MultiTimeRange:
-    ranges: Optional[list[TimeRange]]
+    ranges: list[TimeRange] | None
 
     def __post_init__(self):
         if self.ranges is None:

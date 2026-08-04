@@ -115,8 +115,10 @@ def pipeline(config, name, dataset=None):
 
 
 def run_pipeline(
-    dataset_name, pipeline_name, override_config={}, datasets_path="datasets.json"
+    dataset_name, pipeline_name, override_config=None, datasets_path="datasets.json"
 ):
+    if override_config is None:
+        override_config = {}
     dataset_config = load_dataset_config(dataset_name, datasets_path)
     merged_config = {**dataset_config, **override_config}
     return pipeline(merged_config, pipeline_name)

@@ -1,5 +1,6 @@
 import asyncio
 import threading
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request
 from starlette.concurrency import run_in_threadpool
@@ -16,19 +17,23 @@ router = APIRouter(tags=["Extraction"])
 @router.get("/datasets/{dataset:path}/extract", summary="Get data at a specific time")
 async def extract_data(
     request: Request,
-    base: models.MeshFormatParams = Depends(),
-    bbox: models.BBoxParams = Depends(),
-    level: float | None = Query(None, description="The level coordinate to extract"),
-    time: models.TimeParams = Depends(),
-    mesh: models.MeshParams = Depends(),
-    spatial_interp: models.SpatialInterpolationParams = Depends(),
-    resolution_limit: float | None = Query(
-        None, description="The resolution limit for data extraction"
-    ),
-    is_3d: bool = Query(
-        False,
-        description="If True, performs a full 3D volume extraction. If False (default) and the dataset is 3D, a vertical coordinate must be provided.",
-    ),
+    base: Annotated[models.MeshFormatParams, Depends()],
+    bbox: Annotated[models.BBoxParams, Depends()],
+    time: Annotated[models.TimeParams, Depends()],
+    mesh: Annotated[models.MeshParams, Depends()],
+    spatial_interp: Annotated[models.SpatialInterpolationParams, Depends()],
+    level: Annotated[
+        float | None, Query(description="The level coordinate to extract")
+    ] = None,
+    resolution_limit: Annotated[
+        float | None, Query(description="The resolution limit for data extraction")
+    ] = None,
+    is_3d: Annotated[
+        bool,
+        Query(
+            description="If True, performs a full 3D volume extraction. If False (default) and the dataset is 3D, a vertical coordinate must be provided.",
+        ),
+    ] = False,
 ):
     interp_vars_params = base.interp_vars_params
     if interp_vars_params is not None and ":" in interp_vars_params:

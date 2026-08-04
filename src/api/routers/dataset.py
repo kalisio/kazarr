@@ -1,5 +1,6 @@
 import datetime as dt
 from email.utils import format_datetime, parsedate_to_datetime
+from typing import Annotated
 
 from fastapi import APIRouter, Query, Request, Response
 from fastapi.responses import RedirectResponse
@@ -13,7 +14,9 @@ router = APIRouter(tags=["Dataset"])
 
 @router.get("/datasets", summary="List available datasets")
 async def list_datasets(
-    search_path: str = Query(None, description="The path to search for datasets"),
+    search_path: Annotated[
+        str | None, Query(description="The path to search for datasets")
+    ] = None,
 ):
     return await run_in_threadpool(dataset_service.list_datasets, search_path)
 

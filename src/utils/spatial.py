@@ -1,13 +1,12 @@
 import hashlib
 import os
-from typing import Optional
 
 import numpy as np
 from loguru import logger as log
 from scipy.spatial import cKDTree
 
 _spatial_index_cache: dict[tuple, cKDTree] = {}
-MAX_CACHE_SIZE = os.getenv("KDTREE_MAX_CACHE_SIZE", 10)
+MAX_CACHE_SIZE = os.getenv("KDTREE_MAX_CACHE_SIZE", "10")
 
 
 def _get_array_hash(arr: np.ndarray) -> str:
@@ -26,16 +25,14 @@ def _get_array_hash(arr: np.ndarray) -> str:
 
 def get_cached_ckdtree(
     points: np.ndarray,
-    dataset_id: Optional[str] = None,
-    coord_vars: Optional[tuple[str, ...]] = None,
+    dataset_id: str | None = None,
+    coord_vars: tuple[str, ...] | None = None,
 ) -> cKDTree:
     """Retrieve or build a cKDTree for the given points.
 
     If dataset_id and coord_vars are provided, they are used for caching.
     Otherwise, a hash of the points is used.
     """
-    global _spatial_index_cache
-
     # Create cache key
     if dataset_id and coord_vars:
         # We still add a data hash to be safe if the file changed or subsetting happened
@@ -59,7 +56,7 @@ def get_cached_ckdtree(
     tree = cKDTree(points)
 
     # Manage cache size
-    if len(_spatial_index_cache) >= MAX_CACHE_SIZE:
+    if len(_spatial_index_cache) >= int(MAX_CACHE_SIZE):
         log.warning("[KAZARR] Cache size limit reached, evicting oldest entry")
         # Simple FIFO-ish eviction: remove a random entry or the first one
         _spatial_index_cache.pop(next(iter(_spatial_index_cache)))

@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from loguru import logger as log
 from starlette.middleware.gzip import GZipMiddleware
 
-import src.exceptions as exceptions
+from src import exceptions
 from src.api.routers import dataset, extract, isoline, mesh, probe, select
 
 app = FastAPI(
@@ -24,15 +24,15 @@ app = FastAPI(
 )
 
 app.add_middleware(
+    GZipMiddleware,
+    minimum_size=1024 # Starting from 1KB
+)
+app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=False,  # Cannot be True when allow_origins is ["*"]
     allow_methods=["*"],
     allow_headers=["*"],
-)
-app.add_middleware(
-    GZipMiddleware,
-    minimum_size=1024 # Starting from 1KB
 )
 
 

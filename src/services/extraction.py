@@ -1,5 +1,5 @@
 import threading
-from typing import Any, Optional, Union
+from typing import Any
 
 import numpy as np
 import xarray as xr
@@ -35,11 +35,11 @@ def extract(
     request: Request,
     dataset_id: str,
     variable: str,
-    time_range: Optional[str] = None,
-    level: Optional[float] = None,
+    time_range: str | None = None,
+    level: float | None = None,
     format: str = "raw",
-    config: Union[dict[str, Any], ExtractionConfig, None] = None,
-    cancel_event: Optional[threading.Event] = None,
+    config: dict[str, Any] | ExtractionConfig | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> dict[str, Any]:
     if not isinstance(config, ExtractionConfig):
         config = ExtractionConfig.model_validate(config or {})
@@ -569,14 +569,14 @@ def extract(
 def probe(
     request: Request,
     dataset_id: str,
-    variables: Union[str, list[str]],
+    variables: str | list[str],
     lon: float,
     lat: float,
-    level: Optional[float] = None,
-    time_range: Optional[str] = None,
+    level: float | None = None,
+    time_range: str | None = None,
     format: str = "raw",
-    config: Union[dict[str, Any], ExtractionConfig, None] = None,
-    cancel_event: Optional[threading.Event] = None,
+    config: dict[str, Any] | ExtractionConfig | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> dict[str, Any]:
     if not isinstance(config, ExtractionConfig):
         config = ExtractionConfig.model_validate(config or {})
@@ -605,7 +605,7 @@ def probe(
         level_var = level_vars
     else:
         for lv in level_vars:
-            if all([var in level_vars[lv] for var in variables]):
+            if all(var in level_vars[lv] for var in variables):
                 level_var = lv
                 break
         if level_var is None:
@@ -848,13 +848,13 @@ def probe(
 def multi_probe(
     request: Request,
     dataset_id: str,
-    variables: Union[str, list[str]],
+    variables: str | list[str],
     points: list[dict[str, float]],
-    time_range: Optional[str] = None,
+    time_range: str | None = None,
     is_path: bool = False,
     format: str = "raw",
-    config: Union[dict[str, Any], ExtractionConfig, None] = None,
-    cancel_event: Optional[threading.Event] = None,
+    config: dict[str, Any] | ExtractionConfig | None = None,
+    cancel_event: threading.Event | None = None,
 ):
     variables = variables if isinstance(variables, list) else [variables]
 
@@ -927,8 +927,8 @@ def free_selection(
     request: Request,
     dataset_id: str,
     variable: str,
-    config: Union[dict[str, Any], ExtractionConfig, None] = None,
-    cancel_event: Optional[threading.Event] = None,
+    config: dict[str, Any] | ExtractionConfig | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> dict[str, Any]:
     if not isinstance(config, ExtractionConfig):
         config = ExtractionConfig.model_validate(config or {})
