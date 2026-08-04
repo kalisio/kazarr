@@ -7,8 +7,8 @@ from src.utils.logging import configure_logging
 
 # Get host and port from environment variables or use defaults
 HOST = os.getenv("HOST", "127.0.0.1")
-PORT = int(os.getenv("PORT", 8000))
-WORKERS_COUNT = int(os.getenv("WORKERS_COUNT", 1))
+PORT = int(os.getenv("PORT", "8000"))
+WORKERS_COUNT = int(os.getenv("WORKERS_COUNT", "1"))
 
 
 def start_api(host, port, workers, datasets_path, enable_debug=False, log_level="INFO"):
@@ -27,7 +27,7 @@ def main():
         description="A lightweight FastAPI service that exposes endpoints to interact with Zarr datasets stored in a Simple Storage Service (S3)"
     )
     parser.add_argument(
-        "-p", "--port", type=int, default=PORT, help="Port to run the API server on"
+        "-p", "--port", type=int, default=int(PORT), help="Port to run the API server on"
     )
     parser.add_argument(
         "-H", "--host", type=str, default=HOST, help="Host to run the API server on"
@@ -36,7 +36,7 @@ def main():
         "-w",
         "--workers",
         type=int,
-        default=WORKERS_COUNT,
+        default=int(WORKERS_COUNT),
         help="Number of worker processes for handling requests",
     )
     parser.add_argument(
