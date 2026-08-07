@@ -5,26 +5,25 @@ description = "A lightweight FastAPI service that exposes endpoints to interact 
 requires-python = ">=3.11"
 
 dependencies = [
-  "xarray>=2026.4.0",
-  "zarr>=3.1.6",
-  "cfgrib>=0.9.15.1",
-  "h5py>=3.15.1",
-  "h5netcdf>=1.7.3",
-  "numpy>=2.3.4",
-  "pyproj>=3.7.2",
-  "dask[distributed]>=2026.3.0",
-  "s3fs>=2025.10.0",
-  "matplotlib>=3.10.7",
-  "pyvista>=0.46.4",
-  "platformdirs>=4.10.0",
-  "bokeh>=3.0.0",
-  "fastapi>=0.136.3",
-  "uvicorn>=0.35.0",
-  "matplotlib>=3.10.7",
-  "vtk>=9.5.2",
-  "scipy>=1.16.3",
-  "uvloop>=0.22.1",
-  "loguru>=0.7.3",
+  "xarray==2026.4.0",
+  "zarr==3.1.6",
+  "cfgrib==0.9.15.1",
+  "h5py==3.15.1",
+  "h5netcdf==1.7.3",
+  "numpy==2.3.4",
+  "pyproj==3.7.2",
+  "dask[distributed]==2026.3.0",
+  "s3fs==2025.10.0",
+  "matplotlib==3.10.7",
+  "pyvista==0.46.4",
+  "platformdirs==4.5.0",
+  "bokeh==3.8.1",
+  "fastapi==0.136.3",
+  "uvicorn==0.35.0",
+  "vtk==9.5.2",
+  "scipy==1.16.3",
+  "uvloop==0.22.1",
+  "loguru==0.7.3",
   "diskcache>=5.6.3"
 ]
 
@@ -38,6 +37,7 @@ test = [
 
 [tool.pytest.ini_options]
 markers = [
+  "Debug: Tests for debugging purposes",
   "General: General tests for the API",
   "RegularGrid: Tests for regular grid datasets",
   "RectilinearGrid: Tests for rectilinear grid datasets",
@@ -48,6 +48,7 @@ markers = [
   "CustomEccodes: Tests for custom ECCODES functionalities",
   "CombineDatasets: Tests for combining datasets",
 ]
+pythonpath = ["."] #, "conversion_tool"]
 
 [tool.coverage.run]
 patch = ["subprocess"]
