@@ -89,8 +89,8 @@ jobs:
   package_conversion_tool:
     name: Package conversion tool
     if: ${{
-      github.event_name == 'workflow_dispatch' && inputs.package_conversion_tool ||
-      github.event_name == 'push' && github.ref_type == 'tag')
+      (github.event_name == 'workflow_dispatch' && inputs.package_conversion_tool) ||
+      (github.event_name == 'push' && github.ref_type == 'tag')
       }}
     runs-on: ubuntu-22.04
     steps:
