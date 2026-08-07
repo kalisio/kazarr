@@ -1,30 +1,15 @@
-FROM mambaorg/micromamba
+FROM python:3.11-bookworm
 LABEL maintainer="<contact@kalisio.xyz>"
 
-ENV HOME=/kazarr
-COPY --chown=mambauser:mambauser . ${HOME}
-WORKDIR ${HOME}
-USER mambauser
+# Install uv and uvx from the Astral SH container registry
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
-RUN micromamba install -y -n base -c conda-forge \
-  python=3.11 \
-  fastapi \
-  uvicorn \
-  xarray \
-  zarr \
-  numpy \
-  pyproj \
-  dask \
-  s3fs \
-  matplotlib \
-  pyvista=0.47.1 \
-  vtk-base=9.5.2 \
-  scipy \
-  uvloop \
-  loguru \
-  diskcache \
-  && micromamba clean --all --yes
+ENV HOME=/app
+COPY . ${HOME}
+WORKDIR ${HOME}
+
+RUN uv sync
 
 EXPOSE 8000
 
-CMD ["micromamba", "run", "-n", "base", "python", "main.py", "-H", "0.0.0.0", "-p", "8000", "-d"]
+CMD ["uv", "run", "python", "main.py", "-H", "0.0.0.0", "-p", "8000", "-d"]

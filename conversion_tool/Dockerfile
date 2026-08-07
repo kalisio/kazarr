@@ -1,6 +1,9 @@
 FROM python:3.11-bookworm
 LABEL maintainer="<contact@kalisio.xyz>"
 
+# Install uv and uvx from the Astral SH container registry
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
   gcc \
   libc6-dev \
@@ -11,4 +14,4 @@ COPY . ${HOME}
 WORKDIR ${HOME}
 
 # Install the package along with its runtime dependencies and pyinstaller
-RUN pip install ".[build]" && pyinstaller -F -n kazarr main.py
+RUN uv sync --group build && uv run pyinstaller -F -n kazarr main.py

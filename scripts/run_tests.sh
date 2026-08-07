@@ -35,10 +35,14 @@ done
 
 . "$WORKSPACE_DIR/development/workspaces/services/services.sh" kazarr
 
-## Setup micromamba env
+## Setup python env
 ##
 
-setup_micromamba_env "kazarr-test" "$THIS_DIR/test-environment.yml" true
+# As setup_python_env create a virtual environment with uv and 
+# run_python_lib_tests runs the tests without using "uv run" 
+# (to keep compatibility with micromamba environments), we need 
+# to activate the environment (-a)
+setup_python_env -a -g "test"
 
 ## Run tests
 ##

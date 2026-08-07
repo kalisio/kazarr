@@ -7,7 +7,7 @@ name = "kazarr-conversion-tool"
 version = "0.1.0"
 description = "A tool to process various data formats to Zarr datasets compatible with the kazarr service"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = { text = "MIT" }
 keywords = ["zarr", "netcdf", "grib", "xarray", "conversion", "kalisio"]
 
@@ -27,8 +27,8 @@ dependencies = [
     "bokeh>=3.0.0",
 ]
 
-[project.optional-dependencies]
-# Required to build the standalone executable (not needed at runtime)
+[dependency-groups]
+# Required to build the standalone executable
 build = ["pyinstaller>=6.21.0"]
 
 [project.scripts]
@@ -36,3 +36,9 @@ kazarr = "kazarr.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["kazarr"]
+
+[tool.bumpversion]
+current_version = "0.1.0"
+commit = true
+tag = true
+commit_args = "--no-verify"
