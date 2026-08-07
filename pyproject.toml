@@ -29,7 +29,12 @@ dependencies = [
 ]
 
 [dependency-groups]
-test = ["pytest", "pytest-cov", "ruff"]
+test = [
+  "pytest",
+  "pytest-cov",
+  "ruff",
+  "httpx2"
+]
 
 [tool.pytest.ini_options]
 markers = [
