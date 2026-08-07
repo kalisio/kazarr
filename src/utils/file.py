@@ -198,7 +198,7 @@ def get_dataset_last_modified(dataset_id: str) -> os.stat_result | str | None:
         full_path = os.path.join(get_datasets_path().rstrip("/"), path)
         try:
             return datetime.datetime.fromtimestamp(
-                os.path.getmtime(full_path), tz=datetime.timezone.utc
+                os.path.getmtime(full_path), tz=datetime.UTC
             )
         except Exception:
             return None

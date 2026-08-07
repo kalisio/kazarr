@@ -41,18 +41,16 @@ async def dataset_metadata(dataset: str, request: Request, response: Response):
         if isinstance(last_modified, str):
             try:
                 # Attempt to parse ISO string
-                last_modified = dt.datetime.fromisoformat(
-                    last_modified.replace("Z", "+00:00")
-                )
+                last_modified = dt.datetime.fromisoformat(last_modified)
             except ValueError:
                 pass
 
         # Ensure it's a timezone-aware UTC datetime for format_datetime(usegmt=True)
         if isinstance(last_modified, dt.datetime):
             if last_modified.tzinfo is not None:
-                last_modified = last_modified.astimezone(dt.timezone.utc)
+                last_modified = last_modified.astimezone(dt.UTC)
             else:
-                last_modified = last_modified.replace(tzinfo=dt.timezone.utc)
+                last_modified = last_modified.replace(tzinfo=dt.UTC)
 
             # Check the If-Modified-Since header
             if_modified_since = request.headers.get("if-modified-since")

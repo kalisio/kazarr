@@ -3,7 +3,7 @@ import logging
 import os
 import shutil
 import time
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from pathlib import Path
 
 import eccodes
@@ -259,7 +259,7 @@ def timestamp_to_datetime(timestamp):
     else:
         divisor = 1e9  # Nanoseconds
 
-    return datetime.fromtimestamp(ts / divisor, tz=timezone.utc)
+    return datetime.fromtimestamp(ts / divisor, tz=UTC)
 
 
 def parse_datetime(date_input, date_format=None):
@@ -281,7 +281,7 @@ def parse_datetime(date_input, date_format=None):
     else:
         date_input = str(date_input)
 
-    dt_obj = datetime.strptime(date_input, date_format).replace(tzinfo=timezone.utc)
+    dt_obj = datetime.strptime(date_input, date_format).replace(tzinfo=UTC)
     return np.datetime64(dt_obj)
 
 
