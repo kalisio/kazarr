@@ -23,6 +23,10 @@ init_github_build_conversion_tool() {
     install_reqs age sops
 }
 
+init_github_package_conversion_tool() {
+    install_reqs age sops uv
+}
+
 begin_group "Init $CI_ID for $JOB_ID"
 
 init_"${CI_ID}_${JOB_ID}"

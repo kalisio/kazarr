@@ -47,7 +47,7 @@ setup_python_env -a -g "test"
 ## Install required OS packages
 ##
 
-apt-get update && apt-get install -y --no-install-recommends \
+sudo apt-get update && sudo apt-get install -y --no-install-recommends \
     libeccodes0 \
     libeccodes-dev \
     && rm -rf /var/lib/apt/lists/*
