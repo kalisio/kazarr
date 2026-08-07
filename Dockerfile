@@ -4,9 +4,8 @@ LABEL maintainer="<contact@kalisio.xyz>"
 # Install uv and uvx from the Astral SH container registry
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
-ENV HOME=/app
-COPY . ${HOME}
-WORKDIR ${HOME}
+WORKDIR /app
+COPY . .
 
 RUN uv sync
 
