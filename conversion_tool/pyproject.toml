@@ -7,7 +7,7 @@ name = "kazarr-conversion-tool"
 version = "0.1.0"
 description = "A tool to process various data formats to Zarr datasets compatible with the kazarr service"
 readme = "README.md"
-requires-python = "==3.11"
+requires-python = ">=3.11.14,<3.12"
 license = { text = "MIT" }
 keywords = ["zarr", "netcdf", "grib", "xarray", "conversion", "kalisio"]
 
