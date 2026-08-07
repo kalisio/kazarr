@@ -50,7 +50,7 @@ setup_python_env -a -g "test"
 sudo apt-get update && sudo apt-get install -y --no-install-recommends \
     libeccodes0 \
     libeccodes-dev \
-    && rm -rf /var/lib/apt/lists/*
+    && sudo rm -rf /var/lib/apt/lists/*
 
 ## Run tests
 ##
