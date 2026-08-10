@@ -15,4 +15,4 @@ WORKDIR /app
 COPY . .
 
 # Install the package along with its runtime dependencies and pyinstaller
-RUN uv sync --group build && uv run pyinstaller -F -n kazarr main.py
+RUN uv sync --group build --no-cache && uv run pyinstaller -F -n kazarr main.py
