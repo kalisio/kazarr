@@ -11,13 +11,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   libeccodes-dev \
   && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
-COPY . .
-
-# /tmp is always world-writable regardless of the runtime UID.
-# uv initializes its cache dir even with --no-cache, so we must point it
-# somewhere accessible to avoid "Permission denied" on /.cache/uv
-ENV UV_CACHE_DIR=/tmp/uv-cache
+ENV HOME=/app
+COPY . ${HOME}
+WORKDIR ${HOME}
 
 # Install the package along with its runtime dependencies and pyinstaller
-RUN uv sync --group build --no-cache && uv run pyinstaller -F -n kazarr main.py
+RUN chmod -R g=u /app && uv sync --group build --no-cache && uv run pyinstaller -F -n kazarr main.py

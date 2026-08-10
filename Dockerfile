@@ -4,18 +4,11 @@ LABEL maintainer="<contact@kalisio.xyz>"
 # Install uv and uvx from the Astral SH container registry
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
-RUN useradd -m -u 1000 app
-USER app
+ENV HOME=/app
+COPY . ${HOME}
+WORKDIR ${HOME}
 
-WORKDIR /app
-COPY --chown=app:app . .
-
-# /tmp is always world-writable regardless of the runtime UID.
-# uv initializes its cache dir even with --no-cache, so we must point it
-# somewhere accessible to avoid "Permission denied" on /.cache/uv
-ENV UV_CACHE_DIR=/tmp/uv-cache
-
-RUN uv sync --no-cache
+RUN chmod -R g=u /app && uv sync --no-cache
 
 EXPOSE 8000
 
