@@ -7,6 +7,9 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 WORKDIR /app
 COPY . .
 
+# Force uv cache into a writable directory (avoids /.cache/uv permission error when $HOME is not set)
+ENV UV_CACHE_DIR=/app/.cache/uv
+
 RUN uv sync
 
 EXPOSE 8000

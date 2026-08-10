@@ -45,6 +45,6 @@ setup_python_env
 
 export UV_PUBLISH_TOKEN=$(decrypt_stdout "$WORKSPACE_DIR/development/common/KALISIO_PYPI_TOKEN.enc.value")
 
-build_and_publish_python_lib "$ROOT_DIR" "$PUBLISH" "$PUBLISH_URL"
+build_and_publish_python_lib "$ROOT_DIR/conversion_tool" "$PUBLISH" "$PUBLISH_URL"
 
 unset UV_PUBLISH_TOKEN
