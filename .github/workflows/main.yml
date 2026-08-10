@@ -18,6 +18,11 @@ on:
         default: false
         required: false
         type: boolean
+      package_conversion_tool:
+        description: "Package and publish conversion tool"
+        default: false
+        required: false
+        type: boolean
 
 jobs:
   run_tests:
