@@ -4,10 +4,10 @@ build-backend = "hatchling.build"
 
 [project]
 name = "kazarr-conversion-tool"
-version = "0.1.1"
+version = "0.1.2"
 description = "A tool to process various data formats to Zarr datasets compatible with the kazarr service"
 readme = "README.md"
-requires-python = ">=3.11.14,<3.12"
+requires-python = ">=3.11,<3.14"
 license = { text = "MIT" }
 keywords = ["zarr", "netcdf", "grib", "xarray", "conversion", "kalisio"]
 
@@ -38,7 +38,7 @@ kazarr = "kazarr.cli:main"
 packages = ["kazarr"]
 
 [tool.bumpversion]
-current_version = "0.1.1"
+current_version = "0.1.2"
 commit = true
 tag = true
 commit_args = "--no-verify"
