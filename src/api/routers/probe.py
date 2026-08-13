@@ -6,8 +6,8 @@ from fastapi import APIRouter, Body, Depends, Query, Request
 from starlette.concurrency import run_in_threadpool
 
 import src.schemas.requests as models
-from schemas.requests import ProbePoint
 from src import exceptions
+from src.schemas.requests import ProbePoint
 from src.services import extraction
 from src.utils.data import parse_query_dict
 from src.utils.requests import watch_disconnection
