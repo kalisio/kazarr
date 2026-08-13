@@ -6,7 +6,10 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-import eccodes
+try:
+    import eccodes
+except ImportError:
+    eccodes = None
 import numpy as np
 import s3fs
 from botocore.exceptions import NoCredentialsError
@@ -476,6 +479,10 @@ def get_valid_template_args(template_args):
 
 
 def load_custom_eccodes(custom_codes_path=None):
+    if eccodes is None:
+        logger.debug("ecCodes not installed; skipping custom ecCodes loading.")
+        return
+
     codes_env_var = "ECCODES_DEFINITION_PATH"
     codes_env_var_value = os.getenv(codes_env_var)
     if custom_codes_path is None:

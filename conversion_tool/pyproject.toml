@@ -14,7 +14,6 @@ keywords = ["zarr", "netcdf", "grib", "xarray", "conversion", "kalisio"]
 dependencies = [
     "xarray==2026.4.0",
     "zarr==3.1.6",
-    "cfgrib==0.9.15.1",
     "h5py==3.15.1",
     "h5netcdf==1.7.3",
     "numpy==2.3.4",
@@ -26,6 +25,9 @@ dependencies = [
     "platformdirs==4.10.0",
     "bokeh==3.0.0",
 ]
+
+[project.optional-dependencies]
+grib = ["cfgrib>=0.9.15.1"]
 
 [dependency-groups]
 # Required to build the standalone executable

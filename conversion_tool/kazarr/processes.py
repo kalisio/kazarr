@@ -7,7 +7,10 @@ import tempfile
 import uuid
 from pathlib import Path
 
-import cfgrib
+try:
+    import cfgrib
+except ImportError:
+    cfgrib = None
 import numpy as np
 import s3fs
 import xarray as xr
@@ -154,6 +157,10 @@ def load_from_netcdf(dataset, config):
 
 def load_from_grib(dataset, config):
     """Load a dataset from local or S3 GRIB files."""
+    if cfgrib is None:
+        raise ImportError(
+            "cfgrib is required to load GRIB files. Please install the tool with GRIB support: 'pip install .[grib]' or 'pip install cfgrib'."
+        )
     ds_count = 0
     total_count = 0
 
