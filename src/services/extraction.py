@@ -96,9 +96,11 @@ def extract(
 
     if len(missing_vars) > 0:
         raise exceptions.BadConfigurationVariable(missing_vars)
-    
+
     # Normalize longitudes if the dataset is in [0, 360] and the bbox uses negative values
-    dataset, _ = bbox.normalize_dataset_longitudes(dataset, lon_var, lat_var, bbox=bounding_box)
+    dataset, _ = bbox.normalize_dataset_longitudes(
+        dataset, lon_var, lat_var, bbox=bounding_box
+    )
 
     # Detect multi-timestep mode: when time is not specified but time_var is defined,
     # we will return data for all timesteps.
@@ -570,23 +572,37 @@ def probe(
     request: Request,
     dataset_id: str,
     variables: str | list[str],
-    lon: float,
-    lat: float,
-    level: float | None = None,
+    points: list[dict[str, float]],
     time_range: str | None = None,
+    is_path: bool = False,
+    is_single_probe: bool = False,
     format: str = "raw",
     config: dict[str, Any] | ExtractionConfig | None = None,
     cancel_event: threading.Event | None = None,
 ) -> dict[str, Any]:
     if not isinstance(config, ExtractionConfig):
         config = ExtractionConfig.model_validate(config or {})
+
     step_logger = StepLoggerAndAborter(
         "probe",
-        parameters=(dataset_id, variables, lon, lat, level, time_range, format, config),
+        parameters=(
+            dataset_id,
+            variables,
+            f"{len(points)} points",
+            f"{len(time_range) if time_range else 0} times",
+            is_path,
+            format,
+            config,
+        ),
         cancel_event=cancel_event,
     )
     step_logger.step_start("Load dataset and config")
+
     variables = variables if isinstance(variables, list) else [variables]
+    is_path = (
+        is_path and isinstance(time_range, list) and len(time_range) == len(points)
+    )
+    with_level = any(point.level is not None for point in points)
     dataset, dataset_config = load_dataset(dataset_id)
     fixed_coords, fixed_dims = dgets(
         dataset_config, [FIXED_VARIABLES_KEY, FIXED_DIMENSIONS_KEY], {}
@@ -610,10 +626,6 @@ def probe(
                 break
         if level_var is None:
             raise exceptions.DifferentTypesOfLevel()
-        
-    query_level = get_from_query(level_var, level, request)
-    level = float(query_level) if query_level is not None else None
-    with_level = level is not None
 
     not_found_vars = []
     for var in variables:
@@ -633,11 +645,8 @@ def probe(
         missing_vars.append(f"time ({time_var})")
     if len(missing_vars) > 0:
         raise exceptions.BadConfigurationVariable(missing_vars)
-    
-    # Normalize longitudes if the dataset is in [0, 360] and the probe uses negative lon
-    dataset, lon = bbox.normalize_dataset_longitudes(dataset, lon_var, lat_var, lon=lon)
 
-    if time_range.has_time() and time_var is not None:
+    if not is_path and time_range.has_time() and time_var is not None:
         bounded_time_range = get_bounded_time(dataset, time_var, time_range)
         time_range_indexer = get_times_in_range(dataset, time_var, bounded_time_range)
         if time_range_indexer is not None and len(time_range_indexer) > 0:
@@ -660,69 +669,145 @@ def probe(
         and longitudes.dims != latitudes.dims
     )
     has_regular_level = level_var is not None and dataset[level_var].ndim == 1
-    if with_level and has_regular_level:
-        fixed_coords[level_var] = level
-        if interp_spatial_method != "nearest":
-            spatial_interp_vars.append(level_var)
-    if is_regular_grid:
-        fixed_coords[lon_var] = lon
-        fixed_coords[lat_var] = lat
-        if interp_spatial_method != "nearest":
-            spatial_interp_vars.extend([lon_var, lat_var])
-    else:
+    if with_level and has_regular_level and interp_spatial_method != "nearest":
+        spatial_interp_vars.append(level_var)
+    if is_regular_grid and interp_spatial_method != "nearest":
+        spatial_interp_vars.extend([lon_var, lat_var])
+
+    # Pre-parse levels to determine global with_level correctly
+    parsed_levels = []
+    for point in points:
+        query_level = get_from_query(level_var, point.level, request)
+        parsed_levels.append(float(query_level) if query_level is not None else None)
+    with_level = any(lvl is not None for lvl in parsed_levels)
+
+    tree = None
+    if not is_regular_grid:
         if with_level and not has_regular_level:
-            levels = dataset[level_var].values
-            points = np.column_stack(
-                (longitudes.values.ravel(), latitudes.values.ravel(), levels.ravel())
+            levels_arr = dataset[level_var].values
+            grid_points = np.column_stack(
+                (
+                    longitudes.values.ravel(),
+                    latitudes.values.ravel(),
+                    levels_arr.ravel(),
+                )
             )
-            target_pt = np.array([lon, lat, level])
         else:
-            points = np.column_stack(
+            grid_points = np.column_stack(
                 (longitudes.values.ravel(), latitudes.values.ravel())
             )
-            target_pt = np.array([lon, lat])
-
-        step_logger.step_start("Build or retrieve spatial index for probe")
         coord_vars = (lon_var, lat_var, level_var) if with_level else (lon_var, lat_var)
-        tree = get_cached_ckdtree(points, dataset_id=dataset_id, coord_vars=coord_vars)
+        tree = get_cached_ckdtree(
+            grid_points, dataset_id=dataset_id, coord_vars=coord_vars
+        )
 
-        if interp_spatial_method != "nearest":
-            step_logger.step_start("Probe interpolation (IDW)")
-            max_radius = interp_spatial_params.get("radius", 0.05)
-            power = interp_spatial_params.get("power", 2.0)
-            indices = tree.query_ball_point(target_pt, r=max_radius)
+    max_radius = interp_spatial_params.get("radius", 0.05)
+    power = interp_spatial_params.get("power", 2.0)
 
-            if not indices:
-                raise exceptions.NoDataInSelection(
-                    "Try increasing interpolation radius"
-                )
+    points_data = []
+    target_pts = []
 
-            neighbors_coords = points[indices]
-            dists = np.linalg.norm(neighbors_coords - target_pt, axis=1)
+    # Calculate dataset longitude convention once to avoid calling .min() in a loop, as bbox.normalize_dataset_longitudes would do
+    lon_min_val = float(dataset[lon_var].min()) if lon_var and lon_var in dataset else 0
+    is_0_360 = lon_min_val >= 0
 
-            zero_dist = dists < 1e-12
-            if np.any(zero_dist):
-                weights = np.zeros(len(indices))
-                weights[np.argmax(zero_dist)] = 1.0
+    for i, point in enumerate(points):
+        level = parsed_levels[i]
+
+        # Normalize longitudes inline
+        lon = point.lon
+        if lon_var and lon_var in dataset:
+            if is_0_360:
+                if lon < 0:
+                    lon = lon + 360
+                elif lon > 360:
+                    lon = lon - 360
             else:
-                weights = (1.0 / (dists**power)) / np.sum(1.0 / (dists**power))
+                if lon > 180:
+                    lon = lon - 360
+                elif lon < -180:
+                    lon = lon + 360
 
-            neighbor_indices = [
-                np.unravel_index(idx, longitudes.shape) for idx in indices
-            ]
-            nearest_idx = neighbor_indices[np.argmax(weights)]
-            for dim_name, indice in zip(longitudes.dims, nearest_idx):
-                fixed_dims[dim_name] = indice
+        p_data = {
+            "lon": lon,
+            "lat": point.lat,
+            "level": level,
+            "fixed_coords": {},
+            "fixed_dims": {},
+            "spatial_indexers": None,
+            "weights_da": None,
+        }
+
+        if with_level and has_regular_level:
+            p_data["fixed_coords"][level_var] = level
+        if is_regular_grid:
+            p_data["fixed_coords"][lon_var] = lon
+            p_data["fixed_coords"][lat_var] = point.lat
         else:
-            step_logger.step_start("Probe interpolation (nearest neighbor)")
-            _, flat_index = tree.query(np.array([target_pt]), k=1)
-            flat_index = np.atleast_1d(flat_index)[0]
-            indices = np.unravel_index(flat_index, longitudes.shape)
-            for dim_name, indice in zip(longitudes.dims, indices):
-                fixed_dims[dim_name] = indice
+            if with_level and not has_regular_level:
+                target_pts.append([lon, point.lat, level])
+            else:
+                target_pts.append([lon, point.lat])
+
+        points_data.append(p_data)
+
+    # Query all target points at once instead of in a Python loop for massive speedups.
+    if not is_regular_grid and target_pts:
+        target_pts_arr = np.array(target_pts)
+        if interp_spatial_method != "nearest":
+            # IDW Interpolation on unstructured grid
+            indices_list = tree.query_ball_point(target_pts_arr, r=max_radius)
+            for i, indices in enumerate(indices_list):
+                if not indices:
+                    raise exceptions.NoDataInSelection(
+                        f"Try increasing interpolation radius (point {i + 1})"
+                    )
+
+                neighbors_coords = grid_points[indices]
+                target_pt = target_pts_arr[i]
+                dists = np.linalg.norm(neighbors_coords - target_pt, axis=1)
+
+                zero_dist = dists < 1e-12
+                if np.any(zero_dist):
+                    weights = np.zeros(len(indices))
+                    weights[np.argmax(zero_dist)] = 1.0
+                else:
+                    weights = (1.0 / (dists**power)) / np.sum(1.0 / (dists**power))
+
+                neighbor_indices = [
+                    np.unravel_index(idx, longitudes.shape) for idx in indices
+                ]
+                dim_indices = {dim: [] for dim in longitudes.dims}
+                for idx in neighbor_indices:
+                    for dim_name, indice in zip(longitudes.dims, idx):
+                        dim_indices[dim_name].append(indice)
+
+                points_data[i]["spatial_indexers"] = {
+                    dim: xr.DataArray(vals, dims=["neighbor"])
+                    for dim, vals in dim_indices.items()
+                }
+                points_data[i]["weights_da"] = xr.DataArray(weights, dims=["neighbor"])
+        else:
+            # Nearest neighbor on unstructured grid
+            _, flat_indices = tree.query(target_pts_arr, k=1)
+            flat_indices = np.atleast_1d(flat_indices)
+            for i, flat_index in enumerate(flat_indices):
+                indices = np.unravel_index(flat_index, longitudes.shape)
+                for dim_name, indice in zip(longitudes.dims, indices):
+                    points_data[i]["fixed_dims"][dim_name] = indice
 
     optional_coords = [time_var] if time_var is not None else []
     optional_dims = [time_dim] if time_dim is not None else []
+
+    if points_data:
+        p0 = points_data[0]
+        for key in ["fixed_coords", "fixed_dims", "spatial_indexers"]:
+            if p0.get(key):
+                if key == "fixed_coords":
+                    optional_coords.extend(p0[key].keys())
+                else:
+                    optional_dims.extend(p0[key].keys())
+
     fixed_coords, fixed_dims = get_required_dims_and_coords(
         dataset,
         variables,
@@ -733,193 +818,207 @@ def probe(
         optional_dims=optional_dims,
         as_dims=config.as_dims or [],
     )
-
-    step_logger.step_start("Extract variable values at probe location")
-    if not is_regular_grid and interp_spatial_method != "nearest":
-        dim_indices = {dim: [] for dim in longitudes.dims}
-        for idx in neighbor_indices:
-            for dim_name, indice in zip(longitudes.dims, idx):
-                dim_indices[dim_name].append(indice)
-
-        spatial_indexers = {
-            dim: xr.DataArray(vals, dims=["neighbor"])
-            for dim, vals in dim_indices.items()
-        }
-        weights_da = xr.DataArray(weights, dims=["neighbor"])
-        base_fixed_dims = {
-            k: v for k, v in fixed_dims.items() if k not in longitudes.dims
-        }
-
-    data = []
-    var_props = {}
-    for var in variables:
-        if not is_regular_grid and interp_spatial_method != "nearest":
-            filtered_da = sel(
-                dataset,
-                var,
-                fixed_coords,
-                base_fixed_dims,
-                interp_vars=interp_vars,
-                interp_method=interp_vars_method,
-                interp_config=interp_vars_params,
-            )
-            neighbor_data = filtered_da.isel(**spatial_indexers)
-            # Identify timesteps (or any leading dims) where ALL neighbors are NaN.
-            # xarray.sum(skipna=True) returns 0.0 in that case, which would
-            # incorrectly replace the "point didn't exist yet" NaN values with 0.
-            all_nan_mask = neighbor_data.isnull().all(dim="neighbor")
-            interpolated_values = (neighbor_data * weights_da).sum(dim="neighbor")
-            # Restore NaN for positions that had no valid neighbor data at all.
-            interpolated_values = interpolated_values.where(~all_nan_mask)
-            var_data = interpolated_values.values.tolist()
-        else:
-            interp_methods = None
-            if is_regular_grid and interp_spatial_method != "nearest":
-                # Force to linear interpolation as IDW (only other method supported for probe) doesn't make sense on a regular grid
-                interp_spatial_method = "linear"
-                interp_vars = list(dict.fromkeys(spatial_interp_vars + interp_vars))
-                interp_methods = dict.fromkeys(
-                    spatial_interp_vars, interp_spatial_method
-                )
-            var_data = sel(
-                dataset,
-                var,
-                fixed_coords,
-                fixed_dims,
-                interp_vars=interp_vars,
-                interp_method=interp_vars_method,
-                interp_methods=interp_methods,
-                interp_config=interp_vars_params,
-            ).values.tolist()
-        data.append(np.atleast_1d(var_data))
-        var_props[var] = dataset[var].attrs
-
-    step_logger.step_start(
-        "Get time values for probe location if time variable is defined"
-    )
+    step_logger.step_start("Extract variable values at probe locations")
+    lats, lons, levels = [], [], []
     times = None
-    if time_var is not None:
-        if time_range.has_time() and interp_vars_method != "nearest":
+    var_props = {}
+
+    if not is_path:
+        if time_var is None:
+            times = None
+        elif time_range.has_time() and interp_vars_method != "nearest":
             times = get_times_in_range(dataset, time_var, time_range)
         elif time_var in dataset:
-            times = sel(
+            time_da = sel(
                 dataset,
                 time_var,
                 fixed_coords,
                 fixed_dims,
                 interp_method=interp_vars_method,
                 interp_config=interp_vars_params,
-            ).values
-            times = np.atleast_1d(times)
+            )
+            times = np.atleast_1d(time_da.values)
             if np.issubdtype(times.dtype, np.datetime64):
                 times = [str(np.datetime_as_string(t)) for t in times]
             else:
                 times = times.tolist()
+    elif is_path:
+        times = []
+
+    lats = [p["lat"] for p in points_data]
+    lons = [p["lon"] for p in points_data]
+    levels = [p["level"] for p in points_data]
+
+    batch_fixed_coords = {**fixed_coords}
+    batch_fixed_dims = {**fixed_dims}
+
+    # Aggregate spatial coords/dims mapped along the new `point` dimension
+    if points_data:
+        if points_data[0]["fixed_coords"]:
+            for k in points_data[0]["fixed_coords"]:
+                batch_fixed_coords[k] = xr.DataArray(
+                    [p["fixed_coords"][k] for p in points_data], dims=["point"]
+                )
+        if points_data[0]["fixed_dims"]:
+            for k in points_data[0]["fixed_dims"]:
+                batch_fixed_dims[k] = xr.DataArray(
+                    [p["fixed_dims"][k] for p in points_data], dims=["point"]
+                )
+
+    # Aggregate spatial indexers and weights for IDW interpolation on unstructured grids
+    batch_spatial_indexers = None
+    batch_weights_da = None
+    if points_data and points_data[0]["spatial_indexers"]:
+        batch_spatial_indexers = {}
+        for k in points_data[0]["spatial_indexers"]:
+            vals_k = np.stack([p["spatial_indexers"][k].values for p in points_data])
+            batch_spatial_indexers[k] = xr.DataArray(vals_k, dims=["point", "neighbor"])
+        weights_vals = np.stack([p["weights_da"].values for p in points_data])
+        batch_weights_da = xr.DataArray(weights_vals, dims=["point", "neighbor"])
+
+    # Extract time points (trajectories).
+    if is_path:
+        req_times = []
+        for tr in time_range.ranges:
+            if tr.start is not None:
+                req_times.append(tr.start)
+            elif time_var is not None and time_var in dataset:
+                req_times.append(dataset[time_var].values[0])
+            else:
+                req_times.append(None)
+
+        if time_var is not None:
+            if time_range.has_time() and interp_vars_method != "nearest":
+                times = []
+                for t in req_times:
+                    try:
+                        t_parsed = np.datetime64(t)
+                        times.append(str(np.datetime_as_string(t_parsed)))
+                    except ValueError:
+                        times.append(str(t))
+            elif time_var in dataset:
+                req_times_arr = np.array(req_times, dtype=dataset[time_var].dtype)
+                temp_fixed_coords = {
+                    **batch_fixed_coords,
+                    time_var: xr.DataArray(req_times_arr, dims=["point"]),
+                }
+
+                time_da = sel(
+                    dataset,
+                    time_var,
+                    temp_fixed_coords,
+                    batch_fixed_dims,
+                    interp_method=interp_vars_method,
+                    interp_config=interp_vars_params,
+                )
+                time_vals = time_da.values
+                if time_vals.ndim > 1:
+                    time_vals = time_vals.squeeze()
+
+                if np.issubdtype(time_vals.dtype, np.datetime64):
+                    times = [str(np.datetime_as_string(t)) for t in time_vals]
+                else:
+                    times = time_vals.tolist()
+            else:
+                times = req_times
+
+        if times and time_var:
+            time_dtype = dataset[time_var].dtype
+            time_arr = np.array(times, dtype=time_dtype)
+            batch_fixed_coords[time_var] = xr.DataArray(time_arr, dims=["point"])
+
+    interp_methods = None
+    if is_regular_grid and interp_spatial_method != "nearest":
+        interp_spatial_method_pt = "linear"
+        interp_vars_pt = list(dict.fromkeys(spatial_interp_vars + interp_vars))
+        interp_methods = dict.fromkeys(spatial_interp_vars, interp_spatial_method_pt)
+    else:
+        interp_vars_pt = interp_vars
+    data = []
+    for var in variables:
+        if not is_regular_grid and interp_spatial_method != "nearest":
+            # For IDW on unstructured grid: filter base dimensions then multiply by spatial indexers
+            base_fixed_dims = {
+                k: v for k, v in batch_fixed_dims.items() if k not in longitudes.dims
+            }
+            filtered_da = sel(
+                dataset,
+                var,
+                batch_fixed_coords,
+                base_fixed_dims,
+                interp_vars=interp_vars_pt,
+                interp_method=interp_vars_method,
+                interp_methods=interp_methods,
+                interp_config=interp_vars_params,
+            )
+            neighbor_data = filtered_da.isel(**batch_spatial_indexers)
+            all_nan_mask = neighbor_data.isnull().all(dim="neighbor")
+            interpolated_values = (neighbor_data * batch_weights_da).sum(dim="neighbor")
+            interpolated_values = interpolated_values.where(~all_nan_mask)
+            da_result = interpolated_values
+        else:
+            # Native pointwise selection for regular grids or nearest neighbors
+            da_result = sel(
+                dataset,
+                var,
+                batch_fixed_coords,
+                batch_fixed_dims,
+                interp_vars=interp_vars_pt,
+                interp_method=interp_vars_method,
+                interp_methods=interp_methods,
+                interp_config=interp_vars_params,
+            )
+
+        # Force 'point' dimension as the last dimension so that .values is returned
+        # as [time, points] instead of [points, time].
+        dims = list(da_result.dims)
+        if "point" in dims:
+            dims.remove("point")
+            dims.append("point")
+            da_result = da_result.transpose(*dims)
+
+        var_data = da_result.values
+        if var_data.ndim == 1:
+            var_data = var_data[np.newaxis, :]
+
+        data.append(var_data)
+        var_props[var] = dataset[var].attrs
+
+    output_has_time = (times is not None) if not is_single_probe else False
 
     if format == "raw":
         step_logger.step_start("Prepare output (raw)")
         out = output.prepare_raw_output(
             variables,
             data,
-            np.atleast_1d(float(lon)),
-            np.atleast_1d(float(lat)),
-            levels=np.atleast_1d(float(level)) if level is not None else None,
+            np.array(lons),
+            np.array(lats),
+            levels=np.array(levels) if with_level else None,
             global_props={"times": times} if times is not None else None,
             var_props=var_props,
+            has_time_dimension=output_has_time,
+            is_path=is_path,
         )
-    elif format == "geojson" and times is not None:
+    elif format == "geojson":
         step_logger.step_start("Prepare output (GeoJSON)")
         out = output.prepare_geojson_output(
             variables,
             data,
-            np.atleast_1d(float(lon)),
-            np.atleast_1d(float(lat)),
-            levels=np.atleast_1d(float(level)) if level is not None else None,
-            collection_props={"times": times},
+            np.array(lons),
+            np.array(lats),
+            levels=np.array(levels) if with_level else None,
+            collection_props={"times": times} if times is not None else {},
             var_props=var_props,
+            has_time_dimension=output_has_time,
+            is_path=is_path,
+            line_string_props={"times": times}
+            if (is_path and times is not None)
+            else None,
         )
     else:
         raise exceptions.BadConfigurationVariable(f"Unsupported format: {format}")
 
     step_logger.end()
-    return out
-
-
-def multi_probe(
-    request: Request,
-    dataset_id: str,
-    variables: str | list[str],
-    points: list[dict[str, float]],
-    time_range: str | None = None,
-    is_path: bool = False,
-    format: str = "raw",
-    config: dict[str, Any] | ExtractionConfig | None = None,
-    cancel_event: threading.Event | None = None,
-):
-    variables = variables if isinstance(variables, list) else [variables]
-
-    is_path = is_path and isinstance(time_range, list) and len(time_range) == len(points)
-
-    lats, lons, levels, vals = [], [], [], {}
-    times, var_props = None, None
-    for index, point in enumerate(points):
-        result = probe(
-            request,
-            dataset_id,
-            variables,
-            point.lon,
-            point.lat,
-            point.level,
-            time_range if not is_path else time_range[index],
-            "raw",
-            config,
-            cancel_event,
-        )
-        lats.append(point.lat)
-        lons.append(point.lon)
-        levels.append(point.level)
-        for var in variables:
-            if var not in vals:
-                vals[var] = []
-            vals[var].append(result["values"][var])
-        if times is None:
-            times = result.get("times") if not is_path else []
-        if is_path:
-            times.append(result.get("times")[0])
-        if var_props is None:
-            var_props = {var: result["variables"][var] for var in variables}
-    vals = [vals[var] for var in variables]
-    # As probe returns values with dims (points, times) and output formatter will expect (times, points), we need to transpose the first two dimensions here
-    # Here, dim 0 is the variable dimension
-    vals = np.array(vals).transpose(0, 2, 1)
-    if format == "raw":
-        out = output.prepare_raw_output(
-            variables,
-            vals,
-            np.asarray(lons),
-            np.asarray(lats),
-            levels=np.asarray(levels) if levels and any(levels) else None,
-            global_props={"times": times} if times is not None else None,
-            has_time_dimension=times is not None,
-            is_path=is_path,
-        )
-    elif format == "geojson":
-        times_props = {"times": times} if times is not None else None
-        out = output.prepare_geojson_output(
-            variables,
-            vals,
-            np.asarray(lons),
-            np.asarray(lats),
-            levels=np.asarray(levels) if levels and any(levels) else None,
-            collection_props=times_props if not is_path else None,
-            var_props=var_props,
-            has_time_dimension=times is not None,
-            is_path=is_path,
-            line_string_props=times_props if is_path else None
-        )
-    else:
-        raise exceptions.BadConfigurationVariable(f"Unsupported format: {format}")
-
     return out
 
 

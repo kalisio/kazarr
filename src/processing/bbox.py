@@ -36,7 +36,7 @@ def normalize_dataset_longitudes(dataset, lon_var, lat_var, bbox=None, lon=None)
         return dataset, lon
 
     # --- Bounding-box case (extract) ---
-    if not bbox.has_bb_lon:
+    if bbox is None or not bbox.has_bb_lon:
         return dataset, lon
 
     longitudes = dataset[lon_var]

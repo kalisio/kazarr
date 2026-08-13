@@ -6,6 +6,7 @@ from fastapi import APIRouter, Body, Depends, Query, Request
 from starlette.concurrency import run_in_threadpool
 
 import src.schemas.requests as models
+from schemas.requests import ProbePoint
 from src import exceptions
 from src.services import extraction
 from src.utils.data import parse_query_dict
@@ -71,10 +72,10 @@ async def probe_data(
             request,
             base.dataset,
             variables,
-            lon,
-            lat,
-            level=level,
+            points=[ProbePoint(lon=lon, lat=lat, level=level)],
             time_range=time.times if time.times else time.time,
+            is_path=False,
+            is_single_probe=True,
             format=base.format,
             config=config,
             cancel_event=cancel_event,
@@ -139,7 +140,7 @@ async def probe_data_multi(
     watcher_task = asyncio.create_task(watch_disconnection(request, cancel_event))
     try:
         return await run_in_threadpool(
-            extraction.multi_probe,
+            extraction.probe,
             request,
             base.dataset,
             variables,

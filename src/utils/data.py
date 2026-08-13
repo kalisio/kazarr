@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import xarray as xr
 from loguru import logger as log
 
 from src import exceptions
@@ -287,9 +288,11 @@ def sel(
 
     # Convert coords values to target dtype
     for var, val in fixed_coords.items():
-        # Avoid to convert slice or ndarray with the same dtype as the dataset variable
-        if not isinstance(val, slice) and not (
-            isinstance(val, np.ndarray) and val.dtype == dataset[var].dtype
+        # Avoid to convert slice, xr.DataArray, or ndarray with the same dtype as the dataset variable
+        if (
+            not isinstance(val, slice)
+            and not isinstance(val, xr.DataArray)
+            and not (isinstance(val, np.ndarray) and val.dtype == dataset[var].dtype)
         ):
             fixed_coords[var] = np.array(val, dtype=dataset[var].dtype)
 
