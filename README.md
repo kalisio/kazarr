@@ -299,8 +299,22 @@ docker run -p 8000:8000 <your-image-name>
 
 ### Run locally
 
-You will need to install multiple Python packages to run this app.
-To simplify, you can install Anaconda (or micromamba) and run these commands :
+#### With `uv`
+
+To create an environment with `uv`, run these commands :
+
+```bash
+uv sync
+
+uv run main.py
+```
+
+> [!TIP]
+> If you also want to be able to execute tests, you will need to add `--group test` to the `uv sync` command
+
+#### With `conda` (Anaconda)
+
+To create an environment with Anaconda, run these commands :
 
 ```bash
 conda create -y -n kazarr_env python=3.11

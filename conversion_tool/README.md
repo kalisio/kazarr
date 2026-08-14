@@ -6,11 +6,21 @@ A tool to create Zarr datasets from NetCDF or GRIB2 files.
 
 ### As a library
 
-The tool requires Python 3.10+. You can install it by using pip:
+The tool requires Python 3.11+. You can install it by using **pip**:
 
 ```bash
-pip install .
+pip install kazarr-conversion-tool[grib] --index-url https://test.pypi.org/simple --extra-index-url https://pypi.org/simple
 ```
+
+Or with **uv**:
+```bash
+uv add kazarr-conversion-tool --default-index https://test.pypi.org/simple --index https://pypi.org/simple
+```
+
+> [!TIP]
+> If you need to use this tool with **GRIB** files, you should install optional dependencies:
+> - With **pip**, add `[grib]` after the library name: `pip install kazarr-conversion-tool[grib] ...`
+> - With **uv**, use `--extra` parameter: `uv add kazarr-conversion-tool --extra grib ...`
 
 ### As an executable
 
