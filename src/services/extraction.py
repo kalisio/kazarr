@@ -757,6 +757,9 @@ def probe(
         if interp_spatial_method != "nearest":
             # IDW Interpolation on unstructured grid
             indices_list = tree.query_ball_point(target_pts_arr, r=max_radius)
+            max_neighbors = (
+                max(len(idx) for idx in indices_list) if len(indices_list) > 0 else 0
+            )
             for i, indices in enumerate(indices_list):
                 if not indices:
                     raise exceptions.NoDataInSelection(
@@ -773,6 +776,16 @@ def probe(
                     weights[np.argmax(zero_dist)] = 1.0
                 else:
                     weights = (1.0 / (dists**power)) / np.sum(1.0 / (dists**power))
+
+                # As each point may have a different number of neighbors, we need 
+                # to pad the indices and weights arrays to the same length 
+                # for batch processing later.
+                pad_width = max_neighbors - len(indices)
+                if pad_width > 0:
+                    indices = list(indices) + [indices[0]] * pad_width
+                    weights = np.pad(
+                        weights, (0, pad_width), mode="constant", constant_values=0.0
+                    )
 
                 neighbor_indices = [
                     np.unravel_index(idx, longitudes.shape) for idx in indices
