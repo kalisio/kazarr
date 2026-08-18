@@ -3,6 +3,7 @@ import logging
 import time
 
 from kazarr import processes as proc
+from kazarr.exceptions import PipelineError
 from kazarr.utils import (
     camel_to_snake,
     dget,
@@ -21,7 +22,7 @@ def pipeline(config, name, dataset=None):
     pipelines = dget(config, "pipelines", {})
 
     if name not in pipelines:
-        raise ValueError(f"Pipeline not found: {name}")
+        raise PipelineError(f"Pipeline not found: {name}")
 
     logger.info('Starting pipeline "%s"', name)
 
@@ -39,7 +40,7 @@ def pipeline(config, name, dataset=None):
             process_name = dget(process, "name")
             process_params = dget(process, "params", default={})
             if process_type is None or process_name is None:
-                raise ValueError(
+                raise PipelineError(
                     f'Invalid process definition in pipeline "{name}": {process}'
                 )
 

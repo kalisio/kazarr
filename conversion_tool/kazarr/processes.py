@@ -5,6 +5,7 @@ import re
 import shutil
 import tempfile
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
 try:
@@ -19,10 +20,26 @@ from dask.distributed import Client, performance_report
 from platformdirs import user_cache_dir
 from pyproj import Transformer
 
+from kazarr.exceptions import (
+    DatasetConfigurationError,
+    DatasetError,
+    DatasetLoadError,
+    KazarrException,
+    LastOperationNotCompletedError,
+    MissingEnvironmentVariableError,
+)
 from kazarr.utils import (
+    BUCKET_NAME_ENV_VAR,
+    LAT_VARIABLE_KEY,
+    LEVEL_VARIABLE_KEY,
+    LON_VARIABLE_KEY,
+    S3_PREFIX,
     add_to_clean_config,
     add_to_global_config_update,
+    dataset_exists,
+    dget,
     get_dataset_config_value,
+    get_dataset_history,
     get_redundant_dimensions,
     get_s3_filesystem,
     get_s3_storage_options,
@@ -33,15 +50,12 @@ from kazarr.utils import (
     parse_datetime,
     rechunk_if_needed,
     resolve_args,
+    update_dataset_history,
 )
 
 logger = logging.getLogger(__name__)
 
-S3_PREFIX = "s3://"
-BUCKET_NAME_ENV_VAR = "BUCKET_NAME"
-LON_VARIABLE_KEY = "variables.lon"
-LAT_VARIABLE_KEY = "variables.lat"
-LEVEL_VARIABLE_KEY = "variables.level"
+
 ZARR_EXTENSION = ".zarr"
 
 
@@ -81,7 +95,7 @@ def load_from_netcdf(dataset, config):
     if path.startswith(S3_PREFIX):
         bucket = os.getenv(BUCKET_NAME_ENV_VAR)
         if bucket is None:
-            raise ValueError(f"{BUCKET_NAME_ENV_VAR} environment variable not set.")
+            raise MissingEnvironmentVariableError(BUCKET_NAME_ENV_VAR)
         path = path.replace(S3_PREFIX, "")
         path = os.path.join(bucket, path)
 
@@ -151,7 +165,7 @@ def load_from_netcdf(dataset, config):
             )
 
     if new_dataset is None:
-        raise ValueError(f"Unable to load NetCDF dataset from path: {path}")
+        raise DatasetLoadError(path, "Unable to load NetCDF dataset")
     return init_store_as_secondary(dataset, new_dataset, config)
 
 
@@ -189,7 +203,7 @@ def load_from_grib(dataset, config):
     if path.startswith(S3_PREFIX):
         bucket = os.getenv(BUCKET_NAME_ENV_VAR)
         if bucket is None:
-            raise ValueError(f"{BUCKET_NAME_ENV_VAR} environment variable not set.")
+            raise MissingEnvironmentVariableError(BUCKET_NAME_ENV_VAR)
         path = path.replace(S3_PREFIX, "")
         path = os.path.join(bucket, path)
 
@@ -227,8 +241,8 @@ def load_from_grib(dataset, config):
             ]
 
             if not files:
-                raise ValueError(
-                    f"No files matching regex '{file_pattern}' found in S3 path: {path}"
+                raise DatasetLoadError(
+                    path, f"No files matching regex '{file_pattern}' found in S3 path"
                 )
 
             files = sorted(files)
@@ -325,8 +339,9 @@ def load_from_grib(dataset, config):
             ]
 
             if not files:
-                raise ValueError(
-                    f"No files matching regex '{file_pattern}' found in local path: {path}"
+                raise DatasetLoadError(
+                    path,
+                    f"No files matching regex '{file_pattern}' found in local path",
                 )
 
             files = sorted(files)
@@ -348,7 +363,7 @@ def load_from_grib(dataset, config):
 
             add_to_clean_config(config, "idx_folders", files)
     if new_dataset is None:
-        raise ValueError(f"Unable to load GRIB dataset from path: {path}")
+        raise DatasetLoadError(path, "Unable to load GRIB dataset")
     return init_store_as_secondary(dataset, new_dataset, config)
 
 
@@ -372,7 +387,7 @@ def load_from_zarr(dataset, config):
         if path.startswith(S3_PREFIX):
             bucket = os.getenv(BUCKET_NAME_ENV_VAR)
             if bucket is None:
-                raise ValueError(f"{BUCKET_NAME_ENV_VAR} environment variable not set.")
+                raise MissingEnvironmentVariableError(BUCKET_NAME_ENV_VAR)
             path = path.replace(S3_PREFIX, "")
             path = os.path.join(bucket, path)
 
@@ -383,14 +398,20 @@ def load_from_zarr(dataset, config):
             new_dataset = xr.open_zarr(s3_store, chunks="auto")
         else:
             new_dataset = xr.open_zarr(path, chunks="auto")
+
+        # Check last operation in history to see if it succeeded, and if not, raise an error to indicate that the dataset may be incomplete or corrupted
+        history = get_dataset_history(path, config)
+        if len(history) > 0 and "end_date" not in history[-1]:
+            raise LastOperationNotCompletedError(history)
     except zarr.errors.GroupNotFoundError as e:
-        raise ValueError(
-            f"Unable to load Zarr dataset from path: {path}. The specified path does not contain a valid Zarr store."
+        raise DatasetLoadError(
+            path,
+            "Unable to load Zarr dataset. The specified path does not contain a valid Zarr store.",
         ) from e
+    except KazarrException as e:
+        raise e  # noqa: TRY201
     except Exception as e:
-        raise ValueError(
-            f"Unable to load Zarr dataset from path: {path}. Error: {e}"
-        ) from e
+        raise DatasetLoadError(path, f"Unable to load Zarr dataset. Error: {e}") from e
     return init_store_as_secondary(dataset, new_dataset, config)
 
 
@@ -464,8 +485,9 @@ def load_and_merge_from_grib(dataset, config):
         new_dataset = None
 
     if new_dataset is None:
-        raise ValueError(
-            f"Unable to find any files matching discriminators {discriminators} in path: {path} for load_and_merge_from_grib process."
+        raise DatasetLoadError(
+            path,
+            f"Unable to find any files matching discriminators {discriminators} for load_and_merge_from_grib process.",
         )
 
     return init_store_as_secondary(dataset, new_dataset, config)
@@ -514,23 +536,23 @@ def combine_at_time(dataset, config):
         "secondary_datasets" not in config
         or combine_dataset_tag not in config["secondary_datasets"]
     ):
-        raise ValueError(
+        raise DatasetConfigurationError(
             f"Dataset with tag '{combine_dataset_tag}' not found in config 'secondary_datasets' for combine_at_time process."
         )
 
     combine_dataset = config["secondary_datasets"][combine_dataset_tag]
 
     if time_var not in dataset:
-        raise ValueError(
+        raise DatasetError(
             f"Time variable '{time_var}' not found in the main dataset for combine_at_time process."
         )
     if time_var not in combine_dataset:
-        raise ValueError(
+        raise DatasetError(
             f"Time variable '{time_var}' not found in the secondary dataset '{combine_dataset_tag}' for combine_at_time process."
         )
 
     if dataset[time_var].ndim != 1:
-        raise ValueError(
+        raise DatasetError(
             f"Time variable '{time_var}' in the main dataset has {dataset[time_var].ndims} dimensions, but a 1-dimensional time variable is required for combine_at_time process."
         )
 
@@ -622,7 +644,7 @@ def combine_at_time(dataset, config):
                         "Please specify 'combine_point_discriminator_var' config parameter to select a variable to use, "
                         "or check that the dataset contains a string variable with the same dimensions as the spatial variables."
                     )
-                raise ValueError(
+                raise DatasetConfigurationError(
                     "This dataset was detected as a point list. To combine two datasets"
                     ", this process need a variable to discriminate points (names), "
                     f"but {message_end}"
@@ -633,12 +655,12 @@ def combine_at_time(dataset, config):
             index_target_var = point_discriminator_var
 
         if index_target_var not in secondary_after:
-            raise ValueError(
+            raise DatasetError(
                 f"Variable '{index_target_var}' not found in the secondary dataset. Please specify a valid variable to discriminate points ('combine_point_discriminator_var' config parameter)."
             )
 
         if len(primary_before[index_target_var].dims) == 0:
-            raise ValueError(
+            raise DatasetError(
                 f"Variable '{index_target_var}' selected as point discriminator "
                 "is a scalar variable in the primary dataset, but it needs to be"
                 " an array variable with the same dimensions as the spatial "
@@ -653,7 +675,7 @@ def combine_at_time(dataset, config):
 
         for label, ds in [("primary", primary_before), ("secondary", secondary_after)]:
             if index_dim_name not in ds.dims:
-                raise ValueError(
+                raise DatasetError(
                     f"Dimension '{index_dim_name}' (derived from discriminator variable "
                     f"'{index_target_var}') was not found among the {label} dataset dimensions: "
                     f"{list(ds.dims)}. Cannot set index for point-list combination."
@@ -689,7 +711,7 @@ def combine_at_time(dataset, config):
                             {dim: (0, diff)}, constant_values=np.nan
                         )
                     except Exception as e:
-                        raise ValueError(
+                        raise DatasetError(
                             f"Failed to pad primary dataset along dimension '{dim}' by {diff} element(s) "
                             f"to align with secondary dataset. This can happen if the dimension is an index "
                             f"or has an incompatible dtype. Original error: {e}"
@@ -707,7 +729,7 @@ def combine_at_time(dataset, config):
                 or not var_pattern
                 or not var_template
             ):
-                raise ValueError(
+                raise DatasetConfigurationError(
                     "'attr_indexed_var_renaming' requires 'attr_pattern', 'target_attr_name', "
                     "'var_pattern', and 'var_template' keys to be defined."
                 )
@@ -723,7 +745,7 @@ def combine_at_time(dataset, config):
                     if m:
                         groups = m.groupdict()
                         if "index" not in groups or "name" not in groups:
-                            raise ValueError(
+                            raise DatasetConfigurationError(
                                 f"'attr_pattern' must contain named groups 'name' and 'index'. "
                                 f"Got groups: {list(groups.keys())} from pattern '{pattern}'."
                             )
@@ -809,7 +831,7 @@ def combine_at_time(dataset, config):
                     )
                     secondary_after = secondary_after.rename(rename_dict)
                 except Exception as e:
-                    raise ValueError(
+                    raise DatasetError(
                         f"Failed to rename variables in the secondary dataset using 'attr_indexed_var_renaming'. "
                         f"Rename mapping: {rename_dict}. Original error: {e}"
                     ) from e
@@ -829,7 +851,7 @@ def combine_at_time(dataset, config):
                 [primary_before, secondary_after], dim=time_dim
             )
         except Exception as e:
-            raise ValueError(
+            raise DatasetError(
                 f"Failed to concatenate primary and secondary datasets along '{time_var}'. "
                 f"This can happen if both datasets have variables with incompatible shapes or dtypes. "
                 f"Primary variables: {list(primary_before.data_vars)}, "
@@ -865,7 +887,7 @@ def combine_at_time(dataset, config):
             continue
         if primary_before[var].ndim != 0 and secondary_after[var].ndim != 0:
             continue
-        if primary_before[var].values == secondary_after[var].values:
+        if (primary_before[var].values == secondary_after[var].values).all():
             combined_dataset[var] = primary_before[var]
 
     if is_point_list:
@@ -889,7 +911,7 @@ def assign_coords(dataset, config):
         error_message="Missing 'assign_coords' config parameter for assign_coords process.",
     )
     if not isinstance(coords, dict):
-        raise TypeError(
+        raise DatasetConfigurationError(
             "'assign_coords' parameter must be a dictionary mapping variable names to dimension names."
         )
 
@@ -962,7 +984,7 @@ def rename_variables(dataset, config):
         error_message="Missing 'rename_map' config parameter for rename_variables process.",
     )
     if not isinstance(rename_map, dict):
-        raise TypeError(
+        raise DatasetConfigurationError(
             "'rename_map' parameter must be a dictionary mapping old variable names to new variable names."
         )
 
@@ -996,7 +1018,7 @@ def exclude_variables(dataset, config):
         error_message="Missing 'exclude_vars' config parameter for exclude_variables process.",
     )
     if not isinstance(exclude_vars, list):
-        raise TypeError(
+        raise DatasetConfigurationError(
             "'exclude_vars' parameter must be a list of variable names to exclude."
         )
 
@@ -1013,7 +1035,7 @@ def keep_variables(dataset, config):
         error_message="Missing 'keep_vars' config parameter for keep_variables process.",
     )
     if not isinstance(keep_vars, list):
-        raise TypeError(
+        raise DatasetConfigurationError(
             "'keep_vars' parameter must be a list of variable names to keep."
         )
 
@@ -1085,13 +1107,13 @@ def delta_time_to_datetime(dataset, config):
         elif var_data.size == 1:
             time_ref = var_data[0]
         else:
-            raise ValueError(
+            raise DatasetError(
                 f"Reference time variable '{time_ref_var}' must be a scalar, a string, or a datetime64 variable."
             )
         try:
             time_ref = parse_datetime(time_ref, time_ref_format)
         except Exception as e:
-            raise ValueError(
+            raise DatasetConfigurationError(
                 "Missing 'referenceTime.format' config parameter for delta_time_to_datetime process."
             ) from e
     except ValueError as e:
@@ -1159,7 +1181,7 @@ def reproject_coordinates(dataset, config):
         error_message=f"Missing '{LAT_VARIABLE_KEY}' config parameter for reproject_coordinates process.",
     )
     if lon_var not in dataset or lat_var not in dataset:
-        raise ValueError(
+        raise DatasetError(
             "Longitude or latitude variable not found in dataset for reproject_coordinates process."
         )
 
@@ -1202,7 +1224,7 @@ def normalize_longitudes(dataset, config):
         error_message=f"Missing '{LON_VARIABLE_KEY}' config parameter for normalize_longitudes process.",
     )
     if lon_var not in dataset:
-        raise ValueError(
+        raise DatasetError(
             f"Longitude variable '{lon_var}' not found in dataset for normalize_longitudes process."
         )
     lon_max = float(dataset[lon_var].max())
@@ -1229,11 +1251,11 @@ def simplify_grid(dataset, config):
     lon_var = get_dataset_config_value(dataset, config, LON_VARIABLE_KEY)
     lat_var = get_dataset_config_value(dataset, config, LAT_VARIABLE_KEY)
     if lon_var is None or lat_var is None:
-        raise ValueError(
+        raise DatasetConfigurationError(
             f"Missing '{LON_VARIABLE_KEY}' or '{LAT_VARIABLE_KEY}' config parameter for simplify_grid process."
         )
     if lon_var not in dataset or lat_var not in dataset:
-        raise ValueError(
+        raise DatasetError(
             f"Longitude '{lon_var}' or latitude '{lat_var}' variable not found in dataset for simplify_grid process."
         )
 
@@ -1331,7 +1353,6 @@ def save(dataset, config):
     ]
     kazarr_metadata = {k: v for k, v in config.items() if k in keep_keys}
     kazarr_metadata = resolve_args(kazarr_metadata, config)
-    dataset.attrs["kazarr"] = kazarr_metadata
 
     final_path = path
     is_update = False
@@ -1348,7 +1369,7 @@ def save(dataset, config):
     if final_path.startswith(S3_PREFIX):
         bucket = os.getenv(BUCKET_NAME_ENV_VAR)
         if bucket is None:
-            raise ValueError(f"{BUCKET_NAME_ENV_VAR} environment variable not set.")
+            raise MissingEnvironmentVariableError(BUCKET_NAME_ENV_VAR)
         final_path = final_path.replace(S3_PREFIX, S3_PREFIX + bucket + "/")
         if is_update:
             write_path = os.path.join(
@@ -1357,6 +1378,33 @@ def save(dataset, config):
             write_path = write_path.replace("\\", "/")
         else:
             write_path = write_path.replace(S3_PREFIX, S3_PREFIX + bucket + "/")
+
+    # Add entry to dataset metadata history indicating the start of the operation
+    target_exists = dataset_exists(final_path, config)
+    op_type = "CREATE"
+    if target_exists:
+        op_type = "UPDATE" if is_update else "OVERWRITE"
+
+    if op_type == "OVERWRITE":
+        existing_history = get_dataset_history(final_path, config)
+    else:
+        existing_history = dget(dataset.attrs, "kazarr.history", [])
+
+    start_date = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    current_operation = {"type": op_type, "start_date": start_date}
+    if op_type == "UPDATE":
+        current_operation["combine_time"] = get_dataset_config_value(
+            dataset,
+            config,
+            "combine_time",
+            "UNKNOWN",
+        )
+    new_history = existing_history + [current_operation]
+    if target_exists:
+        update_dataset_history(final_path, config, new_history)
+
+    kazarr_metadata["history"] = new_history
+    dataset.attrs["kazarr"] = kazarr_metadata
 
     logger.info("Saving dataset to Zarr format to %s...", write_path)
 
@@ -1400,6 +1448,11 @@ def save(dataset, config):
             if os.path.exists(final_path):
                 shutil.rmtree(final_path)
             shutil.move(write_path, final_path)
+
+    # Update metadata with end date indicating success
+    end_date = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    kazarr_metadata["history"][-1]["end_date"] = end_date
+    update_dataset_history(final_path, config, kazarr_metadata["history"])
 
     return dataset, config
 

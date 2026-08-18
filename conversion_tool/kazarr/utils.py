@@ -12,14 +12,28 @@ except ImportError:
     eccodes = None
 import numpy as np
 import s3fs
+import zarr
 from botocore.exceptions import NoCredentialsError
 from dask import array as da
+
+from kazarr.exceptions import (
+    ConfigurationError,
+    DatasetConfigurationError,
+    DatasetError,
+    MissingEnvironmentVariableError,
+)
+
+S3_PREFIX = "s3://"
+BUCKET_NAME_ENV_VAR = "BUCKET_NAME"
+LON_VARIABLE_KEY = "variables.lon"
+LAT_VARIABLE_KEY = "variables.lat"
+LEVEL_VARIABLE_KEY = "variables.level"
 
 logger = logging.getLogger(__name__)
 
 
 def get_s3_storage_options(config, path=None):
-    if path and not path.startswith("s3://"):
+    if path and not path.startswith(S3_PREFIX):
         return {}
 
     storage_options = get_ci(config, "storage_options", default={})
@@ -54,25 +68,25 @@ def get_s3_filesystem(config, path=None):
 # Load JSON file
 def load_json(path="datasets.json", config=None):
     config = config or {}
-    if path.startswith("s3://"):
+    if path.startswith(S3_PREFIX):
         path = path[5:]
         fs = get_s3_filesystem(config, path)
-        bucket = os.getenv("BUCKET_NAME")
+        bucket = os.getenv(BUCKET_NAME_ENV_VAR)
         if bucket is None:
-            raise ValueError("BUCKET_NAME environment variable not set.")
+            raise MissingEnvironmentVariableError(BUCKET_NAME_ENV_VAR)
         try:
             with fs.open(os.path.join(bucket, path), "r") as f:
                 datasets = json.load(f)
         except NoCredentialsError:
-            raise ValueError("S3 credentials not found.")
+            raise ConfigurationError("S3 credentials not found.")
         except Exception as e:
-            raise ValueError("Unable to access S3: " + str(e))
+            raise ConfigurationError("Unable to access S3: " + str(e))
     else:
         try:
             with open(path, "r") as f:
                 datasets = json.load(f)
         except Exception as e:
-            raise ValueError("Unable to access local file: " + str(e))
+            raise ConfigurationError("Unable to access local file: " + str(e))
     return datasets
 
 
@@ -83,7 +97,7 @@ def load_dataset_config(
     datasets = load_json(datasets_path)
 
     if dataset_name not in datasets:
-        raise ValueError(f"Dataset {dataset_name} not found.")
+        raise DatasetError(f"Dataset {dataset_name} not found.")
 
     template = datasets[dataset_name].get("template")
     if template:
@@ -269,7 +283,9 @@ def parse_datetime(date_input, date_format=None):
     if isinstance(date_input, np.datetime64):
         return date_input
 
-    if isinstance(date_input, (int, float)) and (date_format is None or date_format == "timestamp"):
+    if isinstance(date_input, (int, float)) and (
+        date_format is None or date_format == "timestamp"
+    ):
         dt_obj = timestamp_to_datetime(date_input)
         return np.datetime64(dt_obj)
 
@@ -395,9 +411,9 @@ def get_dataset_config_value(
 
 
 def get_spatial_variables(dataset, config):
-    lon_var = get_ci(config, "variables.lon")
-    lat_var = get_ci(config, "variables.lat")
-    level_var = get_ci(config, "variables.level")
+    lon_var = get_ci(config, LON_VARIABLE_KEY)
+    lat_var = get_ci(config, LAT_VARIABLE_KEY)
+    level_var = get_ci(config, LEVEL_VARIABLE_KEY)
 
     spatial_vars = set()
     for var in [lon_var, lat_var, level_var]:
@@ -411,11 +427,11 @@ def get_spatial_variables(dataset, config):
             elif var in dataset:
                 spatial_vars.add(var)
             else:
-                raise ValueError(
+                raise DatasetError(
                     f"Spatial variable '{var}' not found in dataset variables."
                 )
         else:
-            raise TypeError(
+            raise DatasetConfigurationError(
                 f"Spatial variable '{var}' must be a string referencing a variable name or an attribute (e.g., 'ATTRS.lon') in the dataset."
             )
     return spatial_vars
@@ -520,3 +536,39 @@ def load_custom_eccodes(custom_codes_path=None):
         os.environ[codes_env_var] = codes_env_var_value
         if hasattr(eccodes, "codes_set_definitions_path"):
             eccodes.codes_set_definitions_path(codes_env_var_value)
+
+
+def dataset_exists(path, config):
+    if path.startswith(S3_PREFIX):
+        target_fs = get_s3_filesystem(config, path)
+        return target_fs.exists(path)
+    return os.path.exists(path)
+
+
+def get_dataset_history(path, config):
+    try:
+        if path.startswith(S3_PREFIX):
+            fs = get_s3_filesystem(config, path)
+            s3_store = s3fs.S3Map(root=path, s3=fs, check=False)
+            store = zarr.open_group(store=s3_store, mode="r")
+        else:
+            store = zarr.open_group(store=path, mode="r")
+        return store.attrs.get("kazarr", {}).get("history", [])
+    except Exception as e:
+        logger.debug("Could not read history from %s: %s", path, e)
+        return []
+
+
+def update_dataset_history(path, config, history):
+    try:
+        if path.startswith(S3_PREFIX):
+            fs = get_s3_filesystem(config, path)
+            s3_store = s3fs.S3Map(root=path, s3=fs, check=False)
+            store = zarr.open_group(store=s3_store, mode="a")
+        else:
+            store = zarr.open_group(store=path, mode="a")
+        existing_kazarr = store.attrs.get("kazarr", {})
+        existing_kazarr["history"] = history
+        store.attrs["kazarr"] = existing_kazarr
+    except Exception as e:
+        logger.warning("Could not update history for %s: %s", path, e)
