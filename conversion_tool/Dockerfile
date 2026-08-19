@@ -16,4 +16,7 @@ COPY . ${HOME}
 WORKDIR ${HOME}
 
 # Install the package along with its runtime dependencies and pyinstaller
-RUN chmod -R g=u /app && uv sync --group build --all-extras --no-cache && uv run pyinstaller -F -n kazarr main.py
+RUN chmod -R g=u /app && uv sync --group build --all-extras --no-cache && uv run pyinstaller -F -n kazarr \
+  --add-data "/usr/share/eccodes/definitions:eccodes/definitions" \
+  --collect-all eccodes \
+  main.py
