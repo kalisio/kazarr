@@ -18,5 +18,6 @@ WORKDIR ${HOME}
 # Install the package along with its runtime dependencies and pyinstaller
 RUN chmod -R g=u /app && uv sync --group build --all-extras --no-cache && uv run pyinstaller -F -n kazarr \
   --add-data "/usr/share/eccodes/definitions:eccodes/definitions" \
+  --add-binary "/usr/lib/x86_64-linux-gnu/libeccodes.so*:." \
   --collect-all eccodes \
   main.py
