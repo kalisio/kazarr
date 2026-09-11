@@ -12,6 +12,7 @@ from src.schemas.config import ExtractionConfig
 from src.utils.data import (
     dget,
     dgets,
+    get_aliased_variable,
     get_bounded_time,
     get_dataset_level_vars,
     get_level_var,
@@ -568,12 +569,50 @@ def extract(
     return out
 
 
+def _is_uniform_time_grid(flat_times: list, group_sizes: list[int]) -> bool:
+    """True when every point was asked for the exact same list of times (same
+    values, same order). In that case, a batch of per-point/time samples is
+    really a regular (time, point) grid rather than independent per-point
+    series, and can be reshaped back into that grid for the response.
+    """
+    if not group_sizes or len(set(group_sizes)) != 1:
+        return False
+    size = group_sizes[0]
+    if size == 0:
+        return False
+    reference = flat_times[:size]
+    offset = 0
+    for group_size in group_sizes:
+        if flat_times[offset : offset + group_size] != reference:
+            return False
+        offset += group_size
+    return True
+
+
+def _expand_time_range_strings(dataset, time_var, times):
+    """Expand any 'start/end' range string in `times` into the concrete
+    dataset timestamps it covers, de-duplicating and sorting the whole list
+    exactly as a single combined time-range query would (matching the
+    historical, pre-flatten behaviour of `get_times_in_range`). A list with
+    no range string is returned unchanged, so this is a no-op for the common
+    case of exact timestamps (trajectories and per-point `times` already
+    forbid ranges at the schema level).
+    """
+    if not times or not any(isinstance(t, str) and "/" in t for t in times):
+        return times
+    if time_var is None or time_var not in dataset:
+        return times
+    expanded = get_times_in_range(dataset, time_var, MultiTimeRange.from_strings(times))
+    return expanded if expanded else times
+
+
 def probe(
     request: Request,
     dataset_id: str,
     variables: str | list[str],
     points: list[dict[str, float]],
-    time_range: str | None = None,
+    time_range: str | list[str] | None = None,
+    point_times: list[list[str] | None] | None = None,
     is_path: bool = False,
     is_single_probe: bool = False,
     format: str = "raw",
@@ -599,9 +638,7 @@ def probe(
     step_logger.step_start("Load dataset and config")
 
     variables = variables if isinstance(variables, list) else [variables]
-    is_path = (
-        is_path and isinstance(time_range, list) and len(time_range) == len(points)
-    )
+
     with_level = any(point.level is not None for point in points)
     dataset, dataset_config = load_dataset(dataset_id)
     fixed_coords, fixed_dims = dgets(
@@ -614,6 +651,50 @@ def probe(
         [LON_VARIABLE_KEY, LAT_VARIABLE_KEY, "variables.time"],
     )
     time_dim = dget(dataset_config, "dimensions.time")
+
+    # Flatten (points, times) into the canonical engine input: one sample per
+    # (point, time) pair, all sharing a single "point" dimension.
+    # `point_times`, when given, wins per point; any entry left unset (or the
+    # whole thing, for the legacy ad hoc "points" + shared "times" request)
+    # falls back to `time_range`, and finally — if there is no time
+    # information at all for that point — to every timestep the dataset has,
+    # matching the historical "no time filter" probe behaviour.
+    fallback_times = (
+        time_range
+        if isinstance(time_range, list)
+        else ([time_range] if time_range else None)
+    )
+    if point_times is None:
+        point_times = [None] * len(points)
+
+    resolved_point_times = []
+    for pt_times in point_times:
+        if pt_times:
+            resolved_point_times.append(
+                _expand_time_range_strings(dataset, time_var, list(pt_times))
+            )
+        elif fallback_times:
+            resolved_point_times.append(
+                _expand_time_range_strings(dataset, time_var, list(fallback_times))
+            )
+        elif time_var is not None and time_var in dataset:
+            time_vals = dataset[time_var].values
+            if np.issubdtype(time_vals.dtype, np.datetime64):
+                resolved_point_times.append(
+                    [str(np.datetime_as_string(t)) for t in time_vals]
+                )
+            else:
+                resolved_point_times.append(time_vals.tolist())
+        else:
+            resolved_point_times.append([None])
+
+    group_sizes = [len(t) for t in resolved_point_times]
+    flat_time_range = []
+    for times_for_point in resolved_point_times:
+        flat_time_range.extend(times_for_point)
+    time_range = flat_time_range
+
+    is_uniform_grid = _is_uniform_time_grid(time_range, group_sizes)
     time_range = MultiTimeRange.from_strings(time_range)
     level_vars = get_dataset_level_vars(dataset, dataset_config)
     level_var = None
@@ -649,15 +730,6 @@ def probe(
     if time_range.has_time() and time_var is not None:
         # Bounded time ranges are also used for paths
         time_range = get_bounded_time(dataset, time_var, time_range)
-        time_range_indexer = get_times_in_range(dataset, time_var, time_range)
-        if (
-            not is_path
-            and time_range_indexer is not None
-            and len(time_range_indexer) > 0
-        ):
-            fixed_coords[time_var] = time_range_indexer
-            # Remove "time" from request parameters to avoid confusion in later steps (case where time is a variable in the dataset)
-            request.query_params._dict.pop("time", None)
         if config.interpolation.vars.time and time_var not in interp_vars:
             interp_vars.append(time_var)
 
@@ -814,6 +886,14 @@ def probe(
                 for dim_name, indice in zip(longitudes.dims, indices):
                     points_data[i]["fixed_dims"][dim_name] = indice
 
+    # Broadcast the deduplicated per-point spatial resolution (one entry per
+    # requested point) back onto the full flattened (point, time) batch:
+    # every sample sharing a point gets an identical copy of that point's
+    # already-resolved spatial data, so the temporal extraction below still
+    # sees one row per (point, time) sample exactly as before.
+    repeat_idx = np.repeat(np.arange(len(points)), group_sizes)
+    points_data = [points_data[j] for j in repeat_idx]
+
     optional_coords = [time_var] if time_var is not None else []
     optional_dims = [time_dim] if time_dim is not None else []
 
@@ -838,30 +918,11 @@ def probe(
     )
     step_logger.step_start("Extract variable values at probe locations")
     lats, lons, levels = [], [], []
-    times = None
+    # `times` is filled in below, one entry per flattened (point, time)
+    # sample — unless the dataset has no time dimension at all, in which case
+    # it stays None throughout.
+    times = None if time_var is None else []
     var_props = {}
-
-    if not is_path:
-        if time_var is None:
-            times = None
-        elif time_range.has_time() and interp_vars_method != "nearest":
-            times = get_times_in_range(dataset, time_var, time_range)
-        elif time_var in dataset:
-            time_da = sel(
-                dataset,
-                time_var,
-                fixed_coords,
-                fixed_dims,
-                interp_method=interp_vars_method,
-                interp_config=interp_vars_params,
-            )
-            times = np.atleast_1d(time_da.values)
-            if np.issubdtype(times.dtype, np.datetime64):
-                times = [str(np.datetime_as_string(t)) for t in times]
-            else:
-                times = times.tolist()
-    elif is_path:
-        times = []
 
     lats = [p["lat"] for p in points_data]
     lons = [p["lon"] for p in points_data]
@@ -894,56 +955,55 @@ def probe(
         weights_vals = np.stack([p["weights_da"].values for p in points_data])
         batch_weights_da = xr.DataArray(weights_vals, dims=["point", "neighbor"])
 
-    # Extract time points (trajectories).
-    if is_path:
-        req_times = []
-        for tr in time_range.ranges:
-            if tr.start is not None:
-                req_times.append(tr.start)
-            elif time_var is not None and time_var in dataset:
-                req_times.append(dataset[time_var].values[0])
+    # Extract time points: one requested timestamp per flattened sample.
+    req_times = []
+    for tr in time_range.ranges:
+        if tr.start is not None:
+            req_times.append(tr.start)
+        elif time_var is not None and time_var in dataset:
+            req_times.append(dataset[time_var].values[0])
+        else:
+            req_times.append(None)
+
+    if time_var is not None:
+        if time_range.has_time() and interp_vars_method != "nearest":
+            times = []
+            for t in req_times:
+                try:
+                    t_parsed = np.datetime64(t)
+                    times.append(str(np.datetime_as_string(t_parsed)))
+                except ValueError:
+                    times.append(str(t))
+        elif time_var in dataset:
+            req_times_arr = np.array(req_times, dtype=dataset[time_var].dtype)
+            temp_fixed_coords = {
+                **batch_fixed_coords,
+                time_var: xr.DataArray(req_times_arr, dims=["point"]),
+            }
+
+            time_da = sel(
+                dataset,
+                time_var,
+                temp_fixed_coords,
+                batch_fixed_dims,
+                interp_method=interp_vars_method,
+                interp_config=interp_vars_params,
+            )
+            time_vals = time_da.values
+            if time_vals.ndim > 1:
+                time_vals = time_vals.squeeze()
+
+            if np.issubdtype(time_vals.dtype, np.datetime64):
+                times = [str(np.datetime_as_string(t)) for t in time_vals]
             else:
-                req_times.append(None)
+                times = time_vals.tolist()
+        else:
+            times = req_times
 
-        if time_var is not None:
-            if time_range.has_time() and interp_vars_method != "nearest":
-                times = []
-                for t in req_times:
-                    try:
-                        t_parsed = np.datetime64(t)
-                        times.append(str(np.datetime_as_string(t_parsed)))
-                    except ValueError:
-                        times.append(str(t))
-            elif time_var in dataset:
-                req_times_arr = np.array(req_times, dtype=dataset[time_var].dtype)
-                temp_fixed_coords = {
-                    **batch_fixed_coords,
-                    time_var: xr.DataArray(req_times_arr, dims=["point"]),
-                }
-
-                time_da = sel(
-                    dataset,
-                    time_var,
-                    temp_fixed_coords,
-                    batch_fixed_dims,
-                    interp_method=interp_vars_method,
-                    interp_config=interp_vars_params,
-                )
-                time_vals = time_da.values
-                if time_vals.ndim > 1:
-                    time_vals = time_vals.squeeze()
-
-                if np.issubdtype(time_vals.dtype, np.datetime64):
-                    times = [str(np.datetime_as_string(t)) for t in time_vals]
-                else:
-                    times = time_vals.tolist()
-            else:
-                times = req_times
-
-        if times and time_var:
-            time_dtype = dataset[time_var].dtype
-            time_arr = np.array(times, dtype=time_dtype)
-            batch_fixed_coords[time_var] = xr.DataArray(time_arr, dims=["point"])
+    if times and time_var:
+        time_dtype = dataset[time_var].dtype
+        time_arr = np.array(times, dtype=time_dtype)
+        batch_fixed_coords[time_var] = xr.DataArray(time_arr, dims=["point"])
 
     interp_methods = None
     if is_regular_grid and interp_spatial_method != "nearest":
@@ -1002,6 +1062,66 @@ def probe(
         data.append(var_data)
         var_props[var] = dataset[var].attrs
 
+    # Decide how to shape the response: a single connected trajectory line, a
+    # (time, point) grid, or one independent series per requested point. The
+    # computation above is always identical (the flat, vectorized batch) —
+    # only this final step differs.
+    if is_path:
+        output_mode = "path"
+    elif is_uniform_grid:
+        output_mode = "grid"
+    else:
+        output_mode = "series"
+
+    if output_mode == "series":
+        step_logger.step_start("Prepare output (per-point series)")
+        n_groups = len(group_sizes)
+        cum = np.concatenate(([0], np.cumsum(group_sizes)))
+        group_lons = [lons[cum[i]] for i in range(n_groups)]
+        group_lats = [lats[cum[i]] for i in range(n_groups)]
+        group_levels = (
+            [levels[cum[i]] for i in range(n_groups)] if with_level else None
+        )
+        group_times = (
+            [list(times[cum[i] : cum[i + 1]]) for i in range(n_groups)]
+            if times is not None
+            else None
+        )
+        group_data = {
+            var: [
+                data[vi][0, cum[i] : cum[i + 1]].tolist() for i in range(n_groups)
+            ]
+            for vi, var in enumerate(variables)
+        }
+        out = output.prepare_series_output(
+            variables,
+            group_data,
+            group_lons,
+            group_lats,
+            levels=group_levels,
+            times=group_times,
+            var_props=var_props,
+            format=format,
+        )
+        step_logger.end()
+        return out
+
+    if output_mode == "grid":
+        # The engine always computes a flat, per-sample batch. When every
+        # point shares the exact same requested times, fold it back into the
+        # (time, point) grid the "raw"/"geojson" grid output expects, instead
+        # of ever building it via a slower orthogonal broadcast.
+        n_groups = len(group_sizes)
+        n_times = group_sizes[0]
+        cum = np.concatenate(([0], np.cumsum(group_sizes)))
+        lons = [lons[cum[i]] for i in range(n_groups)]
+        lats = [lats[cum[i]] for i in range(n_groups)]
+        if with_level:
+            levels = [levels[cum[i]] for i in range(n_groups)]
+        if times is not None:
+            times = list(times[:n_times])
+        data = [d.reshape(n_groups, n_times).T for d in data]
+
     output_has_time = (times is not None) if not is_single_probe else False
 
     if format == "raw":
@@ -1058,6 +1178,7 @@ def free_selection(
     step_logger.step_start("Load dataset and config")
     dataset, dataset_config = load_dataset(dataset_id)
 
+    variable = get_aliased_variable(dataset, variable, dataset_config)
     if variable not in dataset:
         raise exceptions.VariableNotFound([variable])
 

@@ -489,3 +489,19 @@ def parse_query_dict(query_string):
                 )
             params[key] = cast_value(value)
     return params
+
+
+def get_aliased_variable(dataset, variable, config):
+    if variable not in dataset:
+        # Check if variable can be aliased to lat/lon/level/time variables
+        aliased_var = None
+        if variable in dget(config, "variables", {}):
+            aliased_var = dget(config, f"variables.{variable}")
+        elif variable == 'latitude':
+            aliased_var = dget(config, "variables.lat")
+        elif variable == 'longitude':
+            aliased_var = dget(config, "variables.lon")
+        if aliased_var is not None and aliased_var in dataset:
+            return aliased_var
+
+    return variable

@@ -9,6 +9,7 @@ from src.exceptions import (
     PathDoesNotSupportTimeRanges,
     PathInvalidTimesLength,
     PathMissingTimes,
+    PointTimesDoNotSupportTimeRanges,
 )
 
 
@@ -199,12 +200,15 @@ class MultiProbeBody(BaseModel):
     features: list[GeoJSONFeature] | None = None
     # Resolved after validation
     is_path: bool = False
+    # Per-point times, parallel to `points`.
+    point_times: list[list[str] | None] | None = None
 
     @model_validator(mode="after")
     def resolve_points(self) -> "MultiProbeBody":
         if self.type == "FeatureCollection" and self.features is not None:
             line_string_points: list[ProbePoint] = []
             point_points: list[ProbePoint] = []
+            point_points_times: list[list[str] | None] = []
             for f in self.features:
                 if f.geometry.type == "LineString":
                     line_string_points.extend(f.geometry.as_probe_points())
@@ -212,11 +216,15 @@ class MultiProbeBody(BaseModel):
                     break  # Only one LineString is allowed, so we can stop after the first one
                 elif f.geometry.type == "Point":
                     point_points.append(f.geometry.as_probe_point())
+                    point_points_times.append(
+                        f.properties.get("times") if f.properties else None
+                    )
 
             if line_string_points:
                 self.path = line_string_points
             elif point_points:
                 self.points = point_points
+                self.point_times = point_points_times
 
         if self.path is not None:
             self.is_path = True
@@ -227,6 +235,26 @@ class MultiProbeBody(BaseModel):
             invalid_times = [t for t in self.times if "/" in t]
             if invalid_times:
                 raise PathDoesNotSupportTimeRanges(invalid_times)
+            # A trajectory is just a series with exactly one time per point.
+            self.points = self.path
+            self.point_times = [[t] for t in self.times]
         elif not self.points:
             raise MultiProbeBodyMissingPoint()
+        elif self.point_times is None:
+            self.point_times = [None] * len(self.points)
+
+        for pt_times in self.point_times:
+            if pt_times:
+                invalid = [t for t in pt_times if "/" in t]
+                if invalid:
+                    raise PointTimesDoNotSupportTimeRanges(invalid)
+
+        if self.is_path and any(
+            pt_times is None or len(pt_times) != 1 for pt_times in self.point_times
+        ):
+            raise PathInvalidTimesLength(
+                [t for pt_times in self.point_times for t in (pt_times or [])],
+                len(self.points),
+            )
+
         return self

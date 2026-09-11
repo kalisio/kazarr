@@ -1,3 +1,5 @@
+import struct
+
 import numpy as np
 import pyvista as pv
 
@@ -71,6 +73,27 @@ def prepare_mesh_output(
         "values": clean_values,
     }
     return out
+
+
+def prepare_mesh_binary_output(mesh_data):
+    vertices_array = np.array(mesh_data.get("vertices", []), dtype=np.float32)
+    indices_array = np.array(mesh_data.get("indices", []), dtype=np.uint32)
+
+    values_list = mesh_data.get("values", [])
+    # np.array converts None to NaN for float types
+    values_array = np.array(values_list, dtype=np.float32)
+
+    vertices_buffer = vertices_array.tobytes()
+    indices_buffer = indices_array.tobytes()
+    values_buffer = values_array.tobytes()
+
+    header = struct.pack(
+        "3I", len(vertices_buffer), len(indices_buffer), len(values_buffer)
+    )
+
+    final_binary_payload = header + vertices_buffer + indices_buffer + values_buffer
+
+    return final_binary_payload
 
 
 def prepare_output(
@@ -289,3 +312,99 @@ def prepare_geojson_output(
         "properties": {**collection_props, "variables": out_props},
         "features": features,
     }
+
+
+def prepare_series_output(
+    var_names,
+    group_data,
+    lons,
+    lats,
+    levels=None,
+    times=None,
+    var_props=None,
+    format="raw",
+):
+    """Build the response for the "series" probe mode: each requested point
+    keeps its own (possibly different-length, differently-timed) list of
+    times and values, instead of being folded into a shared (time, point)
+    grid or a single connected trajectory.
+    """
+    if isinstance(var_names, str):
+        var_names = [var_names]
+    var_props = var_props or {}
+
+    n_points = len(lons)
+    out_vars_props = {}
+    cleaned_group_data = {}
+    no_data = True
+
+    for var_name in var_names:
+        series = group_data.get(var_name, [[] for _ in range(n_points)])
+        cleaned_series = []
+        all_valid = []
+        for vals in series:
+            cleaned = [
+                None if isinstance(v, float) and np.isnan(v) else v for v in vals
+            ]
+            cleaned_series.append(cleaned)
+            all_valid.extend(v for v in cleaned if v is not None)
+        cleaned_group_data[var_name] = cleaned_series
+
+        props = var_props.get(var_name, {}).copy()
+        if all_valid:
+            no_data = False
+            props["bounds"] = {
+                "min": float(min(all_valid)),
+                "max": float(max(all_valid)),
+            }
+        out_vars_props[var_name] = props
+
+    if no_data:
+        raise exceptions.NoDataInSelection()
+
+    def _level_coord(i):
+        if levels is None:
+            return None
+        lvl = levels[i]
+        if lvl is None or (isinstance(lvl, float) and np.isnan(lvl)):
+            return None
+        return lvl
+
+    if format == "geojson":
+        features = []
+        for i in range(n_points):
+            coords = [lons[i], lats[i]]
+            lvl = _level_coord(i)
+            if lvl is not None:
+                coords.append(lvl)
+            props = {"id": i}
+            if times is not None:
+                props["times"] = times[i]
+            for var_name in var_names:
+                props[var_name] = cleaned_group_data[var_name][i]
+            features.append(
+                {
+                    "type": "Feature",
+                    "geometry": {"type": "Point", "coordinates": coords},
+                    "properties": props,
+                }
+            )
+        return {
+            "type": "FeatureCollection",
+            "properties": {"variables": out_vars_props},
+            "features": features,
+        }
+
+    points_out = []
+    for i in range(n_points):
+        entry = {"lon": lons[i], "lat": lats[i]}
+        if levels is not None:
+            entry["level"] = levels[i]
+        if times is not None:
+            entry["times"] = times[i]
+        entry["values"] = {
+            var_name: cleaned_group_data[var_name][i] for var_name in var_names
+        }
+        points_out.append(entry)
+
+    return {"variables": out_vars_props, "points": points_out}

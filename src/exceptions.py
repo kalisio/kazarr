@@ -219,3 +219,16 @@ class MultiProbeBodyMissingPoint(UserInputBasedException):
             "Body must contain 'points', 'path', or a GeoJSON FeatureCollection of Points/LineString."
         )
         super().__init__("MULTI_PROBE_BODY_MISSING_POINT", message)
+
+
+class PointTimesDoNotSupportTimeRanges(UserInputBasedException):
+    def __init__(self, invalid_times):
+        message = (
+            "Per-point 'times' only support single timestamps, not time ranges. "
+            f"Invalid values: {invalid_times}"
+        )
+        super().__init__(
+            "POINT_TIMES_DO_NOT_SUPPORT_TIME_RANGES",
+            message,
+            {"invalid_times": invalid_times},
+        )

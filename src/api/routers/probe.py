@@ -64,6 +64,13 @@ async def probe_data(
         },
     }
 
+    if time.times:
+        point_times = [time.times]
+    elif time.time:
+        point_times = [[time.time]]
+    else:
+        point_times = [None]
+
     cancel_event = threading.Event()
     watcher_task = asyncio.create_task(watch_disconnection(request, cancel_event))
     try:
@@ -73,7 +80,7 @@ async def probe_data(
             base.dataset,
             variables,
             points=[ProbePoint(lon=lon, lat=lat, level=level)],
-            time_range=time.times if time.times else time.time,
+            point_times=point_times,
             is_path=False,
             is_single_probe=True,
             format=base.format,
@@ -144,8 +151,9 @@ async def probe_data_multi(
             request,
             base.dataset,
             variables,
-            body.points if not body.is_path else body.path,
+            body.points,
             time_range=times,
+            point_times=body.point_times,
             is_path=body.is_path,
             format=base.format,
             config=config,
