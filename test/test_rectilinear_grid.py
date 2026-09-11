@@ -559,6 +559,65 @@ class TestRectilinearGrid:
         assert len(feature["properties"]["times"]) == 3
         assert len(feature["properties"]["Precipitation"]) == 3
 
+    def test_probes_path_time_interpolation(self, client: TestClient):
+        """Probe along a path with time interpolation."""
+        payload = {
+            "type": "FeatureCollection",
+            "features": [
+                {
+                    "type": "Feature",
+                    "geometry": {
+                        "type": "LineString",
+                        "coordinates": [[2.3, 43.3], [2.4, 43.4], [2.5, 43.5]],
+                    },
+                    "properties": {"times": ["2026-01-01T00:10:00", "2026-01-01T00:20:00", "2026-01-01T00:30:00"]},
+                }
+            ]
+        }
+        response = client.post(
+            f"/datasets/{DATASET_NAME}/probes?variables=Precipitation&format=geojson&interp_time=true&interp_vars_method=linear", json=payload
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        print(data)
+        assert len(data["features"]) == 1
+        feature = data["features"][0]
+        assert feature["geometry"]["type"] == "LineString"
+        assert len(feature["geometry"]["coordinates"]) == 3
+        assert len(feature["properties"]["times"]) == 3
+        assert feature["properties"]["times"] == ["2026-01-01T00:10:00", "2026-01-01T00:20:00", "2026-01-01T00:30:00"]
+        assert len(feature["properties"]["Precipitation"]) == 3
+
+    def test_probes_path_spatial_interpolation(self, client: TestClient):
+        """Probe along a path with spatial interpolation."""
+        payload = {
+            "type": "FeatureCollection",
+            "features": [
+                {
+                    "type": "Feature",
+                    "geometry": {
+                        "type": "LineString",
+                        "coordinates": [[2.3, 43.3], [2.4, 43.4], [2.5, 43.5]],
+                    },
+                    "properties": {"times": ["2026-01-01T00:00:00", "2026-01-01T01:00:00", "2026-01-01T02:00:00"]},
+                }
+            ]
+        }
+        response = client.post(
+            f"/datasets/{DATASET_NAME}/probes?variables=Precipitation&format=geojson&interp_spatial_method=linear", json=payload
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        print(data)
+        assert len(data["features"]) == 1
+        feature = data["features"][0]
+        assert feature["geometry"]["type"] == "LineString"
+        assert len(feature["geometry"]["coordinates"]) == 3
+        assert len(feature["properties"]["times"]) == 3
+        assert len(feature["properties"]["Precipitation"]) == 3
+
     # ------------------------------------------------------------------
     # Mesh endpoint
     # ------------------------------------------------------------------

@@ -548,6 +548,36 @@ class TestRegularGrid:
         assert len(data["values"]["Value"]) == 3
         assert len(data["values"]["Value"][0]) == 2
 
+    def test_probes_multiple_points_multiple_times_per_point(self, client: TestClient):
+            """Probe multiple points with multiple times per point."""
+            payload = {
+                "type": "FeatureCollection",
+                "features": [
+                    {
+                        "type": "Feature",
+                        "geometry": {"type": "Point", "coordinates": [LON_START, LAT_START]},
+                        "properties": {"times": ["2026-01-01", "2026-01-02"]},
+                    },
+                    {
+                        "type": "Feature",
+                        "geometry": {"type": "Point", "coordinates": [LON_START + LON_STEP, LAT_START + LAT_STEP]},
+                        "properties": {"times": ["2026-01-04"]},
+                    },
+                ],
+            }
+            response = client.post(
+                f"/datasets/{DATASET_NAME}/probes?variables=Value&format=geojson", json=payload
+            )
+    
+            assert response.status_code == 200
+            data = response.json()
+            assert "features" in data
+            assert len(data["features"]) == 2
+            assert "properties" in data["features"][0]
+            assert "times" in data["features"][0]["properties"]
+            assert "Value" in data["features"][0]["properties"]
+            assert len(data["features"][0]["properties"]["Value"]) == 2
+
     # ------------------------------------------------------------------
     # Select
     # ------------------------------------------------------------------
