@@ -292,15 +292,25 @@ def parse_datetime(date_input, date_format=None):
     if isinstance(date_input, datetime):
         return np.datetime64(date_input)
 
-    if date_format is None:
-        raise ValueError("Date format required to parse datetime string or bytes.")
-
     if isinstance(date_input, bytes):
         date_input = date_input.decode("utf-8")
     else:
         date_input = str(date_input)
 
-    dt_obj = datetime.strptime(date_input, date_format).replace(tzinfo=UTC)
+    if date_format is None:
+        try:
+            dt_obj = datetime.fromisoformat(date_input).replace(tzinfo=UTC) # Set timezone to UTC as linter suggested
+        except ValueError:
+            raise ValueError(
+                f"Invalid datetime string format: {date_input}. Please provide a valid date_format."
+            )
+    else:
+        dt_obj = datetime.strptime(date_input, date_format).replace(tzinfo=UTC) # Set timezone to UTC as linter suggested
+
+    # Remove timezone information to ensure compatibility with np.datetime64
+    if dt_obj.tzinfo is not None:
+        dt_obj = dt_obj.replace(tzinfo=None)
+
     return np.datetime64(dt_obj)
 
 
