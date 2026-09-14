@@ -505,7 +505,6 @@ def combine_at_time(dataset, config):
         dataset,
         config,
         "combine_time_format",
-        default="%Y-%m-%dT%H:%M:%S",
     )
     combine_dataset_tag = get_dataset_config_value(
         dataset, config, "combine_dataset_tag", default="secondary_1"
