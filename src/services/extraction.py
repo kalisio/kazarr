@@ -23,7 +23,13 @@ from src.utils.data import (
 from src.utils.file import load_dataset
 from src.utils.logging import StepLoggerAndAborter
 from src.utils.requests import get_from_query
-from src.utils.spatial import get_cached_ckdtree
+from src.utils.spatial import (
+    chord_to_deg_distance,
+    deg_to_chord_distance,
+    get_cached_ckdtree,
+    lonlat_to_sphere_points,
+    lonlat_to_xyz,
+)
 
 FIXED_DIMENSIONS_KEY = "dimensions.fixed"
 FIXED_VARIABLES_KEY = "variables.fixed"
@@ -760,19 +766,19 @@ def probe(
 
     tree = None
     if not is_regular_grid:
+        # Project (lon, lat) to 3D Cartesian (x, y, z) on the unit sphere.
+        # Raw degrees are geometrically invalid: they distort distances outside
+        # the equator, compress near the poles, and break across the antimeridian.
+        # In 3D, Euclidean chord distance is monotonic with true great-circle distance.
+        # Applied systematically to all irregular grids to avoid these distortions.
+        sphere_points = lonlat_to_sphere_points(
+            longitudes.values.ravel(), latitudes.values.ravel()
+        )
         if with_level and not has_regular_level:
             levels_arr = dataset[level_var].values
-            grid_points = np.column_stack(
-                (
-                    longitudes.values.ravel(),
-                    latitudes.values.ravel(),
-                    levels_arr.ravel(),
-                )
-            )
+            grid_points = np.column_stack((sphere_points, levels_arr.ravel()))
         else:
-            grid_points = np.column_stack(
-                (longitudes.values.ravel(), latitudes.values.ravel())
-            )
+            grid_points = sphere_points
         coord_vars = (lon_var, lat_var, level_var) if with_level else (lon_var, lat_var)
         tree = get_cached_ckdtree(
             grid_points, dataset_id=dataset_id, coord_vars=coord_vars
@@ -780,6 +786,20 @@ def probe(
 
     max_radius = interp_spatial_params.get("radius", 0.05)
     power = interp_spatial_params.get("power", 2.0)
+    # Scale the vertical axis to match horizontal degrees for 3D IDW.
+    # Combining horizontal degrees (~111 km/deg) with raw vertical units
+    # (meters, hPa) directly is physically meaningless and causes one axis
+    # to dwarf the other.
+    # `level_scale` defines how many vertical units equal 1 horizontal degree,
+    # converting the vertical coordinate into degree-equivalents.
+    # Caveat: Assumes a roughly linear relationship to physical distance (e.g., meters).
+    # For nonlinear coordinates like pressure levels (logarithmic with altitude),
+    # this is only a local approximation; consider pre-transforming the data.
+    level_scale = interp_spatial_params.get("level_scale", 1.0)
+    if not isinstance(level_scale, (int, float)) or level_scale <= 0:
+        raise exceptions.BadSelection(
+            "interp_spatial_params.level_scale must be a positive number."
+        )
 
     points_data = []
     target_pts = []
@@ -821,10 +841,11 @@ def probe(
             p_data["fixed_coords"][lon_var] = lon
             p_data["fixed_coords"][lat_var] = point.lat
         else:
+            px, py, pz = lonlat_to_xyz(lon, point.lat)
             if with_level and not has_regular_level:
-                target_pts.append([lon, point.lat, level])
+                target_pts.append([px, py, pz, level])
             else:
-                target_pts.append([lon, point.lat])
+                target_pts.append([px, py, pz])
 
         points_data.append(p_data)
 
@@ -832,8 +853,29 @@ def probe(
     if not is_regular_grid and target_pts:
         target_pts_arr = np.array(target_pts)
         if interp_spatial_method != "nearest":
-            # IDW Interpolation on unstructured grid
-            indices_list = tree.query_ball_point(target_pts_arr, r=max_radius)
+            # IDW Interpolation on unstructured grid.
+            if with_level and not has_regular_level:
+                # We want to match points inside an anisotropic ellipsoid:
+                #     sqrt(spatial_deg**2 + (level_diff / level_scale)**2) <= max_radius
+                # Because spatial and level dimensions have different units, and because
+                # converting chord distance to degrees is nonlinear, cKDTree cannot query
+                # this ellipsoid directly in a single step.
+                # To solve this without relying on small-angle approximations, we:
+                # 1. Query cKDTree with a conservative bounding box / over-inclusive radius:
+                #    Any valid candidate necessarily satisfies:
+                #      - spatial_chord <= chord_radius (spatial_deg <= max_radius)
+                #      - |level_diff|  <= max_radius * level_scale
+                # 2. Filter these candidates manually below against the exact ellipsoid formula.
+                chord_radius = deg_to_chord_distance(max_radius)
+                query_radius = np.sqrt(
+                    chord_radius**2 + (max_radius * level_scale) ** 2
+                )
+            else:
+                # Pure spatial case: convert the radius from degrees of true
+                # angular distance to the equivalent unit-sphere chord
+                # distance, so the query threshold matches the tree's space.
+                query_radius = deg_to_chord_distance(max_radius)
+            indices_list = tree.query_ball_point(target_pts_arr, r=query_radius)
             max_neighbors = (
                 max(len(idx) for idx in indices_list) if len(indices_list) > 0 else 0
             )
@@ -845,7 +887,36 @@ def probe(
 
                 neighbors_coords = grid_points[indices]
                 target_pt = target_pts_arr[i]
-                dists = np.linalg.norm(neighbors_coords - target_pt, axis=1)
+                if with_level and not has_regular_level:
+                    # Keep the spatial (chord) and level components separate:
+                    # convert the spatial part back to true angular degrees,
+                    # and turn the level difference into the same
+                    # degree-equivalent unit via `level_scale`, so `power`
+                    # applies to a single physically-consistent anisotropic
+                    # distance instead of mixing raw degrees with raw level
+                    # units.
+                    spatial_chord = np.linalg.norm(
+                        neighbors_coords[:, :3] - target_pt[:3], axis=1
+                    )
+                    spatial_deg = chord_to_deg_distance(spatial_chord)
+                    level_diff_deg = (neighbors_coords[:, 3] - target_pt[3]) / level_scale
+                    dists = np.sqrt(spatial_deg**2 + level_diff_deg**2)
+
+                    # The query above is a generous, over-inclusive bound (see
+                    # comment there) -- filter down to the exact requested
+                    # ellipsoid before weighting.
+                    within_radius = dists <= max_radius
+                    if not np.any(within_radius):
+                        raise exceptions.NoDataInSelection(
+                            f"Try increasing interpolation radius (point {i + 1})"
+                        )
+                    indices = [
+                        idx for idx, keep in zip(indices, within_radius) if keep
+                    ]
+                    dists = dists[within_radius]
+                else:
+                    spatial_chord = np.linalg.norm(neighbors_coords - target_pt, axis=1)
+                    dists = chord_to_deg_distance(spatial_chord)
 
                 zero_dist = dists < 1e-12
                 if np.any(zero_dist):

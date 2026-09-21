@@ -311,7 +311,7 @@ class TestRectilinearGrid:
         )
         r_interp = client.get(
             f"/datasets/{DATASET_NAME}/probe?variables=Precipitation&lat=43.3&lon=2.35"
-            "&interp_spatial_method=idw&interp_spatial_params=radius:0.2"
+            "&interp_spatial_method=idw&interp_spatial_params=radius:0.05"
         )
 
         assert r1.status_code == 200
@@ -332,7 +332,7 @@ class TestRectilinearGrid:
         """IDW probe with radius too small to find neighbors returns 400."""
         response = client.get(
             f"/datasets/{DATASET_NAME}/probe?variables=Precipitation&lat=43.3&lon=2.35"
-            "&interp_spatial_method=idw&interp_spatial_params=radius:0.04"
+            "&interp_spatial_method=idw&interp_spatial_params=radius:0.03"
         )
 
         assert response.status_code == 400
