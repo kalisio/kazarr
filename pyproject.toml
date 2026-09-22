@@ -1,6 +1,6 @@
 [project]
 name = "kazarr"
-version = "0.1.0"
+version = "1.0.0"
 description = "A lightweight FastAPI service that exposes endpoints to interact with Zarr datasets stored in a Simple Storage Service (S3)"
 requires-python = ">=3.11,<3.14"
 
@@ -37,7 +37,6 @@ test = [
 
 [tool.pytest.ini_options]
 markers = [
-  "Debug: Tests for debugging purposes",
   "General: General tests for the API",
   "RegularGrid: Tests for regular grid datasets",
   "RectilinearGrid: Tests for rectilinear grid datasets",
@@ -48,7 +47,7 @@ markers = [
   "CustomEccodes: Tests for custom ECCODES functionalities",
   "CombineDatasets: Tests for combining datasets",
 ]
-pythonpath = ["."] #, "conversion_tool"]
+pythonpath = ["."]
 
 [tool.coverage.run]
 patch = ["subprocess"]
