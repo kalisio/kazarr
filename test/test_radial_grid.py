@@ -284,6 +284,63 @@ class TestRadialGrid:
         assert isinstance(values, list)
         assert len(values) > 0
 
+    def test_probe_matches_extract_at_grid_point(self, client: TestClient):
+        """A nearest-neighbor probe exactly on a grid point must match the
+        value `extract` returns for that same point.
+        """
+        node_lon, node_lat = 5.280056761226873, 45.72529656578681
+        epsilon = 1e-6
+
+        r_extract = client.get(
+            f"/datasets/{DATASET_NAME}/extract?variable=WindSpeed&time=2026-01-01"
+            f"&lon_min={node_lon - epsilon}&lon_max={node_lon + epsilon}"
+            f"&lat_min={node_lat - epsilon}&lat_max={node_lat + epsilon}"
+        )
+        assert r_extract.status_code == 200
+        extract_data = r_extract.json()
+        assert len(extract_data["values"]["WindSpeed"]) == 1
+        extract_value = extract_data["values"]["WindSpeed"][0]
+
+        r_probe = client.get(
+            f"/datasets/{DATASET_NAME}/probe?variables=WindSpeed"
+            f"&lon={node_lon}&lat={node_lat}&time=2026-01-01"
+        )
+        assert r_probe.status_code == 200
+        probe_value = r_probe.json()["values"]["WindSpeed"][0]
+
+        assert probe_value == pytest.approx(extract_value)
+
+    def test_probe_idw_matches_extract_neighbors_average(self, client: TestClient):
+        """IDW probe at the midpoint of two adjacent grid points must match
+        the average of those two points' own values (as returned by
+        `extract`), when the radius is set to only capture those two.
+        """
+        lon1, lat1 = 5.280056761226873, 45.72529656578681
+        lon2, lat2 = 5.275582630680504, 45.72509143985007
+        epsilon = 1e-6
+
+        r_extract = client.get(
+            f"/datasets/{DATASET_NAME}/extract?variable=WindSpeed&time=2026-01-01"
+            f"&lon_min={min(lon1, lon2) - epsilon}&lon_max={max(lon1, lon2) + epsilon}"
+            f"&lat_min={min(lat1, lat2) - epsilon}&lat_max={max(lat1, lat2) + epsilon}"
+        )
+        assert r_extract.status_code == 200
+        extract_data = r_extract.json()
+        assert len(extract_data["values"]["WindSpeed"]) == 2
+        v1, v2 = extract_data["values"]["WindSpeed"]
+
+        mid_lon = (lon1 + lon2) / 2
+        mid_lat = (lat1 + lat2) / 2
+        r_probe = client.get(
+            f"/datasets/{DATASET_NAME}/probe?variables=WindSpeed"
+            f"&lon={mid_lon}&lat={mid_lat}&time=2026-01-01"
+            "&interp_spatial_method=idw&interp_spatial_params=radius:0.002"
+        )
+        assert r_probe.status_code == 200
+        probe_value = r_probe.json()["values"]["WindSpeed"][0]
+
+        assert probe_value == pytest.approx((v1 + v2) / 2, rel=1e-3)
+
     def test_probes_multiple_points(self, client: TestClient):
         """Probe multiple points returns a list of probe results."""
         payload = {"points": [{"lon": 2.3, "lat": 43.3}, {"lon": 2.4, "lat": 43.4}]}

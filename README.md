@@ -248,7 +248,7 @@ Interpolation is applied in four different scenarios:
      - *Multi-dimensional Level Variables*: Currently restricted to `linear` or `nearest` methods.
 4. **Point Probing**: Used by the `probe` endpoint to retrieve values over time.
    - *Supported methods*: Currently, only `IDW` (Inverse Distance Weighting) is supported.
-   - *Parameters*: `radius` (Maximum search radius for neighbors) and `power` (Distance weighting power).
+   - *Parameters*: `radius` (Maximum search radius for neighbors), `level_scale` (number of native level units treated as equivalent to 1 degree of horizontal distance in the IDW neighbor search) and `power` (Distance weighting power).
 
 ### Supplying Interpolation Parameters
 
