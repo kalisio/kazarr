@@ -489,6 +489,28 @@ class TestRegularGrid:
         assert data["values"]["Value"][0][0] == 150
         assert data["values"]["Value"][2][1] == 466
 
+    def test_probes_multiple_points_single_time_url(self, client: TestClient):
+        """Probe multiple points with a single time specified in the URL returns a list of values for that time."""
+        payload = {
+            "points": [
+                {"lon": LON_START, "lat": LAT_START},
+                {"lon": LON_START + LON_STEP, "lat": LAT_START + LAT_STEP},
+            ]
+        }
+        response = client.post(
+            f"/datasets/{DATASET_NAME}/probes?variables=Value&time=2026-01-03",
+            json=payload,
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "times" in data
+        assert len(data["times"]) == 1
+        assert "values" in data
+        assert len(data["values"]["Value"]) == 1
+        assert len(data["values"]["Value"][0]) == 2
+        assert data["values"]["Value"][0][0] == 300
+
     def test_probes_multiple_points_geojson(self, client: TestClient):
         """Probe multiple points with GeoJSON FeatureCollection body."""
         payload = {

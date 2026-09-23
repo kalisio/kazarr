@@ -657,6 +657,8 @@ def probe(
         [LON_VARIABLE_KEY, LAT_VARIABLE_KEY, "variables.time"],
     )
     time_dim = dget(dataset_config, "dimensions.time")
+    if time_var is not None:
+        request.query_params._dict.pop("time", None)
 
     # Flatten (points, times) into the canonical engine input: one sample per
     # (point, time) pair, all sharing a single "point" dimension.
