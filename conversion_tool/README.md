@@ -22,6 +22,11 @@ uv add kazarr-conversion-tool --default-index https://test.pypi.org/simple --ind
 > - With **pip**, add `[grib]` after the library name: `pip install kazarr-conversion-tool[grib] ...`
 > - With **uv**, use `--extra` parameter: `uv add kazarr-conversion-tool --extra grib ...`
 
+> [!WARNING]
+> If you need to use this tool with **GRIB** files, you will need to install ecCodes library : `apt install libeccodes0 libeccodes-dev`.
+> But be aware that the version installed may be old, and can leads to `unknown` variables in your dataset.
+> The easiest way to install a recent version of ecCodes seems to be with `micromamba` or `anaconda` and `conda-forge` package manager. You can find how to proceed in the Dockerfile
+
 ### As an executable
 
 #### With Docker

@@ -27,7 +27,22 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-grib = ["cfgrib>=0.9.15.1"]
+# eccodes is pinned >=2.45 ON PURPOSE, which is the opposite of the usual
+# advice for https://github.com/ecmwf/eccodes-python/issues/150. Versions
+# >=2.45 have broken PyPI metadata that DROPS the "eccodeslib" dependency
+# (which bundles a precompiled ecCodes binary for Linux/macOS via a vendored
+# eckit, which in turn vendors its own PROJ). We don't want eccodeslib at
+# all: eckit's bundled PROJ (9.8.x) coexists in the same process as pyproj's
+# own bundled PROJ (9.5.x, see the pyproj pin above) and the two conflict at
+# the C++ ABI level, crashing PyInstaller builds with glibc heap corruption
+# ("corrupted size vs. prev_size") on interpreter shutdown. So we deliberately
+# keep the "none-any" pure-Python wheel (falls back to findlibs) and provide
+# our own clean ecCodes native library instead - see the Dockerfile, which
+# installs a recent one from conda-forge (no proj/eckit dependency at all:
+# https://github.com/conda-forge/eccodes-feedstock). Revisit this once
+# eccodes-python's metadata bug is fixed upstream AND eccodeslib no longer
+# vendors its own PROJ (or vendors a version identical to pyproj's).
+grib = ["cfgrib>=0.9.15.1", "eccodes>=2.45"]
 
 [dependency-groups]
 # Required to build the standalone executable
