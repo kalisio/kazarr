@@ -42,10 +42,32 @@ def get_s3_storage_options(config, path=None):
     connect_timeout = get_ci(config, "s3.connect_timeout", 300)
     read_timeout = get_ci(config, "s3.read_timeout", 300)
 
+    # Default retry policy: makes the S3 client resilient to transient
+    # network errors during writes (connection resets, read/connect
+    # timeouts, 5xx, throttling). Note this does NOT cover S3's
+    # "IncompleteBody" error -- botocore never treats it as retryable
+    # regardless of this config (verified against botocore's retry
+    # conditions). That specific error is retried separately: per-chunk
+    # via RetryingS3FileSystem (kazarr/s3_retry.py), with a whole-dataset
+    # retry in processes.save() as a fallback.
+    retries_max_attempts = get_ci(config, "s3.retries_max_attempts", 5)
+    retries_mode = get_ci(config, "s3.retries_mode", "adaptive")
+
     # Ensure client_kwargs exists
     config_kwargs = storage_options.get("config_kwargs", {})
     config_kwargs.setdefault("connect_timeout", connect_timeout)
     config_kwargs.setdefault("read_timeout", read_timeout)
+    config_kwargs.setdefault(
+        "retries", {"max_attempts": retries_max_attempts, "mode": retries_mode}
+    )
+    config_kwargs.setdefault(
+        "request_checksum_calculation",
+        get_ci(config, "s3.request_checksum_calculation", "when_required"),
+    )
+    config_kwargs.setdefault(
+        "response_checksum_validation",
+        get_ci(config, "s3.response_checksum_validation", "when_required"),
+    )
     storage_options["config_kwargs"] = config_kwargs
 
     # Ensure authentication
