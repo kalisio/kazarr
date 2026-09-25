@@ -28,6 +28,7 @@ from kazarr.exceptions import (
     LastOperationNotCompletedError,
     MissingEnvironmentVariableError,
 )
+from kazarr.s3.upload_stats import register_stats_s3_filesystem_on_workers
 from kazarr.utils import (
     BUCKET_NAME_ENV_VAR,
     LAT_VARIABLE_KEY,
@@ -66,6 +67,16 @@ def init_dask_dashboard(dataset, config):
     message = "Dask dashboard available at: "
     separator = "=" * (len(message) + len(link))
     logger.info("\n%s\nDask dashboard available at: %s\n%s", separator, link, separator)
+
+    # Client() spins up worker *processes* (dask.distributed's default
+    # multiprocessing-method is "spawn", even on Linux), which are separate
+    # Python interpreters that never import kazarr.utils on their own --
+    # so without this, "s3://" silently resolves to plain s3fs.S3FileSystem
+    # inside every worker, disabling --s3-upload-stats there. See
+    # kazarr/s3/upload_stats.py's register_stats_s3_filesystem_on_workers
+    # docstring for the full story.
+    register_stats_s3_filesystem_on_workers(client)
+
     config["dask_dashboard_initialised"] = True
 
     return dataset, config

@@ -10,6 +10,7 @@ try:
     import eccodes
 except ImportError:
     eccodes = None
+import fsspec
 import numpy as np
 import s3fs
 import zarr
@@ -22,6 +23,7 @@ from kazarr.exceptions import (
     DatasetError,
     MissingEnvironmentVariableError,
 )
+from kazarr.s3.upload_stats import register_stats_s3_filesystem
 
 S3_PREFIX = "s3://"
 BUCKET_NAME_ENV_VAR = "BUCKET_NAME"
@@ -30,6 +32,13 @@ LAT_VARIABLE_KEY = "variables.lat"
 LEVEL_VARIABLE_KEY = "variables.level"
 
 logger = logging.getLogger(__name__)
+
+# Make every "s3://" path (including the one xarray/zarr build internally
+# from storage_options in dataset.to_zarr()) resolve through
+# kazarr.s3.upload_stats._StatsS3FileSystem, so --s3-upload-stats sees every
+# S3 request Kazarr makes, not just ones going through get_s3_filesystem()
+# below. See kazarr/s3/upload_stats.py for details.
+register_stats_s3_filesystem()
 
 
 def get_s3_storage_options(config, path=None):
@@ -84,7 +93,10 @@ def get_s3_storage_options(config, path=None):
 
 
 def get_s3_filesystem(config, path=None):
-    return s3fs.S3FileSystem(**get_s3_storage_options(config, path))
+    # Goes through fsspec's registry (rather than instantiating
+    # s3fs.S3FileSystem directly) so this also benefits from the
+    # --s3-upload-stats instrumentation registered in kazarr/s3/upload_stats.py.
+    return fsspec.filesystem("s3", **get_s3_storage_options(config, path))
 
 
 # Load JSON file

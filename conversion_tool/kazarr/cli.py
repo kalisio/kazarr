@@ -9,6 +9,7 @@ from kazarr.api import (
     list_templates,
     process,
 )
+from kazarr.s3.upload_stats import enable_upload_stats
 
 
 def _run():
@@ -94,6 +95,18 @@ other commands:
         help="Output path for the processed dataset (local or s3://)",
     )
     parser.add_argument(
+        "--s3-upload-stats",
+        type=str,
+        metavar="PATH",
+        help=(
+            "Diagnostic: record per-attempt S3 upload stats (chunk size, "
+            "duration, success/error) as JSON lines appended to PATH. Use "
+            "analyze_s3_upload_stats.py to turn this into a report on "
+            "whether IncompleteBody failures are random or timing-related. "
+            "Disabled by default."
+        ),
+    )
+    parser.add_argument(
         "-p",
         "--pipeline",
         type=str,
@@ -156,6 +169,9 @@ other commands:
     if not args.input_path:
         parser.print_help()
         sys.exit(1)
+
+    if args.s3_upload_stats:
+        enable_upload_stats(args.s3_upload_stats)
 
     process(
         args.input_path,
