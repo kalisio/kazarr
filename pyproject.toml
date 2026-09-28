@@ -1,6 +1,6 @@
 [project]
 name = "kazarr"
-version = "1.0.0"
+version = "1.0.1"
 description = "A lightweight FastAPI service that exposes endpoints to interact with Zarr datasets stored in a Simple Storage Service (S3)"
 requires-python = ">=3.11,<3.14"
 
