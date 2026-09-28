@@ -9,7 +9,6 @@ from kazarr.api import (
     list_templates,
     process,
 )
-from kazarr.s3.upload_stats import enable_upload_stats
 
 
 def _run():
@@ -170,9 +169,6 @@ other commands:
         parser.print_help()
         sys.exit(1)
 
-    if args.s3_upload_stats:
-        enable_upload_stats(args.s3_upload_stats)
-
     process(
         args.input_path,
         template=args.template,
@@ -188,6 +184,7 @@ other commands:
         custom_eccodes_path=args.custom_eccodes_path,
         dask_dashboard=args.dask_dashboard,
         s3_storage_class=args.s3_storage_class,
+        s3_upload_stats_path=args.s3_upload_stats,
     )
 
 

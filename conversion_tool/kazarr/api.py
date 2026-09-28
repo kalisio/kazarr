@@ -1,4 +1,5 @@
 from kazarr import pipelines
+from kazarr.s3.upload_stats import enable_upload_stats
 from kazarr.utils import get_valid_template_args, load_custom_eccodes, load_json, merge
 
 TEMPLATE_DEFAULT_PATH = "templates.json"
@@ -19,6 +20,7 @@ def process(
     custom_eccodes_path=None,
     dask_dashboard=False,
     s3_storage_class="STANDARD",
+    s3_upload_stats_path=None,
 ):
     """Create a new Zarr dataset from the given input path.
 
@@ -36,12 +38,16 @@ def process(
         mesh_type (str, optional): Type of mesh to generate ("auto", "regular", "rectilinear", "radial"). Defaults to "auto".
         dask_dashboard (bool, optional): Whether to start a Dask dashboard. Defaults to False.
         s3_storage_class (str, optional): S3 storage class for the output dataset. Defaults to "STANDARD".
+        s3_upload_stats_path (str, optional): Path to a file for recording S3 upload stats. Disabled by default.
 
     Returns:
         tuple: The (dataset, config) result from the pipeline.
     """
     # Before doing anything, load custom codes (ecCodes) if any
     load_custom_eccodes(custom_eccodes_path)
+
+    if s3_upload_stats_path:
+        enable_upload_stats(s3_upload_stats_path)
 
     config = config or {}
     template_args = template_args or []
