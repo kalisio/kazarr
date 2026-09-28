@@ -56,11 +56,12 @@ def get_s3_storage_options(config, path=None):
     # timeouts, 5xx, throttling). Note this does NOT cover S3's
     # "IncompleteBody" error -- botocore never treats it as retryable
     # regardless of this config (verified against botocore's retry
-    # conditions). That specific error is retried separately: per-chunk
-    # via RetryingS3FileSystem (kazarr/s3_retry.py), with a whole-dataset
-    # retry in processes.save() as a fallback.
-    retries_max_attempts = get_ci(config, "s3.retries_max_attempts", 5)
-    retries_mode = get_ci(config, "s3.retries_mode", "adaptive")
+    # conditions).
+    retries_max_attempts = get_ci(config, "s3.retries_max_attempts")
+    if retries_max_attempts is None:
+        retries_max_attempts = int(os.environ.get("AWS_MAX_ATTEMPTS", "6"))
+        retries_max_attempts = retries_max_attempts - 1  # With env variable, initial request counts as 1 attempt, so subtract 1 to get max retries
+    retries_mode = get_ci(config, "s3.retries_mode", os.environ.get("AWS_RETRY_MODE", "adaptive"))
 
     # Ensure client_kwargs exists
     config_kwargs = storage_options.get("config_kwargs", {})
@@ -71,11 +72,19 @@ def get_s3_storage_options(config, path=None):
     )
     config_kwargs.setdefault(
         "request_checksum_calculation",
-        get_ci(config, "s3.request_checksum_calculation", "when_required"),
+        get_ci(
+            config,
+            "s3.request_checksum_calculation",
+            os.environ.get("AWS_REQUEST_CHECKSUM_CALCULATION", "when_required"),
+        ),
     )
     config_kwargs.setdefault(
         "response_checksum_validation",
-        get_ci(config, "s3.response_checksum_validation", "when_required"),
+        get_ci(
+            config,
+            "s3.response_checksum_validation",
+            os.environ.get("AWS_RESPONSE_CHECKSUM_VALIDATION", "when_required"),
+        ),
     )
     storage_options["config_kwargs"] = config_kwargs
 
