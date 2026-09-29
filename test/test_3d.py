@@ -743,6 +743,236 @@ class TestNonRegularGrid3D:
         val_interp = data_interp["values"]["Value"][0]
         assert val1 < val_interp < val2
 
+    def test_probe_level_interpolation_level_scale_default_matches_explicit(
+        self, client: TestClient
+    ):
+        """Omitting `level_scale` must be identical to passing `level_scale:1`."""
+        probe_lon = 2.06440
+        probe_lat = 50.97832
+
+        r_default = client.get(
+            f"/datasets/{DATASET_NON_REGULAR}/probe?variables=Value&time=2026-01-01"
+            f"&lon={probe_lon}&lat={probe_lat}&level=150"
+            "&interp_spatial_method=idw&interp_spatial_params=radius:200",
+        )
+        r_explicit = client.get(
+            f"/datasets/{DATASET_NON_REGULAR}/probe?variables=Value&time=2026-01-01"
+            f"&lon={probe_lon}&lat={probe_lat}&level=150"
+            "&interp_spatial_method=idw&interp_spatial_params=radius:200,level_scale:1",
+        )
+
+        assert r_default.status_code == 200
+        assert r_explicit.status_code == 200
+        assert r_default.json()["values"]["Value"] == r_explicit.json()["values"]["Value"]
+
+    def test_probe_level_interpolation_level_scale_changes_weighting(
+        self, client: TestClient
+    ):
+        """`level_scale` must have an actual effect on the IDW weighting."""
+        probe_lon = 2.06440
+        probe_lat = 50.97832
+
+        point1 = client.get(
+            f"/datasets/{DATASET_NON_REGULAR}/probe?variables=Value&time=2026-01-01"
+            f"&lon={probe_lon}&lat={probe_lat}&level=100",
+        )
+        point2 = client.get(
+            f"/datasets/{DATASET_NON_REGULAR}/probe?variables=Value&time=2026-01-01"
+            f"&lon={probe_lon}&lat={probe_lat}&level=200",
+        )
+        assert point1.status_code == 200
+        assert point2.status_code == 200
+        val1 = point1.json()["values"]["Value"][0]
+        val2 = point2.json()["values"]["Value"][0]
+
+        r_small_scale = client.get(
+            f"/datasets/{DATASET_NON_REGULAR}/probe?variables=Value&time=2026-01-01"
+            f"&lon={probe_lon}&lat={probe_lat}&level=150"
+            "&interp_spatial_method=idw&interp_spatial_params=radius:200,level_scale:1",
+        )
+        r_large_scale = client.get(
+            f"/datasets/{DATASET_NON_REGULAR}/probe?variables=Value&time=2026-01-01"
+            f"&lon={probe_lon}&lat={probe_lat}&level=150"
+            "&interp_spatial_method=idw&interp_spatial_params=radius:200,level_scale:10000",
+        )
+
+        assert r_small_scale.status_code == 200
+        assert r_large_scale.status_code == 200
+        val_small_scale = r_small_scale.json()["values"]["Value"][0]
+        val_large_scale = r_large_scale.json()["values"]["Value"][0]
+
+        # Both remain a valid weighted average of the surrounding levels...
+        assert val1 < val_small_scale < val2
+        assert val1 < val_large_scale < val2
+        # ...but level_scale genuinely changed the weighting, not just a
+        # cosmetic no-op.
+        assert val_small_scale != pytest.approx(val_large_scale)
+
+    def test_probe_level_interpolation_invalid_level_scale(self, client: TestClient):
+        """A non-positive `level_scale` is rejected with a clear error."""
+        probe_lon = 2.06440
+        probe_lat = 50.97832
+
+        for invalid_value in ["0", "-1"]:
+            response = client.get(
+                f"/datasets/{DATASET_NON_REGULAR}/probe?variables=Value&time=2026-01-01"
+                f"&lon={probe_lon}&lat={probe_lat}&level=150"
+                f"&interp_spatial_method=idw&interp_spatial_params=radius:200,level_scale:{invalid_value}",
+            )
+            assert response.status_code == 400
+            assert response.json()["detail"]["error_code"] == "BAD_SELECTION"
+
+    # ------------------------------------------------------------------
+    # IDW neighbor selection: "k" (nearest-neighbors) vs "radius"
+    # ------------------------------------------------------------------
+
+    def test_probe_idw_default_is_knn(self, client: TestClient):
+        """Omitting both `k` and `radius` must behave exactly like an
+        explicit `k` equal to the built-in default (k-NN is now the default
+        neighbor-selection strategy, no longer "radius")."""
+        probe_lon = 2.06440
+        probe_lat = 50.97832
+
+        r_default = client.get(
+            f"/datasets/{DATASET_NON_REGULAR}/probe?variables=Value&time=2026-01-01"
+            f"&lon={probe_lon}&lat={probe_lat}&level=150"
+            "&interp_spatial_method=idw",
+        )
+        r_explicit_k = client.get(
+            f"/datasets/{DATASET_NON_REGULAR}/probe?variables=Value&time=2026-01-01"
+            f"&lon={probe_lon}&lat={probe_lat}&level=150"
+            "&interp_spatial_method=idw&interp_spatial_params=k:4",
+        )
+
+        assert r_default.status_code == 200
+        assert r_explicit_k.status_code == 200
+        assert (
+            r_default.json()["values"]["Value"] == r_explicit_k.json()["values"]["Value"]
+        )
+
+    def test_probe_idw_explicit_radius_overrides_knn_default(self, client: TestClient):
+        """Passing `radius` alone (no `k`) must still select radius mode,
+        not the new k-NN default."""
+        probe_lon = 2.06440
+        probe_lat = 50.97832
+
+        response = client.get(
+            f"/datasets/{DATASET_NON_REGULAR}/probe?variables=Value&time=2026-01-01"
+            f"&lon={probe_lon}&lat={probe_lat}&level=150"
+            "&interp_spatial_method=idw&interp_spatial_params=radius:200",
+        )
+        assert response.status_code == 200
+
+    def test_probe_idw_k_wins_when_both_k_and_radius_given(self, client: TestClient):
+        """If both `k` and `radius` are given, `k` takes precedence."""
+        probe_lon = 2.06440
+        probe_lat = 50.97832
+
+        r_k_and_radius = client.get(
+            f"/datasets/{DATASET_NON_REGULAR}/probe?variables=Value&time=2026-01-01"
+            f"&lon={probe_lon}&lat={probe_lat}&level=150"
+            "&interp_spatial_method=idw&interp_spatial_params=k:4,radius:0.001",
+        )
+        r_k_only = client.get(
+            f"/datasets/{DATASET_NON_REGULAR}/probe?variables=Value&time=2026-01-01"
+            f"&lon={probe_lon}&lat={probe_lat}&level=150"
+            "&interp_spatial_method=idw&interp_spatial_params=k:4",
+        )
+
+        assert r_k_and_radius.status_code == 200
+        assert r_k_only.status_code == 200
+        # A `radius` this tiny would normally find no candidates at all
+        # (NoDataInSelection) -- succeeding here, and matching the k-only
+        # result, confirms "radius" was ignored in favor of "k".
+        assert (
+            r_k_and_radius.json()["values"]["Value"]
+            == r_k_only.json()["values"]["Value"]
+        )
+
+    def test_probe_idw_invalid_k(self, client: TestClient):
+        """A non-positive or non-integer `k` is rejected with a clear error."""
+        probe_lon = 2.06440
+        probe_lat = 50.97832
+
+        for invalid_value in ["0", "-1", "abc"]:
+            response = client.get(
+                f"/datasets/{DATASET_NON_REGULAR}/probe?variables=Value&time=2026-01-01"
+                f"&lon={probe_lon}&lat={probe_lat}&level=150"
+                f"&interp_spatial_method=idw&interp_spatial_params=k:{invalid_value}",
+            )
+            assert response.status_code == 400
+            assert response.json()["detail"]["error_code"] == "BAD_SELECTION"
+
+    def test_probe_idw_knn_mode_level_interpolation(self, client: TestClient):
+        """"k" mode must interpolate between levels just like "radius" mode."""
+        probe_lon = 2.06440
+        probe_lat = 50.97832
+        point1 = client.get(
+            f"/datasets/{DATASET_NON_REGULAR}/probe?variables=Value&time=2026-01-01"
+            f"&lon={probe_lon}&lat={probe_lat}&level=100",
+        )
+        point2 = client.get(
+            f"/datasets/{DATASET_NON_REGULAR}/probe?variables=Value&time=2026-01-01"
+            f"&lon={probe_lon}&lat={probe_lat}&level=200",
+        )
+        interp_point = client.get(
+            f"/datasets/{DATASET_NON_REGULAR}/probe?variables=Value&time=2026-01-01"
+            f"&lon={probe_lon}&lat={probe_lat}&level=150"
+            "&interp_spatial_method=idw&interp_spatial_params=k:6",
+        )
+
+        assert point1.status_code == 200
+        assert point2.status_code == 200
+        assert interp_point.status_code == 200
+        val1 = point1.json()["values"]["Value"][0]
+        val2 = point2.json()["values"]["Value"][0]
+        val_interp = interp_point.json()["values"]["Value"][0]
+        assert val1 < val_interp < val2
+
+    def test_probe_idw_knn_mode_level_scale_changes_weighting(
+        self, client: TestClient
+    ):
+        """`level_scale` must also affect "k" mode's weighting -- this is
+        the mode whose neighbor *selection* now bakes `level_scale` into
+        the KD-tree's own coordinates (previously the tree was built with
+        the raw, unscaled level axis, biasing which neighbors "k" picked in
+        the first place, regardless of how they were later weighted)."""
+        probe_lon = 2.06440
+        probe_lat = 50.97832
+
+        point1 = client.get(
+            f"/datasets/{DATASET_NON_REGULAR}/probe?variables=Value&time=2026-01-01"
+            f"&lon={probe_lon}&lat={probe_lat}&level=100",
+        )
+        point2 = client.get(
+            f"/datasets/{DATASET_NON_REGULAR}/probe?variables=Value&time=2026-01-01"
+            f"&lon={probe_lon}&lat={probe_lat}&level=200",
+        )
+        assert point1.status_code == 200
+        assert point2.status_code == 200
+        val1 = point1.json()["values"]["Value"][0]
+        val2 = point2.json()["values"]["Value"][0]
+
+        r_small_scale = client.get(
+            f"/datasets/{DATASET_NON_REGULAR}/probe?variables=Value&time=2026-01-01"
+            f"&lon={probe_lon}&lat={probe_lat}&level=150"
+            "&interp_spatial_method=idw&interp_spatial_params=k:6,level_scale:1",
+        )
+        r_large_scale = client.get(
+            f"/datasets/{DATASET_NON_REGULAR}/probe?variables=Value&time=2026-01-01"
+            f"&lon={probe_lon}&lat={probe_lat}&level=150"
+            "&interp_spatial_method=idw&interp_spatial_params=k:6,level_scale:10000",
+        )
+
+        assert r_small_scale.status_code == 200
+        assert r_large_scale.status_code == 200
+        val_small_scale = r_small_scale.json()["values"]["Value"][0]
+        val_large_scale = r_large_scale.json()["values"]["Value"][0]
+
+        assert val1 < val_small_scale < val2
+        assert val1 < val_large_scale < val2
+        assert val_small_scale != pytest.approx(val_large_scale)
+
     # ------------------------------------------------------------------
     # Mesh — 2D slice
     # ------------------------------------------------------------------
@@ -1044,25 +1274,30 @@ class TestSimplifyGrid3D:
         probe_lon = 2.06440
         probe_lat = 50.97832
         point1 = client.get(
-            f"/datasets/{DATASET_MIXED}/probe?variables=Value&time=2026-01-01&lon={probe_lon}&lat={probe_lat}&level=100",
+            f"/datasets/{DATASET_MIXED}/probe?variables=Value&time=2026-01-01"
+            f"&lon={probe_lon}&lat={probe_lat}&level=100"
+            "&interp_spatial_method=idw&interp_spatial_params=radius:200",
         )
         point2 = client.get(
-            f"/datasets/{DATASET_MIXED}/probe?variables=Value&time=2026-01-01&lon={probe_lon}&lat={probe_lat}&level=200",
+            f"/datasets/{DATASET_MIXED}/probe?variables=Value&time=2026-01-01"
+            f"&lon={probe_lon}&lat={probe_lat}&level=200"
+            "&interp_spatial_method=idw&interp_spatial_params=radius:200",
         )
-        interp_point = client.get(
-            f"/datasets/{DATASET_MIXED}/probe?variables=Value&time=2026-01-01&lon={probe_lon}&lat={probe_lat}&level=150&interp_spatial_method=idw&interp_spatial_params=radius:200",
-        )
-
         assert point1.status_code == 200
         assert point2.status_code == 200
-        assert interp_point.status_code == 200
-        data1 = point1.json()
-        data2 = point2.json()
-        data_interp = interp_point.json()
-        val1 = data1["values"]["Value"][0]
-        val2 = data2["values"]["Value"][0]
-        val_interp = data_interp["values"]["Value"][0]
-        assert val1 < val_interp < val2
+        val1 = point1.json()["values"]["Value"][0]
+        val2 = point2.json()["values"]["Value"][0]
+
+        for level, fraction in ((125, 0.25), (175, 0.75)):
+            response = client.get(
+                f"/datasets/{DATASET_MIXED}/probe?variables=Value&time=2026-01-01"
+                f"&lon={probe_lon}&lat={probe_lat}&level={level}"
+                "&interp_spatial_method=idw&interp_spatial_params=radius:200",
+            )
+            assert response.status_code == 200
+            val_interp = response.json()["values"]["Value"][0]
+            expected = val1 + fraction * (val2 - val1)
+            assert val_interp == pytest.approx(expected, rel=1e-3)
 
     # ------------------------------------------------------------------
     # Mesh — 2D slice

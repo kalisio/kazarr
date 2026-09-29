@@ -248,7 +248,30 @@ Interpolation is applied in four different scenarios:
      - *Multi-dimensional Level Variables*: Currently restricted to `linear` or `nearest` methods.
 4. **Point Probing**: Used by the `probe` endpoint to retrieve values over time.
    - *Supported methods*: Currently, only `IDW` (Inverse Distance Weighting) is supported.
-   - *Parameters*: `radius` (Maximum search radius for neighbors), `level_scale` (number of native level units treated as equivalent to 1 degree of horizontal distance in the IDW neighbor search) and `power` (Distance weighting power).
+   - *Parameters*:
+     - `k`: Number of nearest neighbors to use (k-nearest-neighbors selection). **Default strategy** when neither `k` nor `radius` is given.
+     - `radius`: Maximum search radius for neighbors (radius-based selection). Only used when explicitly given; ignored if `k` is also given.
+     - `level_scale`: Number of native level units treated as equivalent to 1 degree of horizontal distance, for datasets with an irregular (multi-dimensional) level variable. See [Probe Spatial Interpolation: Grid Cases](#probe-spatial-interpolation-grid-cases) below.
+     - `power`: Distance weighting power.
+
+### Probe Spatial Interpolation: Grid Cases
+
+The `probe`/`probes` endpoints pick a different spatial interpolation strategy depending on how the dataset's grid and level are structured. This determines which parameters are relevant and why.
+
+| Grid case                                                    | Horizontal resolution                                                                                        | Level resolution                                                                                                                                                                            | KD-tree? | Relevant `interp_spatial_params`       |
+| ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :------: | ---------------------------------------- |
+| **Regular grid** (1D `lon`/`lat` axes)                        | Direct axis-wise selection/interpolation (`nearest` or `linear`) along the `lon`/`lat` axes, independently.      | Same: direct axis-wise selection/interpolation along the `level` axis, independently of `lon`/`lat`.                                                                                          |    No    | *(none — IDW params don't apply)*        |
+| **Irregular horizontal grid + regular (1D) level**             | IDW over a KD-tree built from the horizontal points only.                                                       | Resolved separately: linear/nearest interpolation along the shared `level` axis (like the regular grid case), applied per neighbor, independently of the horizontal IDW weights.              |  Yes (2D)  | `k` / `radius`, `power`                  |
+| **Irregular horizontal grid + irregular (multi-dim) level**    | IDW over a KD-tree built jointly from horizontal *and* level coordinates.                                        | Resolved jointly with the horizontal position: there is no shared level axis to interpolate along separately, since each grid point carries its own level value.                              |  Yes (4D)  | `k` / `radius`, `power`, `level_scale`   |
+
+> [!TIP]
+> A **regular grid** never needs a KD-tree at all: `lon` and `lat` (and `level`, if present) are independent 1D axes, so xarray resolves each one on its own, without ever computing a joint 2D/3D distance. This also means the pole-compression and antimeridian issues below simply don't apply to it.
+
+For the two irregular-grid cases, a few implementation details worth knowing:
+
+- **Cartographic (cartesian) conversion**: horizontal coordinates are projected onto the unit sphere as 3D cartesian `(x, y, z)` points before being fed to the KD-tree. This avoids two issues inherent to searching a raw `(lon, lat)` point cloud with a generic distance-based algorithm: the antimeridian discontinuity (-180°/180°) and the compression of longitude distances near the poles. `deg_to_chord_distance`/`chord_to_deg_distance` convert between real angular degrees and the tree's native (chord) distance — an exact conversion, valid at any angle, not an approximation.
+- **`level_scale` and radians (irregular level only)**: combining horizontal degrees with a vertical axis in raw physical units (meters, hPa, ...) in a single distance metric is meaningless without first making them comparable. `level_scale` converts the level axis into "degree-equivalents" (how many native level units count as 1 horizontal degree). That degree-equivalent value is then converted to radians before being stored in the KD-tree, to match the scale of the cartesian `(x, y, z)` chord coordinates (which are themselves radian-scale, not degree-scale) — otherwise the level axis would still dominate (or be dominated by) the spatial axes in the tree's own distance ordering, biasing which neighbors get selected. This bakes `level_scale` into neighbor *selection* itself (both `k` and `radius` modes), not just the final IDW weighting.
+- **`k` vs `radius`**: `k` selects a fixed number of nearest neighbors (via `cKDTree.query`); `radius` instead selects every neighbor within a given distance (via `cKDTree.query_ball_point`), which can vary per point. `k` is the default, since it never risks an empty neighbor search on a sparse patch of the grid; passing `radius` opts into distance-bounded selection instead. If both are given, `k` takes precedence.
 
 ### Supplying Interpolation Parameters
 
