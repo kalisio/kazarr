@@ -4,6 +4,7 @@ from typing import Any
 import numpy as np
 import xarray as xr
 from fastapi import Request
+from loguru import logger as log
 
 from src import exceptions
 from src.processing import bbox, interpolation, output
@@ -18,6 +19,7 @@ from src.utils.data import (
     get_level_var,
     get_required_dims_and_coords,
     get_times_in_range,
+    is_time_out_of_bounds_data,
     sel,
 )
 from src.utils.file import load_dataset
@@ -27,6 +29,7 @@ from src.utils.spatial import (
     chord_to_deg_distance,
     deg_to_chord_distance,
     get_cached_ckdtree,
+    get_cached_structured_grid_geometry,
     lonlat_to_sphere_points,
     lonlat_to_xyz,
 )
@@ -92,6 +95,13 @@ def extract(
         if time_var not in dataset:
             missing_vars.append(f"time ({time_var})")
         else:
+            time_info = is_time_out_of_bounds_data(dataset, time_var, time_range)
+            if time_info["out_of_bounds"]:
+                raise exceptions.TimeOutOfBounds(
+                    time_str=time_info["time"],
+                    min_time=time_info["min_time"],
+                    max_time=time_info["max_time"],
+                )
             bounded_time_range = get_bounded_time(dataset, time_var, time_range)
             time_range_indexer = bounded_time_range.get_indexer()
             if time_range_indexer is not None:
@@ -754,6 +764,13 @@ def probe(
         raise exceptions.BadConfigurationVariable(missing_vars)
 
     if time_range.has_time() and time_var is not None:
+        time_info = is_time_out_of_bounds_data(dataset, time_var, time_range)
+        if time_info["out_of_bounds"]:
+            raise exceptions.TimeOutOfBounds(
+                time_str=time_info["time"],
+                min_time=time_info["min_time"],
+                max_time=time_info["max_time"],
+            )
         # Bounded time ranges are also used for paths
         time_range = get_bounded_time(dataset, time_var, time_range)
         if config.interpolation.vars.time and time_var not in interp_vars:
@@ -903,6 +920,44 @@ def probe(
 
         points_data.append(p_data)
 
+    # Structured irregular grids (lon/lat arrays of 2+ dimensions sharing the
+    # same dims, e.g. curvilinear or radial grids): flag the probes falling
+    # outside the grid. Nearest / IDW would otherwise silently return the
+    # value of the closest node, however far it is. Their values are set to
+    # NaN below, as a regular grid does when interpolating outside its extent.
+    # Point lists (1D lon/lat) have no cell topology and are not checked.
+    outside_mask = np.zeros(len(points), dtype=bool)
+    is_structured_irregular_grid = (
+        not is_regular_grid
+        and longitudes.ndim >= 2
+        and longitudes.dims == latitudes.dims
+    )
+    if is_structured_irregular_grid and target_pts:
+        step_logger.step_start("Check probes against grid extent")
+        query_xyz = np.array(target_pts)[:, :3]
+        if grid_points.shape[1] == 3:
+            horizontal_tree = tree
+        else:
+            horizontal_tree = get_cached_ckdtree(
+                sphere_points, dataset_id=dataset_id, coord_vars=(lon_var, lat_var)
+            )
+        nearest_dist, nearest_idx = horizontal_tree.query(query_xyz, k=1)
+        geometry = get_cached_structured_grid_geometry(
+            longitudes.values,
+            latitudes.values,
+            dataset_id=dataset_id,
+            coord_vars=(lon_var, lat_var),
+            data_on_cells=bool(dget(dataset_config, "mesh_data_on_cells", False)),
+        )
+        outside_mask = ~geometry.contains(query_xyz, nearest_idx, nearest_dist)
+        if outside_mask.any():
+            log.info(
+                "[KAZARR] {n}/{total} probe(s) outside the grid of dataset {dataset_id}",
+                n=int(outside_mask.sum()),
+                total=len(points),
+                dataset_id=dataset_id,
+            )
+
     # Query all target points at once instead of in a Python loop for massive speedups.
     if not is_regular_grid and target_pts:
         target_pts_arr = np.array(target_pts)
@@ -944,6 +999,9 @@ def probe(
                 max_neighbors = (
                     max(len(idx) for idx in indices_list) if len(indices_list) > 0 else 0
                 )
+                # Probes outside the grid may have no neighbor at all: they get
+                # a single placeholder neighbor (their value is discarded).
+                max_neighbors = max(max_neighbors, 1)
 
             for i in range(len(target_pts_arr)):
                 if use_knn:
@@ -951,9 +1009,13 @@ def probe(
                 else:
                     indices = indices_list[i]
                     if not indices:
-                        raise exceptions.NoDataInSelection(
-                            f"Try increasing interpolation radius (point {i + 1})"
-                        )
+                        if not outside_mask[i]:
+                            raise exceptions.NoDataInSelection(
+                                f"Try increasing interpolation radius (point {i + 1})"
+                            )
+                        # Outside the grid: placeholder neighbor, value
+                        # replaced by NaN after extraction.
+                        indices = [0]
 
                 target_pt = target_pts_arr[i]
                 if with_level and not has_regular_level:
@@ -984,9 +1046,11 @@ def probe(
                         # ellipsoid before weighting.
                         within_radius = dists <= max_radius
                         if not np.any(within_radius):
-                            raise exceptions.NoDataInSelection(
-                                f"Try increasing interpolation radius (point {i + 1})"
-                            )
+                            if not outside_mask[i]:
+                                raise exceptions.NoDataInSelection(
+                                    f"Try increasing interpolation radius (point {i + 1})"
+                                )
+                            within_radius = np.ones_like(within_radius)
                         indices = [
                             idx for idx, keep in zip(indices, within_radius) if keep
                         ]
@@ -1050,6 +1114,7 @@ def probe(
     # sees one row per (point, time) sample exactly as before.
     repeat_idx = np.repeat(np.arange(len(points)), group_sizes)
     points_data = [points_data[j] for j in repeat_idx]
+    sample_outside_mask = outside_mask[repeat_idx]
 
     optional_coords = [time_var] if time_var is not None else []
     optional_dims = [time_dim] if time_dim is not None else []
@@ -1113,6 +1178,15 @@ def probe(
         batch_weights_da = xr.DataArray(weights_vals, dims=["point", "neighbor"])
 
     # Extract time points: one requested timestamp per flattened sample.
+    # Samples whose requested time is outside the dataset time extent are
+    # ignored: like probes outside the grid, they still go through the batch
+    # selection with a valid placeholder time (their start was already clipped
+    # to the nearest bound by get_bounded_time), then get NaN values and a
+    # None time in the output. Appending None here instead would break the
+    # vectorized selection (None -> NaT in a datetime64 array).
+    sample_time_oob_mask = np.array(
+        [tr.is_out_of_bounds for tr in time_range.ranges], dtype=bool
+    )
     req_times = []
     for tr in time_range.ranges:
         if tr.start is not None:
@@ -1161,6 +1235,36 @@ def probe(
         time_dtype = dataset[time_var].dtype
         time_arr = np.array(times, dtype=time_dtype)
         batch_fixed_coords[time_var] = xr.DataArray(time_arr, dims=["point"])
+
+    # Out-of-bounds times are reported as None in the output (only after the
+    # batch coords above were built with the valid placeholder times).
+    if times and sample_time_oob_mask.any():
+        times = [
+            None if oob else t for t, oob in zip(times, sample_time_oob_mask)
+        ]
+
+    # Samples to blank out: probe outside the grid, or time out of bounds
+    sample_ignored_mask = sample_outside_mask.copy()
+    if sample_time_oob_mask.size == sample_ignored_mask.size:
+        sample_ignored_mask |= sample_time_oob_mask
+
+    # One error code (or None) per sample, i.e. per (point, time), reported in
+    # the output "errors" field aligned with the times. A sample that is both
+    # outside the grid and out of the time bounds gets the combined code.
+    sample_location_oob = np.asarray(sample_outside_mask, dtype=bool)
+    sample_time_oob = (
+        sample_time_oob_mask
+        if sample_time_oob_mask.size == len(points_data)
+        else np.zeros(len(points_data), dtype=bool)
+    )
+    sample_errors = [None] * len(points_data)
+    for i in np.flatnonzero(sample_location_oob | sample_time_oob):
+        if sample_location_oob[i] and sample_time_oob[i]:
+            sample_errors[i] = exceptions.TIME_AND_LOCATION_OUT_OF_BOUNDS
+        elif sample_location_oob[i]:
+            sample_errors[i] = exceptions.LOCATION_OUT_OF_BOUNDS
+        else:
+            sample_errors[i] = exceptions.TIME_OUT_OF_BOUNDS
 
     interp_methods = None
     if spatial_interp_vars:
@@ -1215,6 +1319,15 @@ def probe(
         var_data = da_result.values
         if var_data.ndim == 1:
             var_data = var_data[np.newaxis, :]
+        if sample_ignored_mask.any():
+            # Probes outside the grid or with an out-of-bounds time: no value
+            # (null in the output, and a NO_DATA_IN_SELECTION error if no
+            # probe at all is inside).
+            if not np.issubdtype(var_data.dtype, np.floating):
+                var_data = var_data.astype(float)
+            else:
+                var_data = var_data.copy()
+            var_data[..., sample_ignored_mask] = np.nan
 
         data.append(var_data)
         var_props[var] = dataset[var].attrs
@@ -1250,6 +1363,8 @@ def probe(
             ]
             for vi, var in enumerate(variables)
         }
+        # One error list per point, aligned with that point's times
+        group_errors = [sample_errors[cum[i] : cum[i + 1]] for i in range(n_groups)]
         out = output.prepare_series_output(
             variables,
             group_data,
@@ -1259,9 +1374,14 @@ def probe(
             times=group_times,
             var_props=var_props,
             format=format,
+            errors=group_errors,
         )
         step_logger.end()
         return out
+
+    # Path: one error code (or None) per vertex, aligned with the path times.
+    # Grid: overridden below with one error list per point, aligned with times.
+    errors = sample_errors
 
     if output_mode == "grid":
         # The engine always computes a flat, per-sample batch. When every
@@ -1271,6 +1391,7 @@ def probe(
         n_groups = len(group_sizes)
         n_times = group_sizes[0]
         cum = np.concatenate(([0], np.cumsum(group_sizes)))
+        errors = [sample_errors[cum[i] : cum[i + 1]] for i in range(n_groups)]
         lons = [lons[cum[i]] for i in range(n_groups)]
         lats = [lats[cum[i]] for i in range(n_groups)]
         if with_level:
@@ -1293,6 +1414,7 @@ def probe(
             var_props=var_props,
             has_time_dimension=output_has_time,
             is_path=is_path,
+            errors=errors,
         )
     elif format == "geojson":
         step_logger.step_start("Prepare output (GeoJSON)")
@@ -1309,6 +1431,7 @@ def probe(
             line_string_props={"times": times}
             if (is_path and times is not None)
             else None,
+            errors=errors,
         )
     else:
         raise exceptions.BadConfigurationVariable(f"Unsupported format: {format}")

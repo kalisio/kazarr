@@ -216,7 +216,7 @@ class TestPointList:
     def test_extract_geojson_time_interpolation(self, client: TestClient):
         """GeoJSON format with time interpolation returns scalar values."""
         response = client.get(
-            f"/datasets/{DATASET_NAME}/extract?variable=Humidity&time=2026-01-01T12:00:00&interp_time=true&interp_vars_method=linear&format=geojson"
+            f"/datasets/{DATASET_NAME}/extract?variable=Humidity&time=2026-01-01T04:00:00&interp_time=true&interp_vars_method=linear&format=geojson"
         )
 
         assert response.status_code == 200

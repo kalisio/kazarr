@@ -14,6 +14,7 @@ from src.utils.data import (
     dgets,
     get_bounded_time,
     get_required_dims_and_coords,
+    is_time_out_of_bounds_data,
     sel,
 )
 from src.utils.file import load_dataset
@@ -56,7 +57,15 @@ def isoline(
         if time_var is None or time_var not in dataset:
             missing_vars.append(f"time ({time_var})")
         else:
-            fixed_coords[time_var] = get_bounded_time(dataset, time_var, time)
+            time_info = is_time_out_of_bounds_data(dataset, time_var, time)
+            if time_info["out_of_bounds"]:
+                raise exceptions.TimeOutOfBounds(
+                    time_str=time_info["time"],
+                    min_time=time_info["min_time"],
+                    max_time=time_info["max_time"],
+                )
+            bounded_time_range = get_bounded_time(dataset, time_var, time)
+            fixed_coords[time_var] = bounded_time_range.get_indexer()
             if config.interpolation.vars.time:
                 interp_vars.append(time_var)
     if len(missing_vars) > 0:

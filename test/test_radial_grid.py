@@ -273,7 +273,7 @@ class TestRadialGrid:
     def test_probe_nearest(self, client: TestClient):
         """Nearest-neighbor probe returns a WindSpeed value."""
         response = client.get(
-            f"/datasets/{DATASET_NAME}/probe?variables=WindSpeed&lat=43.3&lon=2.3"
+            f"/datasets/{DATASET_NAME}/probe?variables=WindSpeed&lat=45.70&lon=5.2711"
         )
 
         assert response.status_code == 200
@@ -341,9 +341,84 @@ class TestRadialGrid:
 
         assert probe_value == pytest.approx((v1 + v2) / 2, rel=1e-3)
 
+    @pytest.mark.parametrize("method", ["nearest", "idw"])
+    def test_probe_outside_grid(self, client: TestClient, method):
+        """A probe far outside the grid must not return the value of the
+        closest node: like a regular grid, it yields NO_DATA_IN_SELECTION.
+        """
+        response = client.get(
+            f"/datasets/{DATASET_NAME}/probe?variables=WindSpeed"
+            f"&lat=43.3&lon=2.3&time=2026-01-01&interp_spatial_method={method}"
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"]["error_code"] == "NO_DATA_IN_SELECTION"
+
+    def test_probe_just_outside_outer_ring(self, client: TestClient):
+        """~550 m beyond the outer ring (cells there are ~2.6 km wide): outside."""
+        response = client.get(
+            f"/datasets/{DATASET_NAME}/probe?variables=WindSpeed"
+            f"&lon=5.2711&lat={45.61705584544383 - 0.005}&time=2026-01-01"
+        )
+
+        assert response.status_code == 400
+
+    def test_probe_just_inside_outer_ring(self, client: TestClient):
+        """~110 m inside the outer ring: inside."""
+        response = client.get(
+            f"/datasets/{DATASET_NAME}/probe?variables=WindSpeed"
+            f"&lon=5.2711&lat={45.61705584544383 + 0.001}&time=2026-01-01"
+        )
+
+        assert response.status_code == 200
+        assert response.json()["values"]["WindSpeed"][0] is not None
+
+    def test_probe_across_duplicated_seam(self, client: TestClient):
+        """A probe in the cell between the last distinct branch and the
+        first one (stored again as the last branch) is inside the grid.
+        """
+        lon = (5.2711 + 5.267730452984618) / 2
+        lat = (45.85098213636223 + 45.85093070792311) / 2
+        response = client.get(
+            f"/datasets/{DATASET_NAME}/probe?variables=WindSpeed"
+            f"&lon={lon}&lat={lat}&time=2026-01-01"
+        )
+
+        assert response.status_code == 200
+        assert response.json()["values"]["WindSpeed"][0] is not None
+
+    @pytest.mark.parametrize(
+        "spatial_query",
+        [
+            "",
+            "&interp_spatial_method=idw",
+            "&interp_spatial_method=idw&interp_spatial_params=radius:0.002",
+        ],
+    )
+    def test_probes_mixed_inside_outside(self, client: TestClient, spatial_query):
+        """In a batch, only the probes outside the grid get a null value."""
+        payload = {
+            "points": [
+                {"lon": 5.280056761226873, "lat": 45.72529656578681},
+                {"lon": 2.3, "lat": 43.3},
+            ]
+        }
+        response = client.post(
+            f"/datasets/{DATASET_NAME}/probes?variables=WindSpeed"
+            f"&time=2026-01-01{spatial_query}",
+            json=payload,
+        )
+
+        assert response.status_code == 200
+        values = response.json()["values"]["WindSpeed"]
+        assert len(values) == 1  # 1 time step
+        inside_value, outside_value = values[0]
+        assert inside_value is not None
+        assert outside_value is None
+
     def test_probes_multiple_points(self, client: TestClient):
         """Probe multiple points returns a list of probe results."""
-        payload = {"points": [{"lon": 2.3, "lat": 43.3}, {"lon": 2.4, "lat": 43.4}]}
+        payload = {"points": [{"lon": 5.2711, "lat": 45.70}, {"lon": 5.30, "lat": 45.75}]}
         response = client.post(
             f"/datasets/{DATASET_NAME}/probes?variables=WindSpeed", json=payload
         )
@@ -365,11 +440,11 @@ class TestRadialGrid:
             "features": [
                 {
                     "type": "Feature",
-                    "geometry": {"type": "Point", "coordinates": [2.3, 43.3]},
+                    "geometry": {"type": "Point", "coordinates": [5.2711, 45.70]},
                 },
                 {
                     "type": "Feature",
-                    "geometry": {"type": "Point", "coordinates": [2.4, 43.4]},
+                    "geometry": {"type": "Point", "coordinates": [5.30, 45.75]},
                 },
             ],
         }
@@ -394,11 +469,11 @@ class TestRadialGrid:
             "features": [
                 {
                     "type": "Feature",
-                    "geometry": {"type": "Point", "coordinates": [2.3, 43.3]},
+                    "geometry": {"type": "Point", "coordinates": [5.2711, 45.70]},
                 },
                 {
                     "type": "Feature",
-                    "geometry": {"type": "Point", "coordinates": [2.4, 43.4]},
+                    "geometry": {"type": "Point", "coordinates": [5.30, 45.75]},
                 },
             ],
         }

@@ -69,6 +69,9 @@ class TimeRange:
     start: str | None = None
     end: str | None = None
     has_time_range: bool = False
+    # Set by validate(): True when the requested time / range
+    # does not overlap the dataset time extent at all.
+    is_out_of_bounds: bool = False
 
     @classmethod
     def from_string(cls, time_range: str | None):
@@ -116,6 +119,36 @@ class TimeRange:
     def has_time(self):
         return self.start is not None or (self.end is not None and self.has_time_range)
 
+    def validate(self, min_time, max_time, dtype=None) -> bool:
+        """
+        Compute and store whether this time / range falls entirely outside
+        [min_time, max_time]. Returns the new value of is_out_of_bounds.
+
+        - Single time value: out of bounds if before min_time or after max_time.
+        - Time range: out of bounds if it does not overlap [min_time, max_time]
+          (a None start/end is treated as unbounded on that side).
+        - No time at all: never out of bounds (whole dataset).
+        """
+
+        def to_time(t_val):
+            if t_val is None:
+                return None
+            return np.array(t_val, dtype=dtype) if dtype is not None else t_val
+
+        start = to_time(self.start)
+        end = to_time(self.end)
+
+        if not self.has_time_range:
+            self.is_out_of_bounds = start is not None and bool(
+                start < min_time or start > max_time
+            )
+        else:
+            self.is_out_of_bounds = bool(
+                (end is not None and end < min_time)
+                or (start is not None and start > max_time)
+            )
+        return self.is_out_of_bounds
+
 
 @dataclass
 class MultiTimeRange:
@@ -143,3 +176,24 @@ class MultiTimeRange:
 
     def has_time(self):
         return any(r.has_time() for r in self.ranges)
+
+    def validate(self, min_time, max_time, dtype=None) -> bool:
+        """
+        Compute and store is_out_of_bounds on every sub-range.
+        Returns True if all sub-ranges are out of bounds.
+        """
+        for r in self.ranges:
+            r.validate(min_time, max_time, dtype)
+        return self.all_out_of_bounds()
+
+    def all_out_of_bounds(self) -> bool:
+        return bool(self.ranges) and all(r.is_out_of_bounds for r in self.ranges)
+
+    def any_out_of_bounds(self) -> bool:
+        return any(r.is_out_of_bounds for r in self.ranges)
+
+    def get_out_of_bounds_ranges(self) -> list[TimeRange]:
+        return [r for r in self.ranges if r.is_out_of_bounds]
+
+    def get_in_bounds_ranges(self) -> list[TimeRange]:
+        return [r for r in self.ranges if not r.is_out_of_bounds]

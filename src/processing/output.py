@@ -176,6 +176,16 @@ def prepare_output(
     )
 
 
+def _has_errors(errors) -> bool:
+    """True if `errors` (an error code, None, or a possibly nested list of
+    them) contains at least one error code."""
+    if errors is None:
+        return False
+    if isinstance(errors, (list, tuple)):
+        return any(_has_errors(e) for e in errors)
+    return True
+
+
 def prepare_raw_output(
     var_names,
     vals,
@@ -186,7 +196,12 @@ def prepare_raw_output(
     var_props=None,
     has_time_dimension=False,
     is_path=False,
+    errors=None,
 ):
+    """`errors`: optional list aligned with lons/lats: for points, one list per
+    point with one error code (or None) per time; for a path, one error code
+    (or None) per vertex. Added as an "errors" column only when at least one
+    result has an error."""
     flat_lons, flat_lats, flat_levels, vals_dict, collection_props, out_props, _ = (
         prepare_output(
             var_names,
@@ -208,6 +223,8 @@ def prepare_raw_output(
     }
     if flat_levels is not None:
         data["levels"] = flat_levels
+    if _has_errors(errors):
+        data["errors"] = errors
 
     return {
         "shape": vals[0].shape[1:] if is_path else vals[0].shape,
@@ -228,7 +245,12 @@ def prepare_geojson_output(
     has_time_dimension=False,
     is_path=False,
     line_string_props=None,
+    errors=None,
 ):
+    """`errors`: optional list aligned with lons/lats (see prepare_raw_output).
+    Point features get `properties.errors` (one error code or None per time)
+    when they have at least one error; the path LineString gets
+    `properties.errors` with one error code or None per vertex."""
     (
         flat_lons,
         flat_lats,
@@ -293,6 +315,8 @@ def prepare_geojson_output(
                 "properties": {"id": 0, **path_values, **line_string_props},
             }
         )
+        if _has_errors(errors):
+            features[0]["properties"]["errors"] = errors
     else:
         # Create all Point features efficiently
         features = [
@@ -306,6 +330,10 @@ def prepare_geojson_output(
             }
             for i, (coord, point_vals) in enumerate(zip(coords, zip(*var_values_list)))
         ]
+        if _has_errors(errors):
+            for feature, point_errors in zip(features, errors):
+                if _has_errors(point_errors):
+                    feature["properties"]["errors"] = point_errors
 
     return {
         "type": "FeatureCollection",
@@ -323,6 +351,7 @@ def prepare_series_output(
     times=None,
     var_props=None,
     format="raw",
+    errors=None,
 ):
     """Build the response for the "series" probe mode: each requested point
     keeps its own (possibly different-length, differently-timed) list of
@@ -382,6 +411,8 @@ def prepare_series_output(
                 props["times"] = times[i]
             for var_name in var_names:
                 props[var_name] = cleaned_group_data[var_name][i]
+            if errors is not None and _has_errors(errors[i]):
+                props["errors"] = errors[i]
             features.append(
                 {
                     "type": "Feature",
@@ -405,6 +436,8 @@ def prepare_series_output(
         entry["values"] = {
             var_name: cleaned_group_data[var_name][i] for var_name in var_names
         }
+        if errors is not None and _has_errors(errors[i]):
+            entry["errors"] = errors[i]
         points_out.append(entry)
 
     return {"variables": out_vars_props, "points": points_out}

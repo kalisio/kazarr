@@ -680,7 +680,7 @@ class TestNonRegularGrid3D:
     def test_probe_with_level(self, client: TestClient):
         """Probe at a 3D point on irregular grid with explicit level coordinate."""
         response = client.get(
-            f"/datasets/{DATASET_NON_REGULAR}/probe?variable=Value&time=2026-01-01&lon=2.05&lat=51.02&level=100",
+            f"/datasets/{DATASET_NON_REGULAR}/probe?variable=Value&time=2026-01-01&lon=2.0644&lat=50.97832&level=100",
         )
         assert response.status_code == 200
         data = response.json()
@@ -702,7 +702,7 @@ class TestNonRegularGrid3D:
                         "type": "Feature",
                         "geometry": {
                             "type": "Point",
-                            "coordinates": [2.05, 51.02],
+                            "coordinates": [2.0644, 50.97832],
                         },
                     }
                 ],
@@ -1231,7 +1231,7 @@ class TestSimplifyGrid3D:
     def test_probe_with_level(self, client: TestClient):
         """Probe at a 3D point on irregular grid with explicit level coordinate."""
         response = client.get(
-            f"/datasets/{DATASET_MIXED}/probe?variable=Value&time=2026-01-01&lon=2.05&lat=51.02&level=100",
+            f"/datasets/{DATASET_MIXED}/probe?variable=Value&time=2026-01-01&lon=2.0644&lat=50.97832&level=100",
         )
         assert response.status_code == 200
         data = response.json()
@@ -1253,7 +1253,7 @@ class TestSimplifyGrid3D:
                         "type": "Feature",
                         "geometry": {
                             "type": "Point",
-                            "coordinates": [2.05, 51.02, 100],
+                            "coordinates": [2.0644, 50.97832, 100],
                         },
                     }
                 ],

@@ -165,7 +165,7 @@ def get_required_dims_and_coords(
 def get_bounded_time(
     dataset, time_var, time_range: TimeRange | MultiTimeRange
 ) -> TimeRange | MultiTimeRange:
-    if time_var not in dataset or not is_monotonic_var(dataset, time_var):
+    if time_var not in dataset or not is_monotonic_var(dataset, time_var)[0]:
         raise exceptions.GenericInternalError(
             f"Time variable '{time_var}' not found or not monotonic in dataset."
         )
@@ -202,6 +202,7 @@ def get_bounded_time(
                     start=bounded_start,
                     end=bounded_end,
                     has_time_range=tr.has_time_range,
+                    is_out_of_bounds=tr.is_out_of_bounds,
                 )
             )
         return MultiTimeRange(ranges=bounded_ranges)
@@ -212,6 +213,88 @@ def get_bounded_time(
             start=bounded_start,
             end=bounded_end,
             has_time_range=time_range.has_time_range,
+            is_out_of_bounds=time_range.is_out_of_bounds,
+        )
+
+
+def is_time_out_of_bounds_data(
+    dataset, time_var, time_range: TimeRange | MultiTimeRange
+) -> dict:
+    """
+    Check whether a requested time (or time range) falls entirely outside the
+    time extent of the dataset.
+
+    Side effect: sets `is_out_of_bounds` on the given TimeRange, or on each
+    sub-range of a MultiTimeRange, so callers can then handle them separately
+    (see MultiTimeRange.get_out_of_bounds_ranges / get_in_bounds_ranges).
+
+    - Single time value: out of bounds if it is before the first or after the last time.
+    - Time range: out of bounds if it does not overlap the dataset time extent
+      (a None start/end is treated as unbounded on that side).
+    - MultiTimeRange: returns True only if every sub-range is out of bounds.
+    """
+    if time_var not in dataset or not is_monotonic_var(dataset, time_var)[0]:
+        raise exceptions.GenericInternalError(
+            f"Time variable '{time_var}' not found or not monotonic in dataset."
+        )
+
+    time_data = dataset[time_var].values
+    if time_data.size == 0:
+        ranges = (
+            time_range.ranges
+            if isinstance(time_range, MultiTimeRange)
+            else [time_range]
+        )
+        for tr in ranges:
+            tr.is_out_of_bounds = True
+        return True
+
+    # Handle both increasing and decreasing time axes
+    min_time, max_time = sorted((time_data[0], time_data[-1]))
+
+    min_time_str = (
+        pd.Timestamp(min_time).isoformat()
+        if np.issubdtype(time_data.dtype, np.datetime64)
+        else str(min_time)
+    )
+    max_time_str = (
+        pd.Timestamp(max_time).isoformat()
+        if np.issubdtype(time_data.dtype, np.datetime64)
+        else str(max_time)
+    )
+
+    try:
+        return {
+            "out_of_bounds": time_range.validate(min_time, max_time, time_data.dtype),
+            "min_time": min_time_str,
+            "max_time": max_time_str,
+            "time": time_range_to_string(time_range),
+        }
+    except Exception as e:
+        raise exceptions.GenericInternalError(
+            f"Unable to convert time value(s) of '{time_range}' to the correct type."
+        ) from e
+
+
+def is_time_out_of_bounds(
+    dataset, time_var, time_range: TimeRange | MultiTimeRange
+) -> bool:
+    return is_time_out_of_bounds_data(dataset, time_var, time_range)["out_of_bounds"]
+
+
+def time_range_to_string(time_range: TimeRange | MultiTimeRange) -> str:
+    if isinstance(time_range, MultiTimeRange):
+        return ",".join(
+            [
+                f"{tr.start}/{tr.end}" if tr.has_time_range else f"{tr.start}"
+                for tr in time_range.ranges
+            ]
+        )
+    else:
+        return (
+            f"{time_range.start}/{time_range.end}"
+            if time_range.has_time_range
+            else f"{time_range.start}"
         )
 
 

@@ -1,3 +1,10 @@
+# Non-fatal, per-result error codes reported in the "errors" field of probe
+# outputs (the request succeeds, but some samples have no value).
+TIME_OUT_OF_BOUNDS = "TIME_OUT_OF_BOUNDS"
+LOCATION_OUT_OF_BOUNDS = "LOCATION_OUT_OF_BOUNDS"
+TIME_AND_LOCATION_OUT_OF_BOUNDS = "TIME_AND_LOCATION_OUT_OF_BOUNDS"
+
+
 class KazarrException(Exception):
     def __init__(self, error_code, message, payload=None):
         super().__init__(message)
@@ -185,6 +192,15 @@ class InvalidDatetimeFormat(UserInputBasedException):
     def __init__(self, datetime_str):
         message = f"Invalid datetime format: '{datetime_str}'. Expected ISO 8601 format."
         super().__init__("INVALID_DATETIME_FORMAT", message, datetime_str)
+
+
+class TimeOutOfBounds(UserInputBasedException):
+    def __init__(self, time_str, min_time, max_time):
+        message = (
+            f"Time '{time_str}' is out of bounds. "
+            f"Expected between '{min_time}' and '{max_time}'."
+        )
+        super().__init__("TIME_OUT_OF_BOUNDS", message, {"time": time_str, "min_time": min_time, "max_time": max_time})
 
 
 class PathMissingTimes(UserInputBasedException):
