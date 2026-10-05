@@ -467,6 +467,15 @@ def sel(
                     )
                     method = "linear"
 
+                # Interpolate in float64: with dask, xarray computes linear
+                # interpolation in the source dtype (float32), which can be
+                # off by one ULP even exactly on a grid node.
+                original_dtype = None
+                if np.issubdtype(data.dtype, np.floating) and data.dtype.itemsize < 8:
+                    # Save original dtype to re-apply after interpolation
+                    original_dtype = data.dtype
+                    data = data.astype(np.float64)
+
                 all_increasing = all(
                     is_monotonic_var_increasing(data, var)
                     for var in vars_to_interp
@@ -482,6 +491,10 @@ def sel(
                     )
                 except ValueError as e:
                     raise exceptions.BadSelection("Data interpolation failed.") from e
+
+                # Re-apply original dtype if it was float32
+                if original_dtype is not None:
+                    data = data.astype(original_dtype)
 
             # Re-apply NaN for positions that were fully null before interpolation.
             # This ensures that a point added after a certain date keeps NaN
