@@ -248,3 +248,11 @@ class PointTimesDoNotSupportTimeRanges(UserInputBasedException):
             message,
             {"invalid_times": invalid_times},
         )
+
+
+class InvalidThresholds(UserInputBasedException):
+    def __init__(self, thresholds, detail=""):
+        message = f"Invalid thresholds: {thresholds}."
+        if detail:
+            message += f" {detail}"
+        super().__init__("INVALID_THRESHOLDS", message, thresholds)

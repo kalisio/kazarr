@@ -215,7 +215,10 @@ def apply_regular_grid_bounding_box(
         if bb_lat_min > lat_max_val or bb_lat_max < lat_min_val:
             raise exceptions.NoDataInSelection()
 
+    # Clip bounds to the data range: a missing bound is infinite, and
+    # argmin(|lons - inf|) would always return the first index.
     if bbox.has_bb_lon:
+        bb_lon_min, bb_lon_max = np.clip([bb_lon_min, bb_lon_max], lon_min_val, lon_max_val)
         idx_start = (np.abs(lons_1d - bb_lon_min)).argmin()
         idx_end = (np.abs(lons_1d - bb_lon_max)).argmin()
         i_min, i_max = min(idx_start, idx_end), max(idx_start, idx_end)
@@ -223,6 +226,7 @@ def apply_regular_grid_bounding_box(
         i_min, i_max = 0, lons_1d.shape[0] - 1
 
     if bbox.has_bb_lat:
+        bb_lat_min, bb_lat_max = np.clip([bb_lat_min, bb_lat_max], lat_min_val, lat_max_val)
         idx_start = (np.abs(lats_1d - bb_lat_min)).argmin()
         idx_end = (np.abs(lats_1d - bb_lat_max)).argmin()
         j_min, j_max = min(idx_start, idx_end), max(idx_start, idx_end)

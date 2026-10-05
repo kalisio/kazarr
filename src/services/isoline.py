@@ -3,10 +3,15 @@ from typing import Any
 from fastapi import Request
 
 from src import exceptions
+from src.processing import bbox
+from src.processing.contexts import BBoxContext
 from src.processing.isoline import (
+    ThresholdRange,
     format_isoline_geojson,
     format_isoline_raw,
     generate_isolines,
+    resolve_thresholds,
+    serialize_isolines,
 )
 from src.schemas.config import ExtractionConfig
 from src.utils.data import (
@@ -20,20 +25,24 @@ from src.utils.data import (
 from src.utils.file import load_dataset
 from src.utils.logging import StepDurationLogger
 
+# Number of grid cells added around the bounding box, so that isolines reach its edges
+BBOX_INDEX_PADDING = 1
+
 
 def isoline(
     request: Request,
     dataset_id: str,
     variable: str,
-    levels: list[float],
+    thresholds: list[float] | ThresholdRange,
     time: str | None = None,
     format: str = "raw",
     config: dict[str, Any] | ExtractionConfig | None = None,
-) -> dict[str, Any]:
+) -> bytes:
+    """Compute isolines and return them serialized as JSON bytes."""
     if not isinstance(config, ExtractionConfig):
         config = ExtractionConfig.model_validate(config or {})
     step_logger = StepDurationLogger(
-        "isoline", parameters=(dataset_id, variable, levels, time, format, config)
+        "isoline", parameters=(dataset_id, variable, thresholds, time, format, config)
     )
 
     step_logger.step_start("Load dataset and config")
@@ -71,6 +80,12 @@ def isoline(
     if len(missing_vars) > 0:
         raise exceptions.BadConfigurationVariable(missing_vars)
 
+    # Handle [0, 360] datasets and bounding boxes crossing the antimeridian
+    bounding_box = BBoxContext.from_tuple(config.bbox)
+    dataset, _ = bbox.normalize_dataset_longitudes(
+        dataset, lon_var, lat_var, bbox=bounding_box
+    )
+
     fixed_coords, fixed_dims = get_required_dims_and_coords(
         dataset,
         variable,
@@ -82,20 +97,88 @@ def isoline(
         as_dims=config.as_dims or [],
     )
 
-    lon = sel(dataset, lon_var, fixed_coords, fixed_dims)
-    lat = sel(dataset, lat_var, fixed_coords, fixed_dims)
-    val = sel(dataset, variable, fixed_coords, fixed_dims, interp_vars=interp_vars)
+    step_logger.step_start("Load coordinates")
+    lon_da = sel(dataset, lon_var, fixed_coords, fixed_dims)
+    lat_da = sel(dataset, lat_var, fixed_coords, fixed_dims)
+    if lon_da.ndim == 0 or lat_da.ndim == 0 or (
+        lon_da.ndim == 1 and lat_da.ndim == 1 and lon_da.dims == lat_da.dims
+    ):
+        raise exceptions.BadSelection(
+            "Isolines can only be computed on gridded datasets (point lists are not supported)."
+        )
+    is_regular_grid = lon_da.ndim == 1 and lat_da.ndim == 1
+    if not is_regular_grid:
+        # Remove extra leading dimensions of size 1 (e.g. a single vertical level)
+        lon_da = lon_da.squeeze([d for d in lon_da.dims[:-2] if lon_da.sizes[d] == 1])
+        lat_da = lat_da.squeeze([d for d in lat_da.dims[:-2] if lat_da.sizes[d] == 1])
+        if lon_da.ndim != 2 or lon_da.dims != lat_da.dims:
+            raise exceptions.TooManyDimensions(lon_da.ndim)
+    lon = lon_da.values
+    lat = lat_da.values
+
+    step_logger.step_start("Apply bounding box")
+    if is_regular_grid:
+        row_dim, col_dim = lat_da.dims[0], lon_da.dims[0]
+        n_rows, n_cols = len(lat), len(lon)
+    else:
+        row_dim, col_dim = lon_da.dims
+        n_rows, n_cols = lon.shape
+    row_min, row_max, col_min, col_max = 0, n_rows - 1, 0, n_cols - 1
+    if bounding_box.has_bb:
+        if is_regular_grid:
+            indices = bbox.apply_regular_grid_bounding_box(
+                lon, lat, bounding_box, BBOX_INDEX_PADDING
+            )
+        else:
+            _, _, indices = bbox.apply_irregular_bounding_box(
+                lon, lat, bounding_box, False, 0.0, 0
+            )
+            indices.row_min = max(0, indices.row_min - BBOX_INDEX_PADDING)
+            indices.row_max = min(n_rows - 1, indices.row_max + BBOX_INDEX_PADDING)
+            indices.col_min = max(0, indices.col_min - BBOX_INDEX_PADDING)
+            indices.col_max = min(n_cols - 1, indices.col_max + BBOX_INDEX_PADDING)
+        row_min, row_max = indices.row_min, indices.row_max
+        col_min, col_max = indices.col_min, indices.col_max
+    rows = slice(row_min, row_max + 1)
+    cols = slice(col_min, col_max + 1)
+    if is_regular_grid:
+        lon, lat = lon[cols], lat[rows]
+    else:
+        lon, lat = lon[rows, cols], lat[rows, cols]
+
+    step_logger.step_start("Load variable values")
+    val_da = sel(dataset, variable, fixed_coords, fixed_dims, interp_vars=interp_vars)
+    if row_dim not in val_da.dims or col_dim not in val_da.dims:
+        raise exceptions.BadSelection(
+            f"Variable '{variable}' is not defined on the ({row_dim}, {col_dim}) grid."
+        )
+    # Only the part of the field covering the bounding box is read
+    val = (
+        val_da.isel({row_dim: rows, col_dim: cols})
+        .squeeze([d for d in val_da.dims if d not in (row_dim, col_dim) and val_da.sizes[d] == 1])
+        .transpose(row_dim, col_dim)
+        .values
+    )
+    if val.shape[0] < 2 or val.shape[1] < 2:
+        raise exceptions.NoDataInSelection(
+            "At least 2x2 grid points are required to compute isolines."
+        )
+
+    # Thresholds given as a range are computed from the selected data (bbox included)
+    thresholds = resolve_thresholds(thresholds, val)
 
     step_logger.step_start("Extract isolines")
-    isolines = generate_isolines(lon, lat, val, levels)
+    isolines = generate_isolines(lon, lat, val, thresholds)
 
     step_logger.step_start("Prepare output")
     if format == "raw":
-        out = format_isoline_raw(isolines, levels)
+        out = format_isoline_raw(isolines, thresholds)
     elif format == "geojson":
-        out = format_isoline_geojson(isolines, levels)
+        out = format_isoline_geojson(isolines, thresholds)
     else:
         raise exceptions.BadConfigurationVariable(f"Unsupported format: {format}")
+    # Serialized here (in the worker thread) rather than by FastAPI in the event loop
+    content = serialize_isolines(out)
 
     step_logger.end()
-    return out
+    return content

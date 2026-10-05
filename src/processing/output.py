@@ -4,6 +4,7 @@ import numpy as np
 import pyvista as pv
 
 from src import exceptions
+from src.utils.serialization import json_array
 
 
 def prepare_mesh_output(
@@ -57,7 +58,6 @@ def prepare_mesh_output(
 
     values = tri_grid.point_data[variable]
 
-    clean_values = np.where(np.isnan(values), None, values).tolist()
     valid_numbers = values[np.isfinite(values)]
 
     if valid_numbers.size == 0:
@@ -68,9 +68,11 @@ def prepare_mesh_output(
     out = {
         "bounds": {"min": val_min, "max": val_max},
         "resolution_factor": {"row": step_row, "col": step_col},
-        "vertices": vertices.tolist(),
-        "indices": indices.tolist(),
-        "values": clean_values,
+        # Kept as numpy arrays: serialized with src.utils.serialization.dumps
+        # (NaN values are written as null)
+        "vertices": json_array(vertices),
+        "indices": json_array(indices),
+        "values": json_array(values),
     }
     return out
 
@@ -106,7 +108,14 @@ def prepare_output(
     var_props=None,
     has_time_dimension=False,
     is_path=False,
+    as_numpy=False,
 ):
+    """Prepare coordinates and values of an output.
+
+    With as_numpy=True, coordinates and numeric values are kept as numpy arrays
+    (NaN included) instead of Python lists: the output must then be serialized
+    with src.utils.serialization.dumps (NaN are written as null).
+    """
     if global_props is None:
         global_props = {}
     if var_props is None:
@@ -119,11 +128,14 @@ def prepare_output(
             "Length of var_names must match length of vals"
         )
 
-    flat_lons = lons.flatten().tolist()
-    flat_lats = lats.flatten().tolist()
+    def flat(array):
+        return json_array(array) if as_numpy else array.flatten().tolist()
+
+    flat_lons = flat(lons)
+    flat_lats = flat(lats)
     if levels is not None and isinstance(levels, (int, float)):
         levels = np.full_like(lons, levels)
-    flat_levels = levels.flatten().tolist() if levels is not None else None
+    flat_levels = flat(levels) if levels is not None else None
     vals_dict = {}
     has_one_point = lons.size == 1 and lats.size == 1
 
@@ -136,7 +148,8 @@ def prepare_output(
             if valid_vals.size == 0:
                 continue
             no_data = False
-            var_vals = np.where(np.isnan(var_vals), None, var_vals)
+            if not as_numpy:
+                var_vals = np.where(np.isnan(var_vals), None, var_vals)
             bounds = {"min": float(valid_vals.min()), "max": float(valid_vals.max())}
         else:
             if var_vals.size == 0:
@@ -158,7 +171,9 @@ def prepare_output(
         if is_path and len(var_vals) == 1:
             var_vals = var_vals[0]  # Unwrap single value for path mode
 
-        vals_dict[var_name] = var_vals.tolist()
+        vals_dict[var_name] = (
+            json_array(var_vals, flatten=False) if as_numpy else var_vals.tolist()
+        )
         out_vars_props[var_name] = var_props.get(var_name, {}).copy()
         if bounds is not None:
             out_vars_props[var_name]["bounds"] = bounds
@@ -197,6 +212,7 @@ def prepare_raw_output(
     has_time_dimension=False,
     is_path=False,
     errors=None,
+    as_numpy=False,
 ):
     """`errors`: optional list aligned with lons/lats: for points, one list per
     point with one error code (or None) per time; for a path, one error code
@@ -213,6 +229,7 @@ def prepare_raw_output(
             var_props=var_props,
             has_time_dimension=has_time_dimension,
             is_path=is_path,
+            as_numpy=as_numpy,
         )
     )
 

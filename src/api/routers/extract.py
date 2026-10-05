@@ -2,7 +2,7 @@ import asyncio
 import threading
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query, Request, Response
 from starlette.concurrency import run_in_threadpool
 
 import src.schemas.requests as models
@@ -81,7 +81,7 @@ async def extract_data(
     cancel_event = threading.Event()
     watcher_task = asyncio.create_task(watch_disconnection(request, cancel_event))
     try:
-        return await run_in_threadpool(
+        content = await run_in_threadpool(
             extraction.extract,
             request,
             base.dataset,
@@ -94,3 +94,4 @@ async def extract_data(
         )
     finally:
         watcher_task.cancel()
+    return Response(content=content, media_type="application/json")

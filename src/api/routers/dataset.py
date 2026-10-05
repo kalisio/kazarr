@@ -1,6 +1,6 @@
 import datetime as dt
 from email.utils import format_datetime, parsedate_to_datetime
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Query, Request, Response
 from fastapi.responses import RedirectResponse
@@ -17,7 +17,7 @@ async def list_datasets(
     search_path: Annotated[
         str | None, Query(description="The path to search for datasets")
     ] = None,
-):
+) -> Any:
     return await run_in_threadpool(dataset_service.list_datasets, search_path)
 
 
@@ -29,7 +29,7 @@ async def redirect_datasets(request: Request):
 
 
 @router.get("/datasets/{dataset:path}/metadata", summary="Get dataset information")
-async def dataset_metadata(dataset: str, request: Request, response: Response):
+async def dataset_metadata(dataset: str, request: Request, response: Response) -> Any:
     # 304 Not Modified handling so that clients can know when a dataset has been updated
     # For now, only works for datasets stored on S3
     last_modified = await run_in_threadpool(

@@ -188,19 +188,34 @@ The `probes` endpoint accepts the following body structures:
 
 ### /datasets/{dataset}/isoline (GET)
 
-Computes isolines (contour lines) for a given variable and specific levels.
+Computes isolines (contour lines) for a given variable and specific thresholds.
 
 The `isoline` endpoint accepts the following query parameters:
 
 | Name                 | Description                                                                                               | Optional | Default   |
 | -------------------- | --------------------------------------------------------------------------------------------------------- | :------: | --------- |
 | `variable`           | The variable to generate isolines for.                                                                    |    ✗     |           |
-| `levels`             | Comma-separated list of levels for isoline generation.                                                    |    ✗     |           |
+| `thresholds`         | Thresholds for isoline generation: repeated values (`thresholds=0&thresholds=5`), or a range `min:max:step` (see below). |    ✗     |           |
 | `time`               | The time value to use for isoline generation.                                                             |    ✓     | `None`    |
-| `format`             | Format of the extracted data (Supported: `raw`, `geojson`). Ignored when `mesh_tile_size` is defined      |    ✓     | `raw`     |
+| `format`             | Format of the output (Supported: `raw`, `geojson`).                                                       |    ✓     | `raw`     |
+| `lon_min`            | Minimum longitude of the bounding box.                                                                    |    ✓     | `None`    |
+| `lat_min`            | Minimum latitude of the bounding box.                                                                     |    ✓     | `None`    |
+| `lon_max`            | Maximum longitude of the bounding box.                                                                    |    ✓     | `None`    |
+| `lat_max`            | Maximum latitude of the bounding box.                                                                     |    ✓     | `None`    |
 | `interp_time`        | Whether to interpolate values on time dimension                                                           |    ✓     | `False`   |
 | `interp_vars_method` | Method for variable/time interpolation                                                                    |    ✓     | `nearest` |
 | `as_dims`            | If a variable has the same name as a dim, force query parameters in this list to be treated as dimensions |    ✓     | `[]`      |
+
+Thresholds can be defined as a range `min:max:step` (e.g. `thresholds=0:30:5`), where `min` and/or `max` can be omitted:
+- `min` omitted: the first threshold is the first multiple of `step` greater than or equal to the minimum value of the selected data (bounding box included), so that thresholds are round values (e.g. data in [273.4, 296.2] with `thresholds=::5` gives 275, 280, ..., 295).
+- `max` omitted: the maximum value of the selected data is used.
+- `max` is inclusive (`thresholds=0:10:5` gives 0, 5, 10) and `step` is required and must be positive. A range can produce up to 1000 thresholds.
+
+Output formats:
+- `raw`: `{"<threshold>": [line, ...], ...}` where each line is a list of `[lon, lat]` points.
+- `geojson`: a `FeatureCollection` with one feature per requested threshold, with `id` (index of the threshold) and `threshold` properties. The geometry is a `LineString` when the threshold has a single line, a `MultiLineString` when it has several. Thresholds without any isoline get an empty `MultiLineString`.
+
+With a bounding box, isolines are computed on the smallest block of grid cells covering it (plus one cell of padding): on curvilinear grids, lines may exceed the bounding box.
 
 > [!IMPORTANT]
 > You may need to specify additional non-generic variables or dimensions according to your dataset. To do so, you can add query parameters with `&my_additional_variable={VALUE}`
@@ -300,6 +315,7 @@ For the `extract` and `probe` endpoints, you can pass interpolation options usin
 | CACHE_SIZE            | Max size of cache folder (e.g. 1024KB, 512MB, 4GB)                                                        | 512MB         |
 | LRU_CACHE_SIZE        | Max number of datasets kept in the in-memory `lru_cache`                                                  | 5             |
 | KDTREE_MAX_CACHE_SIZE | Max number of cKDTree cached                                                                              | 10            |
+| GZIP_COMPRESSION_LEVEL | Compression level of the responses, from 1 (fastest) to 9 (smallest). `0` disables compression (e.g. when a reverse proxy already compresses) | 1             |
 
 > [!IMPORTANT]
 > With some S3 provider, some errors about checksum calculation can occur (error: `botocore.exceptions.ClientError: An error occurred (InvalidArgument) when calling the PutObject operation: x-amz-content-sha256 must be UNSIGNED-PAYLOAD, or a valid sha256 value.`). In that case, you should set `AWS_REQUEST_CHECKSUM_CALCULATION` environment variable to `when_required`

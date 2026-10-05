@@ -1,6 +1,6 @@
 import asyncio
 import threading
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Path, Query, Request
 from starlette.concurrency import run_in_threadpool
@@ -47,7 +47,7 @@ async def mesh(
             description="The variable to use as level coordinate for the mesh geometry. This will override the dataset configuration and the 'variable' parameter.",
         ),
     ] = None,
-):
+) -> Any:
     config = {
         "is_3d": is_3d,
         "variable": variable,

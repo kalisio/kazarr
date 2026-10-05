@@ -10,6 +10,7 @@ from src import exceptions
 from src.processing import bbox, interpolation, output
 from src.processing.contexts import BBoxContext, MultiTimeRange, TimeRange
 from src.schemas.config import ExtractionConfig
+from src.utils import serialization
 from src.utils.data import (
     dget,
     dgets,
@@ -50,7 +51,8 @@ def extract(
     format: str = "raw",
     config: dict[str, Any] | ExtractionConfig | None = None,
     cancel_event: threading.Event | None = None,
-) -> dict[str, Any]:
+) -> bytes:
+    """Extract data and return it serialized as JSON bytes."""
     if not isinstance(config, ExtractionConfig):
         config = ExtractionConfig.model_validate(config or {})
 
@@ -564,6 +566,7 @@ def extract(
             global_props=global_props,
             var_props={variable: dataset[variable].attrs},
             has_time_dimension=is_multi_time,
+            as_numpy=True,
         )
     elif format == "geojson":
         step_logger.step_start("Prepare output (GeoJSON)")
@@ -581,8 +584,13 @@ def extract(
     else:
         raise exceptions.BadConfigurationVariable(f"Unsupported format: {format}")
 
+    # Serialized here (in the worker thread) with orjson, which handles numpy
+    # arrays natively, rather than by FastAPI in the event loop
+    step_logger.step_start("Serialize output")
+    content = serialization.dumps(out)
+
     step_logger.end()
-    return out
+    return content
 
 
 def _is_uniform_time_grid(flat_times: list, group_sizes: list[int]) -> bool:

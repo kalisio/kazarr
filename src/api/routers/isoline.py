@@ -1,10 +1,11 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query, Request, Response
 from starlette.concurrency import run_in_threadpool
 
 import src.schemas.requests as models
 from src import exceptions
+from src.processing.isoline import parse_thresholds
 from src.services import isoline as isoline_service
 from src.utils.data import parse_query_dict
 
@@ -19,8 +20,14 @@ async def isoline_data(
     request: Request,
     base: Annotated[models.BaseParams, Depends()],
     time: Annotated[models.TimeParams, Depends()],
-    levels: Annotated[
-        list[float], Query(description="List of levels for isoline generation")
+    bbox: Annotated[models.BBoxParams, Depends()],
+    thresholds: Annotated[
+        list[str],
+        Query(
+            description="Thresholds for isoline generation: either a list of values "
+            "(thresholds=0&thresholds=5&thresholds=10), or a range 'min:max:step' where min "
+            "and max are optional and taken from the data when omitted (e.g. '::5', '0::5', ':30:5')."
+        ),
     ],
 ):
     interp_vars_params = base.interp_vars_params
@@ -31,6 +38,7 @@ async def isoline_data(
         raise exceptions.MissingQueryParameter("variable")
 
     config = {
+        "bbox": (bbox.lon_min, bbox.lat_min, bbox.lon_max, bbox.lat_max),
         "as_dims": base.as_dims,
         "interpolation": {
             "vars": {
@@ -42,13 +50,14 @@ async def isoline_data(
         },
     }
 
-    return await run_in_threadpool(
+    content = await run_in_threadpool(
         isoline_service.isoline,
         request,
         base.dataset,
         base.variable,
-        levels,
+        parse_thresholds(thresholds),
         time=time.time,
         format=base.format,
         config=config,
     )
+    return Response(content=content, media_type="application/json")

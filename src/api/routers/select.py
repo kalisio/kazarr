@@ -1,6 +1,6 @@
 import asyncio
 import threading
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Request
 from starlette.concurrency import run_in_threadpool
@@ -22,7 +22,7 @@ async def free_selection_data(
     request: Request,
     base: Annotated[models.BaseParams, Depends()],
     time: Annotated[models.TimeParams, Depends()],
-):
+) -> Any:
     interp_vars_params = base.interp_vars_params
     if interp_vars_params is not None and ":" in interp_vars_params:
         interp_vars_params = parse_query_dict(interp_vars_params)

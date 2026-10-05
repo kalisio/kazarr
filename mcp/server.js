@@ -420,18 +420,19 @@ export function buildServer (options = {}) {
   server.tool(
     'get_isoline',
     'Compute contour lines (isolines) for a variable at specified threshold values. ' +
-    'Returns a GeoJSON FeatureCollection of LineString features, each with a "level" property.',
+    'Returns a GeoJSON FeatureCollection with one feature per threshold (LineString if the threshold has a single line, MultiLineString otherwise), each with a "threshold" property.',
     {
       dataset: z.string().describe('Dataset identifier.'),
       variable: z.string().describe('Variable for which to compute isolines, e.g. "temperature".'),
-      levels: z.string().describe(
-        'Comma-separated list of isoline threshold values, e.g. "0,5,10,15,20". ' +
-        'Each value produces a set of contour lines at that threshold.'
+      thresholds: z.string().describe(
+        'Comma-separated list of isoline threshold values, e.g. "0,5,10,15,20", ' +
+        'or a range "min:max:step" (max inclusive) where min and/or max can be omitted to use ' +
+        'the data min/max, e.g. "::5" or "0::5". Each value produces a set of contour lines at that threshold.'
       ),
       time: z.string().optional().describe('ISO 8601 time instant or interval.'),
       interp_time: z.boolean().optional().describe('Interpolate along the time axis.'),
       format: z.enum(['raw', 'geojson']).optional().describe(
-        '"geojson" (default for isolines): GeoJSON FeatureCollection of LineStrings. "raw": raw contour data.'
+        '"geojson": GeoJSON FeatureCollection, one LineString/MultiLineString feature per threshold. "raw" (default): {threshold: [line, ...]} where a line is a list of [lon, lat].'
       ),
       interp_vars: z.string().optional().describe('Comma-separated coordinate variables to interpolate.'),
       interp_vars_method: z.enum([
@@ -442,17 +443,20 @@ export function buildServer (options = {}) {
       as_dims: z.string().optional().describe('Comma-separated dimension variable names.')
     },
     async ({
-      dataset, variable, levels, time, interp_time, format,
+      dataset, variable, thresholds, time, interp_time, format,
       interp_vars, interp_vars_method, interp_vars_params, as_dims
     }) => {
       try {
-        const levelList = splitList(levels).map(Number).filter(v => !isNaN(v))
-        if (levelList.length === 0) {
-          return err(new Error('levels must be a non-empty comma-separated list of numbers'))
+        // A range "min:max:step" is forwarded as is, values are sent as repeated parameters
+        const thresholdList = thresholds.includes(':')
+          ? [thresholds.trim()]
+          : splitList(thresholds).map(Number).filter(v => !isNaN(v))
+        if (thresholdList.length === 0) {
+          return err(new Error('thresholds must be a non-empty comma-separated list of numbers or a "min:max:step" range'))
         }
         const params = {
           variable,
-          levels: levelList,
+          thresholds: thresholdList,
           time,
           interp_time: interp_time ? 'true' : undefined,
           format,

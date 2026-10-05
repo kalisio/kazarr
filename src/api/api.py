@@ -1,5 +1,6 @@
 import os
 import sys
+from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -23,10 +24,31 @@ app = FastAPI(
     docs_url=None,
 )
 
-app.add_middleware(
-    GZipMiddleware,
-    minimum_size=1024 # Starting from 1KB
-)
+# Compression level of the responses, from 1 (fastest) to 9 (smallest).
+# Level 1 gives almost the same size as level 9 on JSON payloads, for a fraction
+# of the CPU time (compression runs in the event loop and blocks it).
+# 0 disables compression (e.g. when a reverse proxy already compresses responses).
+GZIP_COMPRESSION_LEVEL_ENV_VAR = "GZIP_COMPRESSION_LEVEL"
+DEFAULT_GZIP_COMPRESSION_LEVEL = 1
+
+
+def get_gzip_compression_level():
+    try:
+        level = int(
+            os.getenv(GZIP_COMPRESSION_LEVEL_ENV_VAR, str(DEFAULT_GZIP_COMPRESSION_LEVEL))
+        )
+    except ValueError:
+        return DEFAULT_GZIP_COMPRESSION_LEVEL
+    return min(max(level, 0), 9)
+
+
+gzip_compression_level = get_gzip_compression_level()
+if gzip_compression_level > 0:
+    app.add_middleware(
+        GZipMiddleware,
+        minimum_size=1024,  # Starting from 1KB
+        compresslevel=gzip_compression_level,
+    )
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -107,7 +129,7 @@ async def request_cancelled_handler(request: Request, exc: exceptions.RequestCan
     summary="API Root",
     description="Provides basic information about the kazarr API.",
 )
-def read_root():
+def read_root() -> Any:
     return {
         "name": "kazarr API",
         "version": os.getenv("APP_VERSION", "0.1.0"),
@@ -130,7 +152,7 @@ def read_root():
     summary="Health Check",
     description="Check the health status of the kazarr API.",
 )
-def health_check():
+def health_check() -> Any:
     return {"status": "ok"}
 
 

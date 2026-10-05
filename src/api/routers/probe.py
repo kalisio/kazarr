@@ -1,6 +1,6 @@
 import asyncio
 import threading
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Body, Depends, Query, Request
 from starlette.concurrency import run_in_threadpool
@@ -29,7 +29,7 @@ async def probe_data(
     level: Annotated[
         float | None, Query(description="The level coordinate to probe")
     ] = None,
-):
+) -> Any:
     interp_vars_params = base.interp_vars_params
     if interp_vars_params is not None and ":" in interp_vars_params:
         interp_vars_params = parse_query_dict(interp_vars_params)
@@ -101,7 +101,7 @@ async def probe_data_multi(
     body: Annotated[models.MultiProbeBody, Body()],
     time: Annotated[models.MultiTimeParams, Depends()],
     spatial_interp: Annotated[models.SpatialInterpolationParams, Depends()],
-):
+) -> Any:
     interp_vars_params = base.interp_vars_params
     if interp_vars_params is not None and ":" in interp_vars_params:
         interp_vars_params = parse_query_dict(interp_vars_params)
