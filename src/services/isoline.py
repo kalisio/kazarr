@@ -4,7 +4,7 @@ from fastapi import Request
 
 from src import exceptions
 from src.processing import bbox
-from src.processing.contexts import BBoxContext
+from src.processing.contexts import BBoxContext, TimeRange
 from src.processing.isoline import (
     ThresholdRange,
     format_isoline_geojson,
@@ -24,6 +24,7 @@ from src.utils.data import (
 )
 from src.utils.file import load_dataset
 from src.utils.logging import StepDurationLogger
+from src.utils.requests import get_from_query
 
 # Number of grid cells added around the bounding box, so that isolines reach its edges
 BBOX_INDEX_PADDING = 1
@@ -61,22 +62,32 @@ def isoline(
         missing_vars.append(f"lon ({lon_var})")
     if lat_var is None or lat_var not in dataset:
         missing_vars.append(f"lat ({lat_var})")
-    if time is not None:
-        time_var = dget(dataset_config, "variables.time")
+    # The time is received as a string: it must be parsed into a TimeRange (as
+    # in extract) before being checked and used for the selection
+    time_var = dget(dataset_config, "variables.time")
+    time_range = TimeRange.from_string(get_from_query(time_var, time, request))
+    if time_range.has_time_range:
+        raise exceptions.InvalidTimeRange(
+            "Isolines require a single time value, not a time range."
+        )
+    if time_range.has_time():
         if time_var is None or time_var not in dataset:
             missing_vars.append(f"time ({time_var})")
         else:
-            time_info = is_time_out_of_bounds_data(dataset, time_var, time)
+            time_info = is_time_out_of_bounds_data(dataset, time_var, time_range)
             if time_info["out_of_bounds"]:
                 raise exceptions.TimeOutOfBounds(
                     time_str=time_info["time"],
                     min_time=time_info["min_time"],
                     max_time=time_info["max_time"],
                 )
-            bounded_time_range = get_bounded_time(dataset, time_var, time)
+            bounded_time_range = get_bounded_time(dataset, time_var, time_range)
             fixed_coords[time_var] = bounded_time_range.get_indexer()
-            if config.interpolation.vars.time:
+            if config.interpolation.vars.time and time_var not in interp_vars:
                 interp_vars.append(time_var)
+            # Remove "time" from request parameters so that it is not used
+            # again by the greedy lookup of get_required_dims_and_coords
+            request.query_params._dict.pop("time", None)
     if len(missing_vars) > 0:
         raise exceptions.BadConfigurationVariable(missing_vars)
 
@@ -147,7 +158,15 @@ def isoline(
         lon, lat = lon[rows, cols], lat[rows, cols]
 
     step_logger.step_start("Load variable values")
-    val_da = sel(dataset, variable, fixed_coords, fixed_dims, interp_vars=interp_vars)
+    val_da = sel(
+        dataset,
+        variable,
+        fixed_coords,
+        fixed_dims,
+        interp_vars=interp_vars,
+        interp_method=config.interpolation.vars.method,
+        interp_config=config.interpolation.vars.params or {},
+    )
     if row_dim not in val_da.dims or col_dim not in val_da.dims:
         raise exceptions.BadSelection(
             f"Variable '{variable}' is not defined on the ({row_dim}, {col_dim}) grid."
