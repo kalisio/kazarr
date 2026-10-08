@@ -86,6 +86,7 @@ The `probe` endpoint accepts the following query parameters:
 | `interp_spatial_params` | Parameters for spatial interpolation (e.g. `padding:1.0`)                                                 |    ✓     | `padding:1.0` |
 | `interp_vars`           | Variables to interpolate during probe                                                                     |    ✓     | `[]`          |
 | `interp_vars_method`    | Method for variable/time interpolation                                                                    |    ✓     | `nearest`     |
+| `interp_vars_params`    | Parameters for variable interpolation (e.g. `method:linear`)                                              |    ✓     | `None`        |
 | `format`                | Format of the extracted data (Supported: `raw`, `geojson`).                                               |    ✓     | `raw`         |
 | `as_dims`               | If a variable has the same name as a dim, force query parameters in this list to be treated as dimensions |    ✓     | `[]`          |
 
@@ -110,6 +111,7 @@ The `probes` endpoint accepts the following query parameters:
 | `interp_spatial_params` | Parameters for spatial interpolation (e.g. `padding:1.0`)                                                 |    ✓     | `padding:1.0` |
 | `interp_vars`           | Variables to interpolate during probe                                                                     |    ✓     | `[]`          |
 | `interp_vars_method`    | Method for variable/time interpolation                                                                    |    ✓     | `nearest`     |
+| `interp_vars_params`    | Parameters for variable interpolation (e.g. `method:linear`)                                              |    ✓     | `None`        |
 | `format`                | Format of the extracted data (Supported: `raw`, `geojson`).                                               |    ✓     | `raw`         |
 | `as_dims`               | If a variable has the same name as a dim, force query parameters in this list to be treated as dimensions |    ✓     | `[]`          |
 
@@ -192,19 +194,20 @@ Computes isolines (contour lines) for a given variable and specific thresholds.
 
 The `isoline` endpoint accepts the following query parameters:
 
-| Name                 | Description                                                                                               | Optional | Default   |
-| -------------------- | --------------------------------------------------------------------------------------------------------- | :------: | --------- |
-| `variable`           | The variable to generate isolines for.                                                                    |    ✗     |           |
+| Name                 | Description                                                                                                              | Optional | Default   |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------ | :------: | --------- |
+| `variable`           | The variable to generate isolines for.                                                                                   |    ✗     |           |
 | `thresholds`         | Thresholds for isoline generation: repeated values (`thresholds=0&thresholds=5`), or a range `min:max:step` (see below). |    ✗     |           |
-| `time`               | The time value to use for isoline generation.                                                             |    ✓     | `None`    |
-| `format`             | Format of the output (Supported: `raw`, `geojson`).                                                       |    ✓     | `raw`     |
-| `lon_min`            | Minimum longitude of the bounding box.                                                                    |    ✓     | `None`    |
-| `lat_min`            | Minimum latitude of the bounding box.                                                                     |    ✓     | `None`    |
-| `lon_max`            | Maximum longitude of the bounding box.                                                                    |    ✓     | `None`    |
-| `lat_max`            | Maximum latitude of the bounding box.                                                                     |    ✓     | `None`    |
-| `interp_time`        | Whether to interpolate values on time dimension                                                           |    ✓     | `False`   |
-| `interp_vars_method` | Method for variable/time interpolation                                                                    |    ✓     | `nearest` |
-| `as_dims`            | If a variable has the same name as a dim, force query parameters in this list to be treated as dimensions |    ✓     | `[]`      |
+| `time`               | The time value to use for isoline generation.                                                                            |    ✓     | `None`    |
+| `format`             | Format of the output (Supported: `raw`, `geojson`).                                                                      |    ✓     | `raw`     |
+| `lon_min`            | Minimum longitude of the bounding box.                                                                                   |    ✓     | `None`    |
+| `lat_min`            | Minimum latitude of the bounding box.                                                                                    |    ✓     | `None`    |
+| `lon_max`            | Maximum longitude of the bounding box.                                                                                   |    ✓     | `None`    |
+| `lat_max`            | Maximum latitude of the bounding box.                                                                                    |    ✓     | `None`    |
+| `interp_time`        | Whether to interpolate values on time dimension                                                                          |    ✓     | `False`   |
+| `interp_vars_method` | Method for variable/time interpolation                                                                                   |    ✓     | `nearest` |
+| `interp_vars_params` | Parameters for variable interpolation (e.g. `method:linear`)                                                             |    ✓     | `None`    |
+| `as_dims`            | If a variable has the same name as a dim, force query parameters in this list to be treated as dimensions                |    ✓     | `[]`      |
 
 Thresholds can be defined as a range `min:max:step` (e.g. `thresholds=0:30:5`), where `min` and/or `max` can be omitted:
 - `min` omitted: the first threshold is the first multiple of `step` greater than or equal to the minimum value of the selected data (bounding box included), so that thresholds are round values (e.g. data in [273.4, 296.2] with `thresholds=::5` gives 275, 280, ..., 295).
@@ -230,6 +233,7 @@ The `select` endpoint accepts the following query parameters:
 | `variable`           | The variable from which you want to select the data.                                                      |    ✗     |           |
 | `interp_vars`        | Variables to interpolate during selection                                                                 |    ✓     | `[]`      |
 | `interp_vars_method` | Method for variable/time interpolation                                                                    |    ✓     | `nearest` |
+| `interp_vars_params` | Parameters for variable interpolation (e.g. `method:linear`)                                              |    ✓     | `None`    |
 | `as_dims`            | If a variable has the same name as a dim, force query parameters in this list to be treated as dimensions |    ✓     | `[]`      |
 
 ### /datasets/{dataset}/mesh
