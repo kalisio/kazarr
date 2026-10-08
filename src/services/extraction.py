@@ -648,6 +648,44 @@ def _idw_weights(dists: np.ndarray, power: float) -> np.ndarray:
     return weights
 
 
+def _within_regular_grid_axis_extent(
+    coord_values: np.ndarray,
+    targets: np.ndarray,
+    data_on_cells: bool = False,
+    period: float | None = None,
+) -> np.ndarray:
+    """Tell, for each target, whether it lies within the extent of one 1D
+    coordinate axis of a regular grid.
+
+    With data on vertices, the extent goes from the first to the last node.
+    With data on cells, each value covers its whole cell, so the extent goes
+    half a cell beyond the first and last nodes.
+    `period` (e.g. 360 for longitudes): an axis wrapping around a full period
+    has no edge, so every target is inside. Targets are expected to already use the
+    same convention as the axis (e.g. [0, 360] vs [-180, 180] longitudes).
+    """
+    targets = np.asarray(targets, dtype=float)
+    coords = np.asarray(coord_values, dtype=float).ravel()
+    coords = np.sort(coords[np.isfinite(coords)])
+    if coords.size == 0:
+        return np.zeros(targets.shape, dtype=bool)
+
+    lo, hi = coords[0], coords[-1]
+    if period is not None and coords.size > 1:
+        # The axis wraps around (e.g. global longitudes 0..359 by 1 degree):
+        # the last node is connected to the first one, so there is no edge.
+        step = float(np.median(np.diff(coords)))
+        if (hi - lo) + step >= period * (1 - 1e-9):
+            return np.ones(targets.shape, dtype=bool)
+    if data_on_cells and coords.size > 1:
+        lo -= (coords[1] - coords[0]) / 2
+        hi += (coords[-1] - coords[-2]) / 2
+
+    # Tolerance for floating point round-trips on probes exactly on an edge
+    tol = 1e-9 * max(1.0, abs(lo), abs(hi))
+    return (targets >= lo - tol) & (targets <= hi + tol)
+
+
 def probe(
     request: Request,
     dataset_id: str,
@@ -958,13 +996,34 @@ def probe(
             data_on_cells=bool(dget(dataset_config, "mesh_data_on_cells", False)),
         )
         outside_mask = ~geometry.contains(query_xyz, nearest_idx, nearest_dist)
-        if outside_mask.any():
-            log.info(
-                "[KAZARR] {n}/{total} probe(s) outside the grid of dataset {dataset_id}",
-                n=int(outside_mask.sum()),
-                total=len(points),
-                dataset_id=dataset_id,
-            )
+
+    # Regular grids without spatial interpolation: `sel(method="nearest")`
+    # would silently return the value of the edge node for a probe outside
+    # the grid. Flag those probes the same way, using the lon/lat extent of
+    # the grid. (With spatial interpolation, `interp` already yields NaN
+    # outside the grid.)
+    if is_regular_grid and interp_spatial_method == "nearest" and points_data:
+        step_logger.step_start("Check probes against grid extent")
+        data_on_cells = bool(dget(dataset_config, "mesh_data_on_cells", False))
+        inside = _within_regular_grid_axis_extent(
+            longitudes.values,
+            [p["lon"] for p in points_data],
+            data_on_cells=data_on_cells,
+            period=360.0,
+        ) & _within_regular_grid_axis_extent(
+            latitudes.values,
+            [p["lat"] for p in points_data],
+            data_on_cells=data_on_cells,
+        )
+        outside_mask = ~inside
+
+    if outside_mask.any():
+        log.info(
+            "[KAZARR] {n}/{total} probe(s) outside the grid of dataset {dataset_id}",
+            n=int(outside_mask.sum()),
+            total=len(points),
+            dataset_id=dataset_id,
+        )
 
     # Query all target points at once instead of in a Python loop for massive speedups.
     if not is_regular_grid and target_pts:
