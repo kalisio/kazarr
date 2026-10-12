@@ -61,12 +61,43 @@ The `extract` endpoint accepts the following query parameters:
 | `interp_vars_method`    | Method for variable/time interpolation (e.g. `linear`, `cubic`, ...)                                                                           |    ✓     | `nearest`     |
 | `interp_vars_params`    | Parameters for variable interpolation (e.g. `method:linear`)                                                                                   |    ✓     | `None`        |
 | `interp_time`           | Whether to interpolate values on time dimension or to get the closest time step. Shortcut to `interp_vars=YOUR_TIME_DIMENSION`                 |    ✓     | `False`       |
+| `time_reduce`           | Collapse a time range (`time=start/end`) into a single field. Supported: `delta`, `sum`, `mean`, `min`, `max` (see below).                      |    ✓     | `None`        |
 | `interp_spatial_method` | The method to use for spatial interpolation. (Supported: `nearest`, `linear`, `cubic`, `idw`, `rbf`)                                           |    ✓     | `nearest`     |
 | `interp_spatial_params` | Parameters for spatial interpolation (e.g. `padding:1.0`)                                                                                      |    ✓     | `padding:1.0` |
 | `as_dims`               | If a variable has the same name as a dim, force query parameters in this list to be treated as dimensions                                      |    ✓     | `[]`          |
 
 > [!IMPORTANT]
 > You may need to specify additional non-generic variables or dimensions according to your dataset. To do so, you can add query parameters with `&my_additional_variable={VALUE}`
+
+#### Time reduction (`time_reduce`)
+
+When `time` is a range (`start/end`), `extract` returns every time step of the range by default. With `time_reduce`, the range is collapsed into a single field instead, and the output has the same shape as a single-time extraction:
+
+| Method  | Result                                                                  | Time steps loaded      |
+| ------- | ----------------------------------------------------------------------- | ---------------------- |
+| `delta` | Value at the end of the range minus value at its start. Null values are ignored: if one bound is null, the other one is returned (null only when both are) | Only the 2 bounds      |
+| `sum`   | Sum over the range (NaN only where every step is NaN)                   | Every step of the range |
+| `mean`  | Mean over the range (NaN ignored)                                       | Every step of the range |
+| `min`   | Minimum over the range (NaN ignored)                                    | Every step of the range |
+| `max`   | Maximum over the range (NaN ignored)                                    | Every step of the range |
+
+`delta` is typically used for variables accumulated since the start of a forecast run (e.g. Météo-France `tp`), to get the accumulation over a period:
+
+```
+/datasets/{dataset}/extract?variable=tp&time=2026-01-01T06:00:00/2026-01-01T12:00:00&time_reduce=delta
+```
+
+The reduction only uses the dataset time steps **inside** the range (for `delta`, the first and last ones). Time interpolation is disabled when `time_reduce` is set: `interp_time`, and the time variable in `interp_vars`, are ignored. Spatial interpolation still applies.
+
+The output contains a `time_reduce` property (at the root for `raw`, in the collection `properties` for `geojson`) describing the effective reduction:
+
+```json
+"time_reduce": { "method": "delta", "start": "2026-01-01T06:00:00.000000000", "end": "2026-01-01T12:00:00.000000000", "count": 2 }
+```
+
+Errors:
+- `TIME_REDUCE_REQUIRES_TIME_RANGE` (400): `time` is missing or is a single value.
+- `TIME_REDUCE_NOT_ENOUGH_STEPS` (400): the range resolves to less than 2 distinct time steps (`delta`) or to none (other methods).
 
 ### /datasets/{dataset}/probe (GET)
 

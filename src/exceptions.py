@@ -203,6 +203,28 @@ class TimeOutOfBounds(UserInputBasedException):
         super().__init__("TIME_OUT_OF_BOUNDS", message, {"time": time_str, "min_time": min_time, "max_time": max_time})
 
 
+class TimeReduceRequiresTimeRange(UserInputBasedException):
+    def __init__(self, method):
+        message = (
+            f"'time_reduce={method}' requires 'time' to be a range ('start/end') "
+            "on a dataset with a configured time variable."
+        )
+        super().__init__("TIME_REDUCE_REQUIRES_TIME_RANGE", message, {"time_reduce": method})
+
+
+class TimeReduceNotEnoughSteps(UserInputBasedException):
+    def __init__(self, method, times):
+        message = (
+            f"'time_reduce={method}' needs at least 2 distinct time steps, "
+            f"but the requested range only resolves to {times}."
+        )
+        super().__init__(
+            "TIME_REDUCE_NOT_ENOUGH_STEPS",
+            message,
+            {"time_reduce": method, "times": times},
+        )
+
+
 class PathMissingTimes(UserInputBasedException):
     def __init__(self):
         message = (

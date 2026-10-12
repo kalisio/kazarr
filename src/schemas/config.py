@@ -28,9 +28,13 @@ class InterpolationConfig(BaseModel):
     )
 
 
+TimeReduceMethod = Literal["delta", "sum", "mean", "min", "max"]
+
+
 class ExtractionConfig(BaseModel):
     bbox: tuple[float | None, ...] | None = None
     is_3d: bool = False
+    time_reduce: TimeReduceMethod | None = None
     as_dims: list[str] | None = Field(default_factory=list)
     resolution_limit: float | None = None
     mesh: MeshConfig = Field(default_factory=MeshConfig)

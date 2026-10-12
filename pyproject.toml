@@ -49,6 +49,7 @@ markers = [
   "CustomEccodes: Tests for custom ECCODES functionalities",
   "CombineDatasets: Tests for combining datasets",
   "Isoline: Tests for the isoline endpoint",
+  "TimeReduce: Tests for time reduction (time_reduce) in the extract endpoint",
 ]
 pythonpath = ["."]
 

@@ -42,6 +42,96 @@ LON_VARIABLE_KEY = "variables.lon"
 LEVEL_VARIABLE_KEY = "variables.level"
 
 
+def _prepare_time_reduce(
+    dataset,
+    time_var,
+    time_range: TimeRange | None,
+    method: str,
+    time_values: list | None = None,
+) -> list:
+    """Validate a time reduction request and return the time values it uses.
+
+    - 'delta': the first and last dataset time steps inside the range.
+    - other methods: every dataset time step inside the range.
+    """
+    if (
+        time_range is None
+        or not time_range.has_time_range
+        or time_var is None
+        or time_var not in dataset
+    ):
+        raise exceptions.TimeReduceRequiresTimeRange(method)
+
+    if time_values is None:
+        time_values = get_times_in_range(dataset, time_var, time_range)
+
+    if method != "delta":
+        if len(time_values) == 0:
+            raise exceptions.TimeReduceNotEnoughSteps(method, time_values)
+        return list(time_values)
+
+    bounds = [time_values[0], time_values[-1]] if time_values else []
+
+    if len(bounds) < 2 or any(b is None for b in bounds):
+        raise exceptions.TimeReduceNotEnoughSteps(method, bounds)
+    bounds_arr = np.array(bounds, dtype=dataset[time_var].dtype)
+    if bounds_arr[0] == bounds_arr[1]:
+        raise exceptions.TimeReduceNotEnoughSteps(method, [str(bounds[0])])
+    return bounds
+
+
+def _get_time_dim(da: xr.DataArray, dataset, time_var) -> str | None:
+    """Return the name of the dimension carrying `time_var` in `da`, if any.
+    The time variable may be a dimension itself, or a coordinate defined on
+    another dimension (e.g. 'valid_time' on 'step' for GRIB datasets)."""
+    if time_var in da.dims:
+        return time_var
+    if time_var in da.coords and da[time_var].ndim == 1:
+        return da[time_var].dims[0]
+    if time_var in dataset and dataset[time_var].ndim == 1:
+        dim = dataset[time_var].dims[0]
+        if dim in da.dims:
+            return dim
+    return None
+
+
+def _reduce_time(da: xr.DataArray, dataset, time_var, method: str) -> xr.DataArray:
+    """Collapse the time dimension of `da` with the given method."""
+    time_dim = _get_time_dim(da, dataset, time_var)
+    if time_dim is None:
+        # Time was already collapsed by the selection (single step).
+        if method == "delta":
+            raise exceptions.TimeReduceNotEnoughSteps(method, [])
+        return da
+
+    if method == "delta":
+        if da.sizes[time_dim] < 2:
+            raise exceptions.TimeReduceNotEnoughSteps(method, [])
+        start = da.isel({time_dim: 0})
+        end = da.isel({time_dim: -1})
+        # Null values are ignored: when only one of the two bounds is null,
+        # the other one is returned as is (NaN only when both are null).
+        reduced = xr.where(
+            start.isnull(),
+            end,
+            xr.where(end.isnull(), start, end - start),
+            keep_attrs=True,
+        )
+    elif method == "sum":
+        # min_count=1 keeps NaN where every step is NaN (instead of 0)
+        reduced = da.sum(dim=time_dim, skipna=True, min_count=1)
+    else:
+        reduced = getattr(da, method)(dim=time_dim, skipna=True)
+
+    # Drop the now scalar time coordinates so they don't leak into later steps
+    scalar_time_coords = [
+        c
+        for c in reduced.coords
+        if c not in reduced.dims and c in da.coords and time_dim in da[c].dims
+    ]
+    return reduced.drop_vars(scalar_time_coords, errors="ignore")
+
+
 def extract(
     request: Request,
     dataset_id: str,
@@ -91,8 +181,14 @@ def extract(
         missing_vars.append(f"lat ({lat_var})")
 
     time_var = dget(dataset_config, "variables.time")
+    if config.time_reduce is not None:
+        # Time interpolation is disabled with a time reduction: the reduction
+        # is computed on the dataset time steps of the range only.
+        config.interpolation.vars.time = False
+        interp_vars = [v for v in interp_vars if v != time_var]
     time_range = get_from_query(time_var, time_range, request)
     time_range = TimeRange.from_string(time_range)
+    bounded_time_range = None
     if time_range.has_time() and time_var is not None:
         if time_var not in dataset:
             missing_vars.append(f"time ({time_var})")
@@ -125,6 +221,23 @@ def extract(
     # we will return data for all timesteps.
     time_values = get_times_in_range(dataset, time_var, time_range)
     is_multi_time = len(time_values) > 1
+
+    time_reduce = config.time_reduce
+    time_reduce_times = None
+    if time_reduce is not None:
+        time_reduce_times = _prepare_time_reduce(
+            dataset,
+            time_var,
+            bounded_time_range,
+            time_reduce,
+            time_values=time_values,
+        )
+        if time_reduce == "delta":
+            # Only the two bounds are needed: select them explicitly instead of
+            # loading every time step of the range.
+            fixed_coords[time_var] = np.array(
+                time_reduce_times, dtype=dataset[time_var].dtype
+            )
 
     # Irregular grids store levels as a 3D variable (DimK, DimJ, DimI), which
     # cannot be used as an Xarray coordinate for interpolation. Detect this case
@@ -288,6 +401,11 @@ def extract(
         interp_methods=methods,
         interp_config=interp_vars_params,
     )
+    if time_reduce is not None:
+        step_logger.step_start(f"Reduce time dimension ({time_reduce})")
+        vals_da = _reduce_time(vals_da, dataset, time_var, time_reduce)
+        # The extraction is now based on a regular single-time.
+        is_multi_time = False
     if is_point_list:
         if resolution_limit is not None and n_points > resolution_limit:
             point_indices = point_indices[::step_row]
@@ -549,6 +667,13 @@ def extract(
     global_props = {"resolution_factor": {"row": step_row, "col": step_col}}
     if is_multi_time:
         global_props["times"] = time_values
+    if time_reduce is not None:
+        global_props["time_reduce"] = {
+            "method": time_reduce,
+            "start": str(time_reduce_times[0]),
+            "end": str(time_reduce_times[-1]),
+            "count": len(time_reduce_times),
+        }
 
     if format == "mesh":
         step_logger.step_start("Prepare output (mesh)")

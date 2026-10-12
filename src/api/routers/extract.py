@@ -7,6 +7,7 @@ from starlette.concurrency import run_in_threadpool
 
 import src.schemas.requests as models
 from src import exceptions
+from src.schemas.config import TimeReduceMethod
 from src.services import extraction
 from src.utils.data import parse_query_dict
 from src.utils.requests import watch_disconnection
@@ -34,6 +35,16 @@ async def extract_data(
             description="If True, performs a full 3D volume extraction. If False (default) and the dataset is 3D, a vertical coordinate must be provided.",
         ),
     ] = False,
+    time_reduce: Annotated[
+        TimeReduceMethod | None,
+        Query(
+            description=(
+                "Reduces the time dimension into a single field. Requires 'time' to be a range ('start/end'). "
+                "'delta': value at the last time step minus value at the first one (e.g. accumulated precipitation over the range, only those 2 steps are loaded); "
+                "'sum', 'mean', 'min', 'max': aggregation over every time step in the range."
+            ),
+        ),
+    ] = None,
 ):
     interp_vars_params = base.interp_vars_params
     if interp_vars_params is not None and ":" in interp_vars_params:
@@ -56,6 +67,7 @@ async def extract_data(
             bbox.level_max,
         ),
         "is_3d": is_3d,
+        "time_reduce": time_reduce,
         "as_dims": base.as_dims,
         "resolution_limit": resolution_limit,
         "mesh": {
