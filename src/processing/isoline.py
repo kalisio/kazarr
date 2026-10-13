@@ -78,11 +78,15 @@ def parse_thresholds(raw_thresholds: list[str]) -> list[float] | ThresholdRange:
 def resolve_thresholds(thresholds: list[float] | ThresholdRange, val) -> list[float]:
     """Compute the thresholds of a ThresholdRange (explicit lists are returned as is).
 
-    - Explicit min: thresholds are min, min + step, min + 2*step, ...
-    - Missing min: the first threshold is the first multiple of step greater than
-      or equal to the minimum of the data, so that thresholds are round values and
-      stay the same from one time step (or bbox) to another.
-    - max (explicit, or the maximum of the data when missing) is inclusive.
+    Thresholds are the multiples of step within [lower, upper], where
+    lower/upper are min/max when given, or the min/max of the data otherwise.
+    They are round values that stay the same from one time step (or bbox) to
+    another. Both bounds are inclusive.
+
+    Bounds explicitly given (min and/or max) are also added to the thresholds,
+    if they are not already multiples of step: e.g. 0.01:4.98:0.05 gives
+    0.01, 0.05, 0.1, ..., 4.95, 4.98. Bounds taken from the data are not added
+    (::0.05 only gives multiples of 0.05).
     """
     if not isinstance(thresholds, ThresholdRange):
         return thresholds
@@ -98,30 +102,38 @@ def resolve_thresholds(thresholds: list[float] | ThresholdRange, val) -> list[fl
             )
         data_min, data_max = float(finite.min()), float(finite.max())
 
-    threshold_max = thresholds.max if thresholds.max is not None else data_max
-    if thresholds.min is not None:
-        start = thresholds.min
-    else:
-        k = math.ceil(data_min / step)
-        # Floating point noise may push the quotient just above an integer
-        # (e.g. 0.3 / 0.1): step back if the previous threshold is still >= min.
-        if round((k - 1) * step, THRESHOLD_DECIMALS) >= data_min:
-            k -= 1
-        start = k * step
-
-    count = math.floor((threshold_max - start) / step) + 1
-    # Same floating point issue for the max (inclusive), e.g. (0.8 - 0.2) / 0.2
-    if round(start + count * step, THRESHOLD_DECIMALS) <= threshold_max:
-        count += 1
-    if count <= 0:
+    lower = thresholds.min if thresholds.min is not None else data_min
+    upper = thresholds.max if thresholds.max is not None else data_max
+    if lower > upper:
         return []
+
+    # First multiple of step >= lower. Floating point noise may push the
+    # quotient just above an integer (e.g. 0.3 / 0.1): step back if the
+    # previous multiple is still >= lower.
+    k_start = math.ceil(lower / step)
+    if round((k_start - 1) * step, THRESHOLD_DECIMALS) >= lower:
+        k_start -= 1
+    # Last multiple of step <= upper (same floating point issue, e.g. 0.8 / 0.2)
+    k_end = math.floor(upper / step)
+    if round((k_end + 1) * step, THRESHOLD_DECIMALS) <= upper:
+        k_end += 1
+
+    count = max(0, k_end - k_start + 1)
     if count > MAX_THRESHOLDS:
         raise exceptions.InvalidThresholds(
             f"{thresholds.min if thresholds.min is not None else ''}:"
             f"{thresholds.max if thresholds.max is not None else ''}:{step}",
             f"This range produces {count} thresholds, the maximum is {MAX_THRESHOLDS}. Use a larger step.",
         )
-    return [round(start + i * step, THRESHOLD_DECIMALS) for i in range(count)]
+    values = [round(k * step, THRESHOLD_DECIMALS) for k in range(k_start, k_end + 1)]
+
+    explicit_bounds = [b for b in (thresholds.min, thresholds.max) if b is not None]
+    for bound in explicit_bounds:
+        if round(bound, THRESHOLD_DECIMALS) not in values:
+            values.append(bound)
+    if explicit_bounds:
+        values.sort()
+    return values
 
 
 def generate_isolines(lon, lat, val, thresholds):

@@ -25,8 +25,10 @@ async def isoline_data(
         list[str],
         Query(
             description="Thresholds for isoline generation: either a list of values "
-            "(thresholds=0&thresholds=5&thresholds=10), or a range 'min:max:step' where min "
-            "and max are optional and taken from the data when omitted (e.g. '::5', '0::5', ':30:5')."
+            "(thresholds=0&thresholds=5&thresholds=10), or a range 'min:max:step' giving the "
+            "multiples of step between min and max (inclusive), plus min and max themselves when "
+            "given. min and max are optional and taken from the data when omitted (in that case "
+            "they are not added), e.g. '::5', '0::5', ':30:5'."
         ),
     ],
 ):

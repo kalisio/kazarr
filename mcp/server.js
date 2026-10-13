@@ -426,8 +426,9 @@ export function buildServer (options = {}) {
       variable: z.string().describe('Variable for which to compute isolines, e.g. "temperature".'),
       thresholds: z.string().describe(
         'Comma-separated list of isoline threshold values, e.g. "0,5,10,15,20", ' +
-        'or a range "min:max:step" (max inclusive) where min and/or max can be omitted to use ' +
-        'the data min/max, e.g. "::5" or "0::5". Each value produces a set of contour lines at that threshold.'
+        'or a range "min:max:step" giving the multiples of step between min and max (both inclusive), ' +
+        'plus min and max themselves when given. min and/or max can be omitted to use the data min/max ' +
+        '(not added in that case), e.g. "::5" or "0::5". Each value produces a set of contour lines at that threshold.'
       ),
       time: z.string().optional().describe('ISO 8601 time instant or interval.'),
       interp_time: z.boolean().optional().describe('Interpolate along the time axis.'),

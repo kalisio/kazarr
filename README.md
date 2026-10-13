@@ -240,10 +240,10 @@ The `isoline` endpoint accepts the following query parameters:
 | `interp_vars_params` | Parameters for variable interpolation (e.g. `method:linear`)                                                             |    ✓     | `None`    |
 | `as_dims`            | If a variable has the same name as a dim, force query parameters in this list to be treated as dimensions                |    ✓     | `[]`      |
 
-Thresholds can be defined as a range `min:max:step` (e.g. `thresholds=0:30:5`), where `min` and/or `max` can be omitted:
-- `min` omitted: the first threshold is the first multiple of `step` greater than or equal to the minimum value of the selected data (bounding box included), so that thresholds are round values (e.g. data in [273.4, 296.2] with `thresholds=::5` gives 275, 280, ..., 295).
-- `max` omitted: the maximum value of the selected data is used.
-- `max` is inclusive (`thresholds=0:10:5` gives 0, 5, 10) and `step` is required and must be positive. A range can produce up to 1000 thresholds.
+Thresholds can be defined as a range `min:max:step` (e.g. `thresholds=0:30:5`): thresholds are then the **multiples of `step`** between `min` and `max` (both inclusive), so that they are round values that stay the same from one time step (or bounding box) to another, **plus `min` and `max` themselves** when they are given and are not multiples of `step`:
+- `thresholds=0:10:5` gives 0, 5, 10, and `thresholds=0.01:4.98:0.05` gives 0.01, 0.05, 0.1, ..., 4.95, 4.98.
+- `min` and/or `max` can be omitted: the minimum and/or maximum value of the selected data (bounding box included) are then used to compute the multiples of `step`, but are not added themselves (e.g. data in [273.4, 296.2] with `thresholds=::5` gives 275, 280, ..., 295, and with `thresholds=271::10` gives 271, 280, 290).
+- `step` is required and must be positive. A range can produce up to 1000 thresholds.
 
 Output formats:
 - `raw`: `{"<threshold>": [line, ...], ...}` where each line is a list of `[lon, lat]` points.

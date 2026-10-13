@@ -8,6 +8,7 @@ fields, so that generated isolines can be checked against the exact solution.
 import os
 
 import numpy as np
+import pandas as pd
 import pytest
 import xarray as xr
 from fastapi.testclient import TestClient
@@ -23,6 +24,9 @@ REGULAR_0_360 = "isoline_regular_0_360"
 CURVILINEAR = "isoline_curvilinear"
 WITH_NAN = "isoline_nan"
 POINT_LIST = "isoline_points"
+WITH_TIME = "isoline_time"
+
+TIMES = pd.date_range("2026-10-05", periods=3, freq="D")
 
 BUMPS = [(-4.0, 45.0), (4.0, 45.0)]  # (lon, lat) centers of two gaussian bumps
 
@@ -35,8 +39,11 @@ def ring(lon, lat, lon0=0.0, lat0=0.0):
     return np.sqrt((lon - lon0) ** 2 + (lat - lat0) ** 2)
 
 
-def save(ds, name, lon="lon", lat="lat"):
-    ds.attrs["kazarr"] = {"variables": {"lon": lon, "lat": lat}}
+def save(ds, name, lon="lon", lat="lat", time=None):
+    variables = {"lon": lon, "lat": lat}
+    if time is not None:
+        variables["time"] = time
+    ds.attrs["kazarr"] = {"variables": variables}
     ds.to_zarr(os.path.join(TMP_FOLDER, f"{name}.zarr"), mode="w", zarr_format=2, consolidated=True)
 
 
@@ -58,6 +65,14 @@ def datasets():
         coords={"lat": lat, "lon": lon},
     ).chunk({"lat": 50, "lon": 50})
     save(ds, REGULAR)
+
+    # Same grid with a time dimension: value = (i + 1) * two_bumps at the i-th time
+    field = two_bumps(*np.meshgrid(lon, lat))
+    ds = xr.Dataset(
+        {"value": (("time", "lat", "lon"), np.stack([field * (i + 1) for i in range(len(TIMES))]))},
+        coords={"time": TIMES, "lat": lat, "lon": lon},
+    ).chunk({"time": 1, "lat": 50, "lon": 50})
+    save(ds, WITH_TIME, time="time")
 
     # Global regular grid in [0, 360[ with a disc centered on lon=0 (dataset seam)
     lon = np.arange(0.0, 360.0, 1.0)
@@ -343,7 +358,8 @@ class TestThresholdsParsing:
     def test_resolve_explicit_bounds(self):
         # max is inclusive, no floating point artifacts
         assert resolve_thresholds(ThresholdRange(0.2, 0.8, 0.2), None) == [0.2, 0.4, 0.6, 0.8]
-        assert resolve_thresholds(ThresholdRange(0, 10, 3), None) == [0, 3, 6, 9]
+        # max (10) is not a multiple of step: added as is
+        assert resolve_thresholds(ThresholdRange(0, 10, 3), None) == [0, 3, 6, 9, 10]
 
     def test_resolve_bounds_from_data(self):
         val = np.array([[273.4, 281.0], [np.nan, 296.2]])
@@ -351,9 +367,36 @@ class TestThresholdsParsing:
         assert resolve_thresholds(ThresholdRange(None, None, 5), val) == [275, 280, 285, 290, 295]
         assert resolve_thresholds(ThresholdRange(None, 285, 5), val) == [275, 280, 285]
         # Explicit min is used as is
-        assert resolve_thresholds(ThresholdRange(271, None, 10), val) == [271, 281, 291]
+        # Explicit min: added, followed by the multiples of step (271 -> 271, 280, ...)
+        assert resolve_thresholds(ThresholdRange(271, None, 10), val) == [271, 280, 290]
+        # Bounds taken from the data (273.4 / 296.2) are not added
+        assert resolve_thresholds(ThresholdRange(None, 293, 5), val) == [
+            275, 280, 285, 290, 293
+        ]
         # Data minimum exactly on a multiple of step is included
         assert resolve_thresholds(ThresholdRange(None, None, 0.1), np.array([0.3, 0.5])) == [0.3, 0.4, 0.5]
+
+    def test_resolve_explicit_bounds_added_to_multiples(self):
+        """Thresholds are the multiples of step between min and max, plus the
+        explicit min/max themselves (both inclusive)."""
+        thresholds = resolve_thresholds(ThresholdRange(0.01, 5, 0.05), None)
+        assert len(thresholds) == 101
+        assert thresholds[:3] == [0.01, 0.05, 0.1]
+        assert thresholds[-2:] == [4.95, 5.0]
+        thresholds = resolve_thresholds(ThresholdRange(0.01, 4.98, 0.05), None)
+        assert thresholds[-3:] == [4.9, 4.95, 4.98]
+        assert resolve_thresholds(ThresholdRange(-0.73, 0.21, 0.1), None) == [
+            -0.73, -0.7, -0.6, -0.5, -0.4, -0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.21
+        ]
+        # Bounds already multiples of step are not duplicated
+        assert resolve_thresholds(ThresholdRange(0, 10, 5), None) == [0, 5, 10]
+        # Only the bounds when there is no multiple of step in the range
+        assert resolve_thresholds(ThresholdRange(0.01, 0.04, 0.05), None) == [0.01, 0.04]
+
+    def test_resolve_bounds_from_data_not_overlapping(self):
+        """min greater than the data max: no threshold."""
+        val = np.array([1.0, 5.0])
+        assert resolve_thresholds(ThresholdRange(10, None, 1), val) == []
 
     def test_resolve_empty_range(self):
         val = np.array([10.0, 20.0])
@@ -393,9 +436,19 @@ class TestIsolineThresholdsRange:
         assert list(self.get(client, REGULAR, "thresholds=:0.5:0.25").json()) == ["0.25", "0.5"]
         assert list(self.get(client, REGULAR, "thresholds=0.6::0.2").json()) == ["0.6", "0.8", "1.0"]
 
+    def test_range_explicit_bounds_added(self, client: TestClient):
+        response = self.get(client, REGULAR, "thresholds=0.01:0.28:0.05")
+        assert response.status_code == 200
+        data = response.json()
+        assert list(data.keys()) == ["0.01", "0.05", "0.1", "0.15", "0.2", "0.25", "0.28"]
+        # The bounds are thresholds like the others: isolines are generated for them
+        assert len(data["0.01"]) > 0
+        assert len(data["0.28"]) > 0
+
     def test_range_uses_bbox_data(self, client: TestClient):
         """Bounds are taken from the data inside the bbox: on the NaN dataset
-        (distance to the center), values in [2, 3]x[-1, 1] are in [2, ~3.2]."""
+        (distance to the center), values in [2, 3]x[-1, 1] are in [2, ~3.2].
+        Bounds taken from the data are not added to the thresholds."""
         response = self.get(
             client, WITH_NAN, "thresholds=::1&lon_min=-3&lon_max=-2&lat_min=-1&lat_max=1"
         )
@@ -412,3 +465,84 @@ class TestIsolineThresholdsRange:
         response = self.get(client, REGULAR, "thresholds=0.5&thresholds=abc")
         assert response.status_code == 400
         assert "INVALID_THRESHOLDS" in response.text
+
+
+@pytest.mark.Isoline
+class TestIsolineTime:
+    """Time selection on a dataset where value = (i + 1) * two_bumps at the
+    i-th time step (2026-10-05, 2026-10-06, 2026-10-07)."""
+
+    def get(self, client, query):
+        return client.get(f"/datasets/{WITH_TIME}/isoline?variable=value&{query}")
+
+    def assert_isoline_of(self, response, factor, threshold=0.5):
+        assert response.status_code == 200, response.text
+        coords = all_coords(response.json()[str(threshold)])
+        assert len(coords) > 0
+        np.testing.assert_allclose(
+            factor * two_bumps(coords[:, 0], coords[:, 1]), threshold, atol=0.02
+        )
+
+    @pytest.mark.parametrize(
+        "time, factor",
+        [
+            ("2026-10-05T00:00:00", 1),
+            ("2026-10-06T00:00:00", 2),  # time reported in the bug
+            ("2026-10-07", 3),
+            ("2026-10-06T00:00:00Z", 2),  # timezone-aware
+        ],
+    )
+    def test_time_selection(self, client: TestClient, time, factor):
+        self.assert_isoline_of(self.get(client, f"thresholds=0.5&time={time}"), factor)
+
+    def test_time_nearest(self, client: TestClient):
+        """Without interpolation, the nearest time step is used."""
+        self.assert_isoline_of(
+            self.get(client, "thresholds=0.5&time=2026-10-06T10:00:00"), 2
+        )
+
+    def test_time_interpolation(self, client: TestClient):
+        """Linear interpolation halfway between the 1st (x1) and 2nd (x2) steps
+        gives x1.5 (the method used to be ignored, nearest was always used)."""
+        self.assert_isoline_of(
+            self.get(
+                client,
+                "thresholds=0.5&time=2026-10-05T12:00:00"
+                "&interp_time=true&interp_vars_method=linear",
+            ),
+            1.5,
+        )
+
+    def test_time_with_thresholds_range(self, client: TestClient):
+        """Thresholds computed from the data of the selected time step (max 3)."""
+        response = self.get(client, "thresholds=::0.5&time=2026-10-07")
+        assert response.status_code == 200
+        assert list(response.json().keys()) == ["0.5", "1.0", "1.5", "2.0", "2.5", "3.0"]
+
+    def test_time_geojson(self, client: TestClient):
+        response = self.get(client, "thresholds=0.5&time=2026-10-06&format=geojson")
+        assert response.status_code == 200
+        feature = response.json()["features"][0]
+        assert feature["geometry"]["type"] == "MultiLineString"
+        assert feature["properties"]["threshold"] == 0.5
+
+    def test_missing_time(self, client: TestClient):
+        response = self.get(client, "thresholds=0.5")
+        assert response.status_code == 400
+        assert "MISSING_DIMENSIONS_OR_COORDINATES" in response.text
+
+    @pytest.mark.parametrize("time", ["2025-01-01T00:00:00", "2027-01-01"])
+    def test_time_out_of_bounds(self, client: TestClient, time):
+        response = self.get(client, f"thresholds=0.5&time={time}")
+        assert response.status_code == 400
+        assert "TIME_OUT_OF_BOUNDS" in response.text
+
+    def test_time_range_is_rejected(self, client: TestClient):
+        response = self.get(client, "thresholds=0.5&time=2026-10-05/2026-10-06")
+        assert response.status_code == 400
+        assert "INVALID_TIME_RANGE" in response.text
+
+    def test_invalid_time(self, client: TestClient):
+        response = self.get(client, "thresholds=0.5&time=not-a-date")
+        assert response.status_code == 400
+        assert "INVALID_DATETIME_FORMAT" in response.text
