@@ -84,6 +84,7 @@ async def extract_data(
                 "params": interp_vars_params,
             },
             "spatial": {
+                "enabled": spatial_interp.interp_spatial,
                 "method": spatial_interp.interp_spatial_method,
                 "params": interp_spatial_params,
             },

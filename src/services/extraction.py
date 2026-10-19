@@ -40,6 +40,11 @@ FIXED_VARIABLES_KEY = "variables.fixed"
 LAT_VARIABLE_KEY = "variables.lat"
 LON_VARIABLE_KEY = "variables.lon"
 LEVEL_VARIABLE_KEY = "variables.level"
+# Strict mode (`interp_spatial=false`) on point lists: default tolerance, in
+# degrees, between a probe and a point of the list for them to match (~1 m).
+# Large enough for coordinates stored as float32 (resolution ~1.5e-5 deg near
+# 180 deg of longitude), small enough to never match a neighbouring point.
+DEFAULT_STRICT_MATCH_TOLERANCE = 1e-5
 
 
 def _prepare_time_reduce(
@@ -811,6 +816,95 @@ def _within_regular_grid_axis_extent(
     return (targets >= lo - tol) & (targets <= hi + tol)
 
 
+def _grid_bounds(lon_values: np.ndarray, lat_values: np.ndarray) -> dict | None:
+    """Bounding box of the grid nodes, reported with LOCATION_OUT_OF_BOUNDS."""
+    lons = np.asarray(lon_values, dtype=float)
+    lats = np.asarray(lat_values, dtype=float)
+    if not np.isfinite(lons).any() or not np.isfinite(lats).any():
+        return None
+    return {
+        "lon_min": float(np.nanmin(lons)),
+        "lon_max": float(np.nanmax(lons)),
+        "lat_min": float(np.nanmin(lats)),
+        "lat_max": float(np.nanmax(lats)),
+    }
+
+
+def _get_strict_match_tolerance(interp_spatial_params: dict) -> float:
+    tolerance = interp_spatial_params.get("tolerance", DEFAULT_STRICT_MATCH_TOLERANCE)
+    try:
+        tolerance = float(tolerance)
+    except (TypeError, ValueError):
+        tolerance = None
+    if tolerance is None or not np.isfinite(tolerance) or tolerance < 0:
+        raise exceptions.BadSelection(
+            "interp_spatial_params.tolerance must be a non-negative number (degrees)."
+        )
+    return tolerance
+
+
+def _matches_nearest_point(
+    lon_values: np.ndarray,
+    lat_values: np.ndarray,
+    nearest_idx: np.ndarray,
+    query_lons: list[float],
+    query_lats: list[float],
+    tolerance: float,
+) -> np.ndarray:
+    """Strict mode on point lists: tell, for each probe, whether its nearest
+    point of the list (the one its value is taken from, `nearest_idx` being
+    flat indices from the cKDTree) lies within `tolerance` degrees of it on
+    both the longitude and the latitude axes. Longitudes are compared modulo
+    360, so the [0, 360] and [-180, 180] conventions both match.
+    """
+    nearest_lons = np.ravel(lon_values)[nearest_idx].astype(float)
+    nearest_lats = np.ravel(lat_values)[nearest_idx].astype(float)
+    dlon = np.abs((nearest_lons - np.asarray(query_lons, dtype=float) + 180.0) % 360.0 - 180.0)
+    dlat = np.abs(nearest_lats - np.asarray(query_lats, dtype=float))
+    return (dlon <= tolerance) & (dlat <= tolerance)
+
+
+def _raise_if_single_probe_out_of_bounds(
+    point,
+    location_out_of_bounds: bool,
+    time_info: dict | None,
+    lon_values: np.ndarray,
+    lat_values: np.ndarray,
+    nearest_point: dict | None = None,
+) -> None:
+    """Raise the out-of-bounds error of a single probe, if it has one.
+
+    `time_info`: result of `is_time_out_of_bounds_data` when every requested
+    time is out of bounds, None otherwise.
+    `nearest_point`: optional {"lon", "lat"} hint reported with the location
+    errors (e.g. the closest point of a point list in strict mode).
+    """
+    if location_out_of_bounds:
+        grid_bounds = _grid_bounds(lon_values, lat_values)
+        if time_info is not None:
+            raise exceptions.TimeAndLocationOutOfBounds(
+                lon=point.lon,
+                lat=point.lat,
+                time_str=time_info["time"],
+                min_time=time_info["min_time"],
+                max_time=time_info["max_time"],
+                grid_bounds=grid_bounds,
+                nearest_point=nearest_point,
+            )
+        raise exceptions.LocationOutOfBounds(
+            lon=point.lon,
+            lat=point.lat,
+            grid_bounds=grid_bounds,
+            nearest_point=nearest_point,
+        )
+    if time_info is not None:
+        raise exceptions.TimeOutOfBounds(
+            time_str=time_info["time"],
+            min_time=time_info["min_time"],
+            max_time=time_info["max_time"],
+        )
+
+
 def probe(
     request: Request,
     dataset_id: str,
@@ -934,14 +1028,21 @@ def probe(
     if len(missing_vars) > 0:
         raise exceptions.BadConfigurationVariable(missing_vars)
 
+    # Set when every requested time of a single probe is out of bounds: the
+    # error is then raised once the location has been checked too, so that a
+    # probe both outside the grid and out of the time extent gets
+    # TIME_AND_LOCATION_OUT_OF_BOUNDS instead of TIME_OUT_OF_BOUNDS.
+    deferred_time_oob = None
     if time_range.has_time() and time_var is not None:
         time_info = is_time_out_of_bounds_data(dataset, time_var, time_range)
         if time_info["out_of_bounds"]:
-            raise exceptions.TimeOutOfBounds(
-                time_str=time_info["time"],
-                min_time=time_info["min_time"],
-                max_time=time_info["max_time"],
-            )
+            if not is_single_probe:
+                raise exceptions.TimeOutOfBounds(
+                    time_str=time_info["time"],
+                    min_time=time_info["min_time"],
+                    max_time=time_info["max_time"],
+                )
+            deferred_time_oob = time_info
         # Bounded time ranges are also used for paths
         time_range = get_bounded_time(dataset, time_var, time_range)
         if config.interpolation.vars.time and time_var not in interp_vars:
@@ -954,6 +1055,9 @@ def probe(
 
     longitudes = dataset[lon_var]
     latitudes = dataset[lat_var]
+    # Read the coordinate values once
+    lon_values = longitudes.values
+    lat_values = latitudes.values
     is_regular_grid = (
         longitudes.ndim == 1
         and latitudes.ndim == 1
@@ -1012,9 +1116,7 @@ def probe(
         # the equator, compress near the poles, and break across the antimeridian.
         # In 3D, Euclidean chord distance is monotonic with true great-circle distance.
         # Applied systematically to all irregular grids to avoid these distortions.
-        sphere_points = lonlat_to_sphere_points(
-            longitudes.values.ravel(), latitudes.values.ravel()
-        )
+        sphere_points = lonlat_to_sphere_points(lon_values.ravel(), lat_values.ravel())
         if with_level and not has_regular_level:
             # Fold `level_scale` in here, converting the raw level axis into
             # degree-equivalents and then into radians -- the same "small
@@ -1044,7 +1146,7 @@ def probe(
     target_pts = []
 
     # Calculate dataset longitude convention once to avoid calling .min() in a loop, as bbox.normalize_dataset_longitudes would do
-    lon_min_val = float(dataset[lon_var].min()) if lon_var and lon_var in dataset else 0
+    lon_min_val = float(np.nanmin(lon_values)) if lon_values.size else 0
     is_0_360 = lon_min_val >= 0
 
     for i, point in enumerate(points):
@@ -1103,44 +1205,92 @@ def probe(
         and longitudes.ndim >= 2
         and longitudes.dims == latitudes.dims
     )
-    if is_structured_irregular_grid and target_pts:
-        step_logger.step_start("Check probes against grid extent")
-        query_xyz = np.array(target_pts)[:, :3]
+    is_point_list = (
+        not is_regular_grid
+        and longitudes.ndim == 1
+        and longitudes.dims == latitudes.dims
+    )
+    # Strict mode (`interp_spatial=false`, nearest) on point lists, see below
+    is_strict_point_list = config.interpolation.spatial.strict and is_point_list
+
+    # Nearest horizontal grid node of every probe, queried once and shared by
+    # the grid extent check, the strict mode and the nearest selection below.
+    # When the tree also holds an (irregular) level axis, the horizontal
+    # nearest node needs a separate, horizontal-only tree.
+    nearest_dist, nearest_idx = None, None
+    if (is_structured_irregular_grid or is_strict_point_list) and target_pts:
         if grid_points.shape[1] == 3:
             horizontal_tree = tree
         else:
             horizontal_tree = get_cached_ckdtree(
                 sphere_points, dataset_id=dataset_id, coord_vars=(lon_var, lat_var)
             )
-        nearest_dist, nearest_idx = horizontal_tree.query(query_xyz, k=1)
+        nearest_dist, nearest_idx = horizontal_tree.query(
+            np.array(target_pts)[:, :3], k=1
+        )
+        nearest_dist = np.atleast_1d(nearest_dist)
+        nearest_idx = np.atleast_1d(nearest_idx)
+
+    if is_structured_irregular_grid and target_pts:
+        step_logger.step_start("Check probes against grid extent")
         geometry = get_cached_structured_grid_geometry(
-            longitudes.values,
-            latitudes.values,
+            lon_values,
+            lat_values,
             dataset_id=dataset_id,
             coord_vars=(lon_var, lat_var),
             data_on_cells=bool(dget(dataset_config, "mesh_data_on_cells", False)),
         )
-        outside_mask = ~geometry.contains(query_xyz, nearest_idx, nearest_dist)
+        outside_mask = ~geometry.contains(
+            np.array(target_pts)[:, :3], nearest_idx, nearest_dist
+        )
 
-    # Regular grids without spatial interpolation: `sel(method="nearest")`
+    # Regular grids: without spatial interpolation, `sel(method="nearest")`
     # would silently return the value of the edge node for a probe outside
     # the grid. Flag those probes the same way, using the lon/lat extent of
-    # the grid. (With spatial interpolation, `interp` already yields NaN
-    # outside the grid.)
-    if is_regular_grid and interp_spatial_method == "nearest" and points_data:
+    # the grid. With spatial interpolation, `interp` already yields NaN
+    # outside the grid, but flagging them too lets the output report why
+    # (LOCATION_OUT_OF_BOUNDS) instead of an unexplained null. Interpolation
+    # only works between nodes, so the half-cell margin of data on cells
+    # only applies to nearest.
+    if is_regular_grid and points_data:
         step_logger.step_start("Check probes against grid extent")
-        data_on_cells = bool(dget(dataset_config, "mesh_data_on_cells", False))
+        data_on_cells = interp_spatial_method == "nearest" and bool(
+            dget(dataset_config, "mesh_data_on_cells", False)
+        )
         inside = _within_regular_grid_axis_extent(
-            longitudes.values,
+            lon_values,
             [p["lon"] for p in points_data],
             data_on_cells=data_on_cells,
             period=360.0,
         ) & _within_regular_grid_axis_extent(
-            latitudes.values,
+            lat_values,
             [p["lat"] for p in points_data],
             data_on_cells=data_on_cells,
         )
         outside_mask = ~inside
+
+    # Strict mode (`interp_spatial=false`, nearest) on point lists: the point
+    # of the list a probe takes its value from (its nearest point) must match
+    # the probe (within `tolerance` degrees per axis), instead of being used
+    # however far it is. Unmatched probes are handled like probes outside a grid.
+    strict_nearest_point = None
+    if is_strict_point_list and target_pts:
+        step_logger.step_start("Strict mode: match probes with the point list")
+        matched = _matches_nearest_point(
+            lon_values,
+            lat_values,
+            nearest_idx,
+            [p["lon"] for p in points_data],
+            [p["lat"] for p in points_data],
+            _get_strict_match_tolerance(interp_spatial_params),
+        )
+        outside_mask = outside_mask | ~matched
+        if is_single_probe and not matched[0]:
+            # Hint for the client: the closest point of the list
+            strict_nearest_point = {
+                "lon": float(np.ravel(lon_values)[nearest_idx[0]]),
+                "lat": float(np.ravel(lat_values)[nearest_idx[0]]),
+            }
 
     if outside_mask.any():
         log.info(
@@ -1148,6 +1298,24 @@ def probe(
             n=int(outside_mask.sum()),
             total=len(points),
             dataset_id=dataset_id,
+        )
+
+    if is_single_probe:
+        # A single probe that can only return null values fails with the
+        # reason why, rather than a generic NO_DATA_IN_SELECTION. Its location
+        # is shared by all its samples (one per requested time), so:
+        # - outside the grid, every time out of bounds -> TIME_AND_LOCATION_OUT_OF_BOUNDS
+        # - outside the grid, some time within bounds  -> LOCATION_OUT_OF_BOUNDS
+        # - inside the grid, every time out of bounds  -> TIME_OUT_OF_BOUNDS
+        # Inside the grid with some time within bounds, the request goes on:
+        # out-of-bounds times get null values and an "errors" entry.
+        _raise_if_single_probe_out_of_bounds(
+            points[0],
+            location_out_of_bounds=bool(outside_mask.any()),
+            time_info=deferred_time_oob,
+            lon_values=lon_values,
+            lat_values=lat_values,
+            nearest_point=strict_nearest_point,
         )
 
     # Query all target points at once instead of in a Python loop for massive speedups.
@@ -1291,9 +1459,13 @@ def probe(
                 }
                 points_data[i]["weights_da"] = xr.DataArray(weights, dims=["neighbor"])
         else:
-            # Nearest neighbor on unstructured grid
-            _, flat_indices = tree.query(target_pts_arr, k=1)
-            flat_indices = np.atleast_1d(flat_indices)
+            # Nearest neighbor on unstructured grid: reuse the horizontal
+            # nearest query made above when it ran on this same tree.
+            if nearest_idx is not None and grid_points.shape[1] == 3:
+                flat_indices = nearest_idx
+            else:
+                _, flat_indices = tree.query(target_pts_arr, k=1)
+                flat_indices = np.atleast_1d(flat_indices)
             for i, flat_index in enumerate(flat_indices):
                 indices = np.unravel_index(flat_index, longitudes.shape)
                 for dim_name, indice in zip(longitudes.dims, indices):
@@ -1388,8 +1560,18 @@ def probe(
         else:
             req_times.append(None)
 
+    # The time is interpolated only if it is one of the interpolated variables
+    # (`interp_time` or `interp_vars=<time>`) with a method other than nearest.
+    # Otherwise the requested times are snapped to the closest dataset time
+    # steps, which must then be reported instead of the requested ones (e.g.
+    # when interpolating another variable but not the time).
+    is_time_interpolated = (
+        time_var is not None
+        and time_var in interp_vars
+        and interp_vars_method != "nearest"
+    )
     if time_var is not None:
-        if time_range.has_time() and interp_vars_method != "nearest":
+        if time_range.has_time() and is_time_interpolated:
             times = []
             for t in req_times:
                 try:

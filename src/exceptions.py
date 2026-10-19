@@ -200,7 +200,74 @@ class TimeOutOfBounds(UserInputBasedException):
             f"Time '{time_str}' is out of bounds. "
             f"Expected between '{min_time}' and '{max_time}'."
         )
-        super().__init__("TIME_OUT_OF_BOUNDS", message, {"time": time_str, "min_time": min_time, "max_time": max_time})
+        super().__init__(TIME_OUT_OF_BOUNDS, message, {"time": time_str, "min_time": min_time, "max_time": max_time})
+
+
+def _location_payload(lon, lat, grid_bounds=None, nearest_point=None):
+    payload = {"lon": lon, "lat": lat}
+    if grid_bounds is not None:
+        payload["grid_bounds"] = grid_bounds
+    if nearest_point is not None:
+        payload["nearest_point"] = nearest_point
+    return payload
+
+
+def _nearest_point_message(nearest_point):
+    if nearest_point is None:
+        return ""
+    return (
+        f" Nearest point: (lon={nearest_point['lon']}, lat={nearest_point['lat']})."
+    )
+
+
+def _grid_bounds_message(grid_bounds):
+    if grid_bounds is None:
+        return ""
+    return (
+        f" Grid extent: lon [{grid_bounds['lon_min']}, {grid_bounds['lon_max']}],"
+        f" lat [{grid_bounds['lat_min']}, {grid_bounds['lat_max']}]."
+    )
+
+
+class LocationOutOfBounds(UserInputBasedException):
+    def __init__(self, lon, lat, grid_bounds=None, nearest_point=None):
+        message = (
+            f"Location (lon={lon}, lat={lat}) is outside the dataset grid."
+            + _grid_bounds_message(grid_bounds)
+            + _nearest_point_message(nearest_point)
+        )
+        super().__init__(
+            LOCATION_OUT_OF_BOUNDS,
+            message,
+            _location_payload(lon, lat, grid_bounds, nearest_point),
+        )
+
+
+class TimeAndLocationOutOfBounds(UserInputBasedException):
+    def __init__(
+        self,
+        lon,
+        lat,
+        time_str,
+        min_time,
+        max_time,
+        grid_bounds=None,
+        nearest_point=None,
+    ):
+        message = (
+            f"Location (lon={lon}, lat={lat}) is outside the dataset grid"
+            f" and time '{time_str}' is out of bounds"
+            f" (expected between '{min_time}' and '{max_time}')."
+            + _grid_bounds_message(grid_bounds)
+            + _nearest_point_message(nearest_point)
+        )
+        payload = {
+            **_location_payload(lon, lat, grid_bounds, nearest_point),
+            "time": time_str,
+            "min_time": min_time,
+            "max_time": max_time,
+        }
+        super().__init__(TIME_AND_LOCATION_OUT_OF_BOUNDS, message, payload)
 
 
 class TimeReduceRequiresTimeRange(UserInputBasedException):

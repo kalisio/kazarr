@@ -39,9 +39,13 @@ class BaseParams:
         "krogh",
         "akima",
         "makima",
-    ] = Query(
-        "nearest",
-        description="The method to use for interpolation of variables.",
+    ] | None = Query(
+        None,
+        description=(
+            "The method to use for interpolation of variables (including the time"
+            " with `interp_time`). Defaults to 'linear' when `interp_time` or"
+            " `interp_vars` is set, and to 'nearest' otherwise."
+        ),
     )
     interp_vars_params: str | None = Query(
         None,
@@ -113,7 +117,7 @@ class TimeParams:
     )
     interp_time: bool = Query(
         False,
-        description="Whether to interpolate values on time dimension or to get the closest time step. Shortcut to interp_vars=TIME_VARIABLE_NAME.",
+        description="Whether to interpolate values on time dimension or to get the closest time step. Shortcut to interp_vars=TIME_VARIABLE_NAME. Interpolates linearly unless `interp_vars_method` is given.",
     )
 
 @dataclass
@@ -138,9 +142,24 @@ class MeshParams:
 
 @dataclass
 class SpatialInterpolationParams:
-    interp_spatial_method: Literal["nearest", "linear", "cubic", "idw", "rbf"] = Query(
-        "nearest",
-        description="The method to use for spatial interpolation.",
+    interp_spatial: bool | None = Query(
+        None,
+        description=(
+            "Whether to interpolate spatially. 'true': interpolate (linear unless"
+            " `interp_spatial_method` is given). 'false': strict mode, no"
+            " interpolation; on point list datasets, a probe must match one of the"
+            " points (within the `tolerance` of `interp_spatial_params`), otherwise"
+            " it is reported as LOCATION_OUT_OF_BOUNDS. Not set: nearest."
+            " An explicit `interp_spatial_method` takes precedence."
+        ),
+    )
+    interp_spatial_method: Literal["nearest", "linear", "cubic", "idw", "rbf"] | None = Query(
+        None,
+        description=(
+            "The method to use for spatial interpolation. Takes precedence over"
+            " `interp_spatial`. Defaults to 'linear' with `interp_spatial=true`,"
+            " and to 'nearest' otherwise."
+        ),
     )
     interp_spatial_params: str = Query(
         "padding:1.0",

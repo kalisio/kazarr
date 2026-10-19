@@ -58,11 +58,12 @@ The `extract` endpoint accepts the following query parameters:
 | `level_min`             | Minimum vertical coordinate (altitude/depth) of the bounding box                                                                               |    ✓     | `None`        |
 | `level_max`             | Maximum vertical coordinate (altitude/depth) of the bounding box                                                                               |    ✓     | `None`        |
 | `interp_vars`           | Variables to interpolate during extraction                                                                                                     |    ✓     | `[]`          |
-| `interp_vars_method`    | Method for variable/time interpolation (e.g. `linear`, `cubic`, ...)                                                                           |    ✓     | `nearest`     |
+| `interp_vars_method` | Method for variable/time interpolation (e.g. `linear`, `cubic`, ...). Overrides the default method (see [Interpolation defaults](#interpolation-defaults-and-precedence)) | ✓ | `linear` with `interp_time`/`interp_vars`, else `nearest` |
 | `interp_vars_params`    | Parameters for variable interpolation (e.g. `method:linear`)                                                                                   |    ✓     | `None`        |
-| `interp_time`           | Whether to interpolate values on time dimension or to get the closest time step. Shortcut to `interp_vars=YOUR_TIME_DIMENSION`                 |    ✓     | `False`       |
+| `interp_time` | Whether to interpolate values on time dimension (linearly, unless `interp_vars_method` is given) or to get the closest time step. Shortcut to `interp_vars=YOUR_TIME_VARIABLE` | ✓ | `False` |
 | `time_reduce`           | Collapse a time range (`time=start/end`) into a single field. Supported: `delta`, `sum`, `mean`, `min`, `max` (see below).                      |    ✓     | `None`        |
-| `interp_spatial_method` | The method to use for spatial interpolation. (Supported: `nearest`, `linear`, `cubic`, `idw`, `rbf`)                                           |    ✓     | `nearest`     |
+| `interp_spatial` | Whether to interpolate spatially: `true` = interpolate (`linear` unless `interp_spatial_method` is given), `false` = strict mode (no interpolation; for probes on point lists, the probe must match one of the points, see [Strict mode](#strict-mode-point-lists)), not set = `nearest` | ✓ | `None` |
+| `interp_spatial_method` | The method to use for spatial interpolation (Supported: `nearest`, `linear`, `cubic`, `idw`, `rbf`). Takes precedence over `interp_spatial` | ✓ | `linear` with `interp_spatial=true`, else `nearest` |
 | `interp_spatial_params` | Parameters for spatial interpolation (e.g. `padding:1.0`)                                                                                      |    ✓     | `padding:1.0` |
 | `as_dims`               | If a variable has the same name as a dim, force query parameters in this list to be treated as dimensions                                      |    ✓     | `[]`          |
 
@@ -112,11 +113,12 @@ The `probe` endpoint accepts the following query parameters:
 | `lat`                   | The latitude coordinate to probe.                                                                         |    ✗     |               |
 | `level`                 | The level coordinate to probe (if 3D data).                                                               |    ✓     | `None`        |
 | `time`                  | The time value/slice to probe.                                                                            |    ✓     | `None`        |
-| `interp_time`           | Whether to interpolate values on time dimension                                                           |    ✓     | `False`       |
-| `interp_spatial_method` | The method to use for spatial interpolation. (Supported: `nearest`, `linear`, `cubic`, `idw`, `rbf`)      |    ✓     | `nearest`     |
+| `interp_time` | Whether to interpolate values on time dimension (linearly, unless `interp_vars_method` is given) or to get the closest time step. Shortcut to `interp_vars=YOUR_TIME_VARIABLE` | ✓ | `False` |
+| `interp_spatial` | Whether to interpolate spatially: `true` = interpolate (`linear` unless `interp_spatial_method` is given), `false` = strict mode (no interpolation; for probes on point lists, the probe must match one of the points, see [Strict mode](#strict-mode-point-lists)), not set = `nearest` | ✓ | `None` |
+| `interp_spatial_method` | The method to use for spatial interpolation (Supported: `nearest`, `linear`, `cubic`, `idw`, `rbf`). Takes precedence over `interp_spatial` | ✓ | `linear` with `interp_spatial=true`, else `nearest` |
 | `interp_spatial_params` | Parameters for spatial interpolation (e.g. `padding:1.0`)                                                 |    ✓     | `padding:1.0` |
 | `interp_vars`           | Variables to interpolate during probe                                                                     |    ✓     | `[]`          |
-| `interp_vars_method`    | Method for variable/time interpolation                                                                    |    ✓     | `nearest`     |
+| `interp_vars_method` | Method for variable/time interpolation. Overrides the default method (see [Interpolation defaults](#interpolation-defaults-and-precedence)) | ✓ | `linear` with `interp_time`/`interp_vars`, else `nearest` |
 | `interp_vars_params`    | Parameters for variable interpolation (e.g. `method:linear`)                                              |    ✓     | `None`        |
 | `format`                | Format of the extracted data (Supported: `raw`, `geojson`).                                               |    ✓     | `raw`         |
 | `as_dims`               | If a variable has the same name as a dim, force query parameters in this list to be treated as dimensions |    ✓     | `[]`          |
@@ -137,11 +139,12 @@ The `probes` endpoint accepts the following query parameters:
 | ----------------------- | --------------------------------------------------------------------------------------------------------- | :------: | ------------- |
 | `variables`             | The list of variables to probe.                                                                           |    ✗     |               |
 | `time`                  | The time value/slice to probe.                                                                            |    ✓     | `None`        |
-| `interp_time`           | Whether to interpolate values on time dimension                                                           |    ✓     | `False`       |
-| `interp_spatial_method` | The method to use for spatial interpolation. (Supported: `nearest`, `linear`, `cubic`, `idw`, `rbf`)      |    ✓     | `nearest`     |
+| `interp_time` | Whether to interpolate values on time dimension (linearly, unless `interp_vars_method` is given) or to get the closest time step. Shortcut to `interp_vars=YOUR_TIME_VARIABLE` | ✓ | `False` |
+| `interp_spatial` | Whether to interpolate spatially: `true` = interpolate (`linear` unless `interp_spatial_method` is given), `false` = strict mode (no interpolation; for probes on point lists, the probe must match one of the points, see [Strict mode](#strict-mode-point-lists)), not set = `nearest` | ✓ | `None` |
+| `interp_spatial_method` | The method to use for spatial interpolation (Supported: `nearest`, `linear`, `cubic`, `idw`, `rbf`). Takes precedence over `interp_spatial` | ✓ | `linear` with `interp_spatial=true`, else `nearest` |
 | `interp_spatial_params` | Parameters for spatial interpolation (e.g. `padding:1.0`)                                                 |    ✓     | `padding:1.0` |
 | `interp_vars`           | Variables to interpolate during probe                                                                     |    ✓     | `[]`          |
-| `interp_vars_method`    | Method for variable/time interpolation                                                                    |    ✓     | `nearest`     |
+| `interp_vars_method` | Method for variable/time interpolation. Overrides the default method (see [Interpolation defaults](#interpolation-defaults-and-precedence)) | ✓ | `linear` with `interp_time`/`interp_vars`, else `nearest` |
 | `interp_vars_params`    | Parameters for variable interpolation (e.g. `method:linear`)                                              |    ✓     | `None`        |
 | `format`                | Format of the extracted data (Supported: `raw`, `geojson`).                                               |    ✓     | `raw`         |
 | `as_dims`               | If a variable has the same name as a dim, force query parameters in this list to be treated as dimensions |    ✓     | `[]`          |
@@ -235,8 +238,8 @@ The `isoline` endpoint accepts the following query parameters:
 | `lat_min`            | Minimum latitude of the bounding box.                                                                                    |    ✓     | `None`    |
 | `lon_max`            | Maximum longitude of the bounding box.                                                                                   |    ✓     | `None`    |
 | `lat_max`            | Maximum latitude of the bounding box.                                                                                    |    ✓     | `None`    |
-| `interp_time`        | Whether to interpolate values on time dimension                                                                          |    ✓     | `False`   |
-| `interp_vars_method` | Method for variable/time interpolation                                                                                   |    ✓     | `nearest` |
+| `interp_time` | Whether to interpolate values on time dimension (linearly, unless `interp_vars_method` is given) or to get the closest time step. Shortcut to `interp_vars=YOUR_TIME_VARIABLE` | ✓ | `False` |
+| `interp_vars_method` | Method for variable/time interpolation. Overrides the default method (see [Interpolation defaults](#interpolation-defaults-and-precedence)) | ✓ | `linear` with `interp_time`/`interp_vars`, else `nearest` |
 | `interp_vars_params` | Parameters for variable interpolation (e.g. `method:linear`)                                                             |    ✓     | `None`    |
 | `as_dims`            | If a variable has the same name as a dim, force query parameters in this list to be treated as dimensions                |    ✓     | `[]`      |
 
@@ -263,7 +266,7 @@ The `select` endpoint accepts the following query parameters:
 | -------------------- | --------------------------------------------------------------------------------------------------------- | :------: | --------- |
 | `variable`           | The variable from which you want to select the data.                                                      |    ✗     |           |
 | `interp_vars`        | Variables to interpolate during selection                                                                 |    ✓     | `[]`      |
-| `interp_vars_method` | Method for variable/time interpolation                                                                    |    ✓     | `nearest` |
+| `interp_vars_method` | Method for variable/time interpolation. Overrides the default method (see [Interpolation defaults](#interpolation-defaults-and-precedence)) | ✓ | `linear` with `interp_time`/`interp_vars`, else `nearest` |
 | `interp_vars_params` | Parameters for variable interpolation (e.g. `method:linear`)                                              |    ✓     | `None`    |
 | `as_dims`            | If a variable has the same name as a dim, force query parameters in this list to be treated as dimensions |    ✓     | `[]`      |
 
@@ -323,6 +326,32 @@ For the two irregular-grid cases, a few implementation details worth knowing:
 - **`level_scale` and radians (irregular level only)**: combining horizontal degrees with a vertical axis in raw physical units (meters, hPa, ...) in a single distance metric is meaningless without first making them comparable. `level_scale` converts the level axis into "degree-equivalents" (how many native level units count as 1 horizontal degree). That degree-equivalent value is then converted to radians before being stored in the KD-tree, to match the scale of the cartesian `(x, y, z)` chord coordinates (which are themselves radian-scale, not degree-scale) — otherwise the level axis would still dominate (or be dominated by) the spatial axes in the tree's own distance ordering, biasing which neighbors get selected. This bakes `level_scale` into neighbor *selection* itself (both `k` and `radius` modes), not just the final IDW weighting.
 - **`k` vs `radius`**: `k` selects a fixed number of nearest neighbors (via `cKDTree.query`); `radius` instead selects every neighbor within a given distance (via `cKDTree.query_ball_point`), which can vary per point. `k` is the default, since it never risks an empty neighbor search on a sparse patch of the grid; passing `radius` opts into distance-bounded selection instead. If both are given, `k` takes precedence.
 
+### Interpolation defaults and precedence
+
+Interpolation can be requested either with a boolean or with an explicit method. An explicit method always takes precedence:
+
+| Parameters | Effective method |
+| --- | --- |
+| `interp_vars_method=...` | that method, for the time (`interp_time`) and the `interp_vars` |
+| `interp_time=true` and/or `interp_vars=...`, no `interp_vars_method` | `linear` |
+| none of them | `nearest` (closest time step / coordinate value) |
+| `interp_spatial_method=...` | that method |
+| `interp_spatial=true`, no `interp_spatial_method` | `linear` (on irregular grids, any method other than `nearest` uses IDW for probes) |
+| `interp_spatial=false`, or no `interp_spatial` | `nearest` |
+
+When the time is not interpolated, probes report the dataset time steps actually used, not the requested times.
+
+### Strict mode (point lists)
+
+With `interp_spatial=false` (and no `interp_spatial_method` other than `nearest`), a probe on a **point list** dataset must match one of the points of the list instead of taking the value of the nearest one. A point matches when both its longitude and its latitude are within `tolerance` degrees of the probe (longitudes are compared modulo 360, so the `[0, 360]` and `[-180, 180]` conventions both work). The tolerance is set with `interp_spatial_params=tolerance:VALUE` (default `1e-5`, about 1 m).
+
+A probe matching no point is handled like a probe outside a grid:
+
+- single probe (`/probe`): `400 LOCATION_OUT_OF_BOUNDS` (or `TIME_AND_LOCATION_OUT_OF_BOUNDS`), whose payload includes the `nearest_point` of the list as a hint;
+- batch (`/probes`): `null` values and a `LOCATION_OUT_OF_BOUNDS` entry in `errors` for that point.
+
+On other grid types, `interp_spatial=false` simply means `nearest` (probes outside the grid are already reported).
+
 ### Supplying Interpolation Parameters
 
 For the `extract` and `probe` endpoints, you can pass interpolation options using the `interp_spatial_params` or `interp_vars_params` query parameters. Here is an example:
@@ -330,6 +359,7 @@ For the `extract` and `probe` endpoints, you can pass interpolation options usin
 `interp_spatial_params=padding:0.5,neighbors:5,smoothing:0.0,kernel:thin_plate_spline`
 
 - `padding`: A coefficient extending the requested bounding box to include contextual data for interpolation. This helps prevent boundary artifacts near tiles.
+- `tolerance`: In [strict mode](#strict-mode-point-lists), maximum difference in degrees, per axis, between a probe and a point of a point list for them to match (default `1e-5`).
 - *Other parameters*: Specific to the chosen interpolation method.
 
 ## Configuring
