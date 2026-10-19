@@ -64,7 +64,10 @@ class TestCompression:
         [(None, 1), ("6", 6), ("0", 0), ("12", 9), ("-1", 0), ("abc", 1)],
     )
     def test_gzip_compression_level(self, monkeypatch, value, expected):
-        from src.api.api import GZIP_COMPRESSION_LEVEL_ENV_VAR, get_gzip_compression_level
+        from src.api.api import (
+            GZIP_COMPRESSION_LEVEL_ENV_VAR,
+            get_gzip_compression_level,
+        )
 
         if value is None:
             monkeypatch.delenv(GZIP_COMPRESSION_LEVEL_ENV_VAR, raising=False)
