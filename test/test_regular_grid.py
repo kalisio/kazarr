@@ -330,6 +330,36 @@ class TestRegularGrid:
             expected_val = start_val + (end_val - start_val) / (mesh_tile_size - 1) * i
             assert data["values"][i] == pytest.approx(expected_val)
 
+    @pytest.mark.parametrize(
+        "flag, method",
+        [("&interp_spatial=true", "linear"), ("&interp_spatial=false", "nearest")],
+    )
+    def test_extract_mesh_interp_spatial(self, client: TestClient, flag, method):
+        """`interp_spatial=true` resamples like `interp_spatial_method=linear`,
+        `interp_spatial=false` like nearest."""
+        base = (
+            f"/datasets/{DATASET_NAME}/extract?variable=Value&time=2026-01-01"
+            "&format=mesh&mesh_tile_size=7"
+        )
+        r_flag = client.get(base + flag)
+        r_method = client.get(base + f"&interp_spatial_method={method}")
+
+        assert r_flag.status_code == 200
+        assert r_flag.json()["values"] == r_method.json()["values"]
+
+    def test_extract_mesh_method_overrides_interp_spatial(self, client: TestClient):
+        """An explicit `interp_spatial_method` wins over `interp_spatial`."""
+        base = (
+            f"/datasets/{DATASET_NAME}/extract?variable=Value&time=2026-01-01"
+            "&format=mesh&mesh_tile_size=7"
+        )
+        r_both = client.get(base + "&interp_spatial=true&interp_spatial_method=nearest")
+        r_nearest = client.get(base + "&interp_spatial_method=nearest")
+        r_linear = client.get(base + "&interp_spatial_method=linear")
+
+        assert r_both.json()["values"] == r_nearest.json()["values"]
+        assert r_both.json()["values"] != r_linear.json()["values"]
+
     # ------------------------------------------------------------------
     # Probe
     # ------------------------------------------------------------------
@@ -349,6 +379,157 @@ class TestRegularGrid:
         values = data["values"]["Value"]
         assert isinstance(values, list)
         assert len(values) > 0
+
+    @pytest.mark.parametrize(
+        "lon, lat",
+        [
+            (LON_START - 1, LAT_START + LAT_STEP),  # west of the grid
+            (LON_START + LON_STEP * LONS + 1, LAT_START),  # east of the grid
+            (LON_START, LAT_START - 1),  # south of the grid
+            (LON_START, LAT_START + LAT_STEP * LATS + 1),  # north of the grid
+        ],
+    )
+    def test_probe_outside_grid(self, client: TestClient, lon, lat):
+        """Without spatial interpolation, a probe outside the grid must not
+        return the value of the closest edge node: a single probe fails with
+        LOCATION_OUT_OF_BOUNDS, reporting the probe and the grid extent."""
+        response = client.get(
+            f"/datasets/{DATASET_NAME}/probe?variables=Value&lon={lon}&lat={lat}"
+        )
+
+        assert response.status_code == 400
+        detail = response.json()["detail"]
+        assert detail["error_code"] == "LOCATION_OUT_OF_BOUNDS"
+        assert detail["payload"]["lon"] == pytest.approx(lon)
+        assert detail["payload"]["lat"] == pytest.approx(lat)
+        assert detail["payload"]["grid_bounds"] == pytest.approx(
+            {
+                "lon_min": LON_START,
+                "lon_max": LON_START + LON_STEP * (LONS - 1),
+                "lat_min": LAT_START,
+                "lat_max": LAT_START + LAT_STEP * (LATS - 1),
+            }
+        )
+
+    def test_probe_just_outside_grid(self, client: TestClient):
+        """A probe a fraction of a cell beyond the last node is outside the
+        grid (data on vertices)."""
+        lon = LON_START + LON_STEP * (LONS - 1) + LON_STEP / 4
+        response = client.get(
+            f"/datasets/{DATASET_NAME}/probe?variables=Value&lon={lon}&lat={LAT_START}"
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"]["error_code"] == "LOCATION_OUT_OF_BOUNDS"
+
+    def test_probe_on_grid_edge(self, client: TestClient):
+        """A probe exactly on the last node is inside the grid."""
+        lon = LON_START + LON_STEP * (LONS - 1)
+        lat = LAT_START + LAT_STEP * (LATS - 1)
+        response = client.get(
+            f"/datasets/{DATASET_NAME}/probe?variables=Value&lon={lon}&lat={lat}"
+        )
+
+        assert response.status_code == 200
+        assert all(v is not None for v in response.json()["values"]["Value"])
+
+    # ------------------------------------------------------------------
+    # Single probe — out-of-bounds errors
+    # ------------------------------------------------------------------
+    # A single probe that can only return null values fails with the reason
+    # why. The dataset spans 2026-01-01 → 2026-01-05.
+
+    def test_probe_outside_grid_with_interpolation(self, client: TestClient):
+        """With spatial interpolation too, a single probe outside the grid
+        fails with LOCATION_OUT_OF_BOUNDS (not NO_DATA_IN_SELECTION)."""
+        response = client.get(
+            f"/datasets/{DATASET_NAME}/probe?variables=Value"
+            f"&lon={LON_START - 1}&lat={LAT_START}&time=2026-01-02"
+            "&interp_spatial_method=linear"
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"]["error_code"] == "LOCATION_OUT_OF_BOUNDS"
+
+    def test_probe_outside_grid_and_time(self, client: TestClient):
+        """Outside the grid and every time out of bounds:
+        TIME_AND_LOCATION_OUT_OF_BOUNDS, with both payloads."""
+        response = client.get(
+            f"/datasets/{DATASET_NAME}/probe?variables=Value"
+            f"&lon={LON_START - 1}&lat={LAT_START}&time=2030-01-01"
+        )
+
+        assert response.status_code == 400
+        detail = response.json()["detail"]
+        assert detail["error_code"] == "TIME_AND_LOCATION_OUT_OF_BOUNDS"
+        payload = detail["payload"]
+        assert payload["lon"] == pytest.approx(LON_START - 1)
+        assert payload["time"].startswith("2030-01-01")
+        assert payload["min_time"].startswith("2026-01-01")
+        assert payload["max_time"].startswith("2026-01-05")
+        assert "grid_bounds" in payload
+
+    def test_probe_outside_grid_some_times_in_bounds(self, client: TestClient):
+        """Outside the grid with only some times out of bounds: the location
+        is what empties every sample, so LOCATION_OUT_OF_BOUNDS."""
+        response = client.get(
+            f"/datasets/{DATASET_NAME}/probe?variables=Value"
+            f"&lon={LON_START - 1}&lat={LAT_START}"
+            "&times=2026-01-02&times=2030-01-01"
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"]["error_code"] == "LOCATION_OUT_OF_BOUNDS"
+
+    def test_probe_inside_grid_time_out_of_bounds(self, client: TestClient):
+        """Inside the grid with every time out of bounds: TIME_OUT_OF_BOUNDS."""
+        response = client.get(
+            f"/datasets/{DATASET_NAME}/probe?variables=Value"
+            f"&lon={LON_START}&lat={LAT_START}&time=2030-01-01"
+        )
+
+        assert response.status_code == 400
+        detail = response.json()["detail"]
+        assert detail["error_code"] == "TIME_OUT_OF_BOUNDS"
+        assert detail["payload"]["max_time"].startswith("2026-01-05")
+
+    def test_probe_inside_grid_some_times_out_of_bounds(self, client: TestClient):
+        """Inside the grid with some times out of bounds: the request
+        succeeds, those times get null values and a TIME_OUT_OF_BOUNDS
+        entry in "errors"."""
+        response = client.get(
+            f"/datasets/{DATASET_NAME}/probe?variables=Value"
+            f"&lon={LON_START}&lat={LAT_START}"
+            "&times=2026-01-02&times=2030-01-01"
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        values = data["values"]["Value"]
+        assert values[0] is not None
+        assert values[1] is None
+        assert "TIME_OUT_OF_BOUNDS" in str(data.get("errors"))
+
+    def test_probes_mixed_inside_outside(self, client: TestClient):
+        """In a batch, only the probes outside the grid get a null value and
+        a LOCATION_OUT_OF_BOUNDS error."""
+        payload = {
+            "points": [
+                {"lon": LON_START, "lat": LAT_START},
+                {"lon": LON_START - 1, "lat": LAT_START},
+            ]
+        }
+        response = client.post(
+            f"/datasets/{DATASET_NAME}/probes?variables=Value&time=2026-01-02",
+            json=payload,
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        inside_value, outside_value = data["values"]["Value"][0]
+        assert inside_value is not None
+        assert outside_value is None
+        assert "LOCATION_OUT_OF_BOUNDS" in str(data.get("errors"))
 
     def test_probe_time_interpolation(self, client: TestClient):
         """Probe with time interpolation returns midpoint value."""
@@ -379,6 +560,60 @@ class TestRegularGrid:
         v_interp = v_interp[0] if isinstance(v_interp, list) else v_interp
 
         assert v_interp == pytest.approx((v1 + v2) / 2)
+
+    def test_probe_time_interpolation_without_method(self, client: TestClient):
+        """`interp_time=true` alone interpolates linearly (same result as with
+        `interp_vars_method=linear`) and reports the requested time."""
+        base = (
+            f"/datasets/{DATASET_NAME}/probe?variables=Value"
+            f"&lon={LON_START}&lat={LAT_START}&time=2026-01-02T12:00:00"
+        )
+        r_default = client.get(base + "&interp_time=true")
+        r_linear = client.get(base + "&interp_time=true&interp_vars_method=linear")
+        r1 = client.get(base.replace("2026-01-02T12:00:00", "2026-01-02"))
+        r2 = client.get(base.replace("2026-01-02T12:00:00", "2026-01-03"))
+
+        assert r_default.status_code == 200
+        v_default = r_default.json()["values"]["Value"][0]
+        assert v_default == r_linear.json()["values"]["Value"][0]
+        v1 = r1.json()["values"]["Value"][0]
+        v2 = r2.json()["values"]["Value"][0]
+        assert v_default == pytest.approx((v1 + v2) / 2)
+        assert r_default.json()["times"][0].startswith("2026-01-02T12:00")
+
+    def test_probe_time_interpolation_explicit_nearest(self, client: TestClient):
+        """An explicit `interp_vars_method=nearest` wins over `interp_time`:
+        the closest time step is used, and reported."""
+        response = client.get(
+            f"/datasets/{DATASET_NAME}/probe?variables=Value"
+            f"&lon={LON_START}&lat={LAT_START}&time=2026-01-02T11:00:00"
+            "&interp_time=true&interp_vars_method=nearest"
+        )
+        exact = client.get(
+            f"/datasets/{DATASET_NAME}/probe?variables=Value"
+            f"&lon={LON_START}&lat={LAT_START}&time=2026-01-02"
+        )
+
+        assert response.status_code == 200
+        assert response.json()["values"] == exact.json()["values"]
+        assert response.json()["times"][0].startswith("2026-01-02T00:00")
+
+    def test_probe_interp_spatial(self, client: TestClient):
+        """`interp_spatial=true` interpolates like `interp_spatial_method=linear`;
+        without it (or with `false`), the nearest node is used."""
+        base = (
+            f"/datasets/{DATASET_NAME}/probe?variables=Value&time=2026-01-02"
+            f"&lon={LON_START + LON_STEP / 2}&lat={LAT_START}"
+        )
+        r_flag = client.get(base + "&interp_spatial=true")
+        r_linear = client.get(base + "&interp_spatial_method=linear")
+        r_default = client.get(base)
+        r_false = client.get(base + "&interp_spatial=false")
+
+        assert r_flag.status_code == 200
+        assert r_flag.json()["values"] == r_linear.json()["values"]
+        assert r_false.json()["values"] == r_default.json()["values"]
+        assert r_flag.json()["values"] != r_default.json()["values"]
 
     def test_probe_time_range(self, client: TestClient):
         """Probe with a time range returns a time series over the requested interval."""

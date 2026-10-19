@@ -333,6 +333,29 @@ class TestRegularGrid3D:
         val_interp = data_interp["values"]["Value"][0]
         assert val_interp == pytest.approx((val1 + val2) / 2, rel=0.1)
 
+    def test_probe_interp_vars_level_snaps_time(self, client: TestClient):
+        """`interp_vars=<level variable>` without a method interpolates the
+        level linearly, while the time (not interpolated) is snapped to the
+        closest dataset time step, which is the one reported. (The level
+        variable of this dataset is named `height`.)"""
+        level_mid = LEVEL_START + LEVEL_STEP / 2
+        base = (
+            f"/datasets/{DATASET_REGULAR}/probe?variables=Value"
+            f"&lon={LON_START}&lat={LAT_START}"
+        )
+        point1 = client.get(base + f"&time=2026-01-01&level={LEVEL_START}")
+        point2 = client.get(base + f"&time=2026-01-01&level={LEVEL_START + LEVEL_STEP}")
+        response = client.get(
+            base + f"&time=2026-01-01T05:00:00&level={level_mid}&interp_vars=height"
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        v1 = point1.json()["values"]["Value"][0]
+        v2 = point2.json()["values"]["Value"][0]
+        assert data["values"]["Value"][0] == pytest.approx((v1 + v2) / 2)
+        assert data["times"][0].startswith("2026-01-01T00:00")
+
     # ------------------------------------------------------------------
     # Mesh — 2D slice
     # ------------------------------------------------------------------

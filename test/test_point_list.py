@@ -454,6 +454,156 @@ class TestPointList:
 
         assert v_interp == pytest.approx((v1 + v2) / 2, rel=0.01)
 
+    def test_probe_time_interpolation_without_method(self, client: TestClient):
+        """`interp_time=true` alone interpolates linearly."""
+        base = (
+            f"/datasets/{DATASET_NAME}/probe?variables=Humidity"
+            f"&lat={STATION_LATS[0]}&lon={STATION_LONS[0]}&time=2026-01-01T01:30:00"
+        )
+        r_default = client.get(base + "&interp_time=true")
+        r_linear = client.get(base + "&interp_time=true&interp_vars_method=linear")
+
+        assert r_default.status_code == 200
+        assert r_linear.status_code == 200
+        assert r_default.json()["values"] == r_linear.json()["values"]
+        assert r_default.json()["times"][0].startswith("2026-01-01T01:30")
+
+    # ------------------------------------------------------------------
+    # Probe — strict mode (interp_spatial=false)
+    # ------------------------------------------------------------------
+    # A probe must match one of the stations (within `tolerance` degrees per
+    # axis, 1e-5 by default) instead of taking the value of the nearest one.
+
+    STRICT_TIME = "2026-01-01T01:00:00"
+
+    def _strict_probe(self, client, lon, lat, extra=""):
+        return client.get(
+            f"/datasets/{DATASET_NAME}/probe?variables=Humidity"
+            f"&lon={lon}&lat={lat}&time={self.STRICT_TIME}&interp_spatial=false{extra}"
+        )
+
+    def test_probe_off_station_without_strict(self, client: TestClient):
+        """Without `interp_spatial`, a probe off a station still takes the
+        nearest station's value."""
+        response = client.get(
+            f"/datasets/{DATASET_NAME}/probe?variables=Humidity"
+            f"&lon={STATION_LONS[0] + 0.1}&lat={STATION_LATS[0]}&time={self.STRICT_TIME}"
+        )
+
+        assert response.status_code == 200
+        assert response.json()["values"]["Humidity"][0] is not None
+
+    @pytest.mark.parametrize(
+        "lon_offset",
+        [
+            0.0,  # exact station coordinates
+            360.0,  # same longitude in the [0, 360] convention
+            5e-6,  # within the default tolerance
+        ],
+    )
+    def test_probe_strict_matching_station(self, client: TestClient, lon_offset):
+        """A probe matching a station returns that station's value."""
+        exact = self._strict_probe(client, STATION_LONS[0], STATION_LATS[0])
+        response = self._strict_probe(
+            client, STATION_LONS[0] + lon_offset, STATION_LATS[0]
+        )
+
+        assert response.status_code == 200
+        assert response.json()["values"] == exact.json()["values"]
+
+    def test_probe_strict_off_station(self, client: TestClient):
+        """A probe matching no station fails with LOCATION_OUT_OF_BOUNDS and
+        reports the nearest station as a hint."""
+        response = self._strict_probe(
+            client, STATION_LONS[0] + 0.1, STATION_LATS[0]
+        )
+
+        assert response.status_code == 400
+        detail = response.json()["detail"]
+        assert detail["error_code"] == "LOCATION_OUT_OF_BOUNDS"
+        assert detail["payload"]["nearest_point"] == pytest.approx(
+            {"lon": STATION_LONS[0], "lat": STATION_LATS[0]}
+        )
+
+    def test_probe_strict_custom_tolerance(self, client: TestClient):
+        """`interp_spatial_params=tolerance:...` widens the matching."""
+        lon = STATION_LONS[0] + 5e-4
+        rejected = self._strict_probe(client, lon, STATION_LATS[0])
+        accepted = self._strict_probe(
+            client, lon, STATION_LATS[0], "&interp_spatial_params=tolerance:0.001"
+        )
+
+        assert rejected.status_code == 400
+        assert accepted.status_code == 200
+
+    def test_probe_strict_invalid_tolerance(self, client: TestClient):
+        response = self._strict_probe(
+            client, STATION_LONS[0], STATION_LATS[0], "&interp_spatial_params=tolerance:-1"
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"]["error_code"] == "BAD_SELECTION"
+
+    def test_probe_strict_with_explicit_nearest(self, client: TestClient):
+        """`interp_spatial_method=nearest` does not cancel the strict mode."""
+        response = self._strict_probe(
+            client,
+            STATION_LONS[0] + 0.1,
+            STATION_LATS[0],
+            "&interp_spatial_method=nearest",
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"]["error_code"] == "LOCATION_OUT_OF_BOUNDS"
+
+    def test_probe_strict_overridden_by_method(self, client: TestClient):
+        """An explicit interpolation method takes precedence over
+        `interp_spatial=false`: no strict mode."""
+        response = self._strict_probe(
+            client,
+            STATION_LONS[0] + 0.1,
+            STATION_LATS[0],
+            "&interp_spatial_method=idw",
+        )
+
+        assert response.status_code == 200
+        assert response.json()["values"]["Humidity"][0] is not None
+
+    def test_probe_strict_off_station_and_time(self, client: TestClient):
+        """Off station and out of the time extent: TIME_AND_LOCATION_OUT_OF_BOUNDS."""
+        response = client.get(
+            f"/datasets/{DATASET_NAME}/probe?variables=Humidity"
+            f"&lon={STATION_LONS[0] + 0.1}&lat={STATION_LATS[0]}"
+            "&time=2030-01-01&interp_spatial=false"
+        )
+
+        assert response.status_code == 400
+        detail = response.json()["detail"]
+        assert detail["error_code"] == "TIME_AND_LOCATION_OUT_OF_BOUNDS"
+        assert "nearest_point" in detail["payload"]
+
+    def test_probes_strict_mixed(self, client: TestClient):
+        """In a batch, only the probes matching no station get a null value
+        and a LOCATION_OUT_OF_BOUNDS error."""
+        payload = {
+            "points": [
+                {"lon": STATION_LONS[0], "lat": STATION_LATS[0]},
+                {"lon": STATION_LONS[0] + 0.1, "lat": STATION_LATS[0]},
+            ]
+        }
+        response = client.post(
+            f"/datasets/{DATASET_NAME}/probes?variables=Humidity"
+            f"&time={self.STRICT_TIME}&interp_spatial=false",
+            json=payload,
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        matched_value, unmatched_value = data["values"]["Humidity"][0]
+        assert matched_value is not None
+        assert unmatched_value is None
+        assert data["errors"] == [[None], ["LOCATION_OUT_OF_BOUNDS"]]
+
     # ------------------------------------------------------------------
     # Dataset metadata
     # ------------------------------------------------------------------

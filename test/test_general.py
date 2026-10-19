@@ -55,3 +55,24 @@ class TestGeneral:
         response = client.post("/datasets/some_dataset/probes?variables=Value", json={})
 
         assert response.status_code in (400, 422)
+
+
+@pytest.mark.General
+class TestCompression:
+    @pytest.mark.parametrize(
+        "value, expected",
+        [(None, 1), ("6", 6), ("0", 0), ("12", 9), ("-1", 0), ("abc", 1)],
+    )
+    def test_gzip_compression_level(self, monkeypatch, value, expected):
+        from src.api.api import GZIP_COMPRESSION_LEVEL_ENV_VAR, get_gzip_compression_level
+
+        if value is None:
+            monkeypatch.delenv(GZIP_COMPRESSION_LEVEL_ENV_VAR, raising=False)
+        else:
+            monkeypatch.setenv(GZIP_COMPRESSION_LEVEL_ENV_VAR, value)
+        assert get_gzip_compression_level() == expected
+
+    def test_small_response_not_compressed(self, client: TestClient):
+        response = client.get("/health", headers={"Accept-Encoding": "gzip"})
+        assert response.status_code == 200
+        assert "content-encoding" not in response.headers

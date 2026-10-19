@@ -344,7 +344,8 @@ class TestRadialGrid:
     @pytest.mark.parametrize("method", ["nearest", "idw"])
     def test_probe_outside_grid(self, client: TestClient, method):
         """A probe far outside the grid must not return the value of the
-        closest node: like a regular grid, it yields NO_DATA_IN_SELECTION.
+        closest node: like a regular grid, a single probe fails with
+        LOCATION_OUT_OF_BOUNDS.
         """
         response = client.get(
             f"/datasets/{DATASET_NAME}/probe?variables=WindSpeed"
@@ -352,7 +353,27 @@ class TestRadialGrid:
         )
 
         assert response.status_code == 400
-        assert response.json()["detail"]["error_code"] == "NO_DATA_IN_SELECTION"
+        detail = response.json()["detail"]
+        assert detail["error_code"] == "LOCATION_OUT_OF_BOUNDS"
+        assert detail["payload"]["lon"] == pytest.approx(2.3)
+        assert detail["payload"]["lat"] == pytest.approx(43.3)
+        bounds = detail["payload"]["grid_bounds"]
+        assert bounds["lon_min"] < 5.2711 < bounds["lon_max"]
+        assert bounds["lat_min"] < 45.79703 < bounds["lat_max"]
+
+    def test_probe_outside_grid_and_time(self, client: TestClient):
+        """Outside the grid and out of the time extent:
+        TIME_AND_LOCATION_OUT_OF_BOUNDS."""
+        response = client.get(
+            f"/datasets/{DATASET_NAME}/probe?variables=WindSpeed"
+            "&lat=43.3&lon=2.3&time=2030-01-01"
+        )
+
+        assert response.status_code == 400
+        assert (
+            response.json()["detail"]["error_code"]
+            == "TIME_AND_LOCATION_OUT_OF_BOUNDS"
+        )
 
     def test_probe_just_outside_outer_ring(self, client: TestClient):
         """~550 m beyond the outer ring (cells there are ~2.6 km wide): outside."""
@@ -362,6 +383,7 @@ class TestRadialGrid:
         )
 
         assert response.status_code == 400
+        assert response.json()["detail"]["error_code"] == "LOCATION_OUT_OF_BOUNDS"
 
     def test_probe_just_inside_outer_ring(self, client: TestClient):
         """~110 m inside the outer ring: inside."""
