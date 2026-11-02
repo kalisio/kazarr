@@ -232,6 +232,7 @@ The `isoline` endpoint accepts the following query parameters:
 | -------------------- | ------------------------------------------------------------------------------------------------------------------------ | :------: | --------- |
 | `variable`           | The variable to generate isolines for.                                                                                   |    ✗     |           |
 | `thresholds`         | Thresholds for isoline generation: repeated values (`thresholds=0&thresholds=5`), or a range `min:max:step` (see below). |    ✗     |           |
+| `thresholds_mode`    | How a range `min:max:step` is computed: `absolute` or `relative` (see below).                                            |    ✓     | `absolute` |
 | `time`               | The time value to use for isoline generation.                                                                            |    ✓     | `None`    |
 | `format`             | Format of the output (Supported: `raw`, `geojson`).                                                                      |    ✓     | `raw`     |
 | `lon_min`            | Minimum longitude of the bounding box.                                                                                   |    ✓     | `None`    |
@@ -247,6 +248,8 @@ Thresholds can be defined as a range `min:max:step` (e.g. `thresholds=0:30:5`): 
 - `thresholds=0:10:5` gives 0, 5, 10, and `thresholds=0.01:4.98:0.05` gives 0.01, 0.05, 0.1, ..., 4.95, 4.98.
 - `min` and/or `max` can be omitted: the minimum and/or maximum value of the selected data (bounding box included) are then used to compute the multiples of `step`, but are not added themselves (e.g. data in [273.4, 296.2] with `thresholds=::5` gives 275, 280, ..., 295, and with `thresholds=271::10` gives 271, 280, 290).
 - `step` is required and must be positive. A range can produce up to 1000 thresholds.
+
+With `thresholds_mode=relative`, thresholds are `min + k * step` instead of the multiples of `step`, still plus `max` when it is given: `thresholds=3:15:5` gives 3, 8, 13, 15 (instead of 3, 5, 10, 15). `min` is then required (thresholds would otherwise move from one time step to another), and the mode can't be used with repeated values.
 
 Output formats:
 - `raw`: `{"<threshold>": [line, ...], ...}` where each line is a list of `[lon, lat]` points.

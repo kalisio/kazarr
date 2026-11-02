@@ -1,5 +1,6 @@
 import math
 from dataclasses import dataclass
+from typing import Literal
 
 import contourpy
 import numpy as np
@@ -12,14 +13,21 @@ MAX_THRESHOLDS = 1000
 # Decimals kept for thresholds generated from a range (avoids 0.30000000000000004)
 THRESHOLD_DECIMALS = 10
 
+ThresholdsMode = Literal["absolute", "relative"]
+
 
 @dataclass
 class ThresholdRange:
-    """Thresholds defined as `min:max:step`. A missing bound is taken from the data."""
+    """Thresholds defined as `min:max:step`. A missing bound is taken from the data.
+
+    In `absolute` mode thresholds are the multiples of step, in `relative` mode
+    they are min + k * step (min is then required).
+    """
 
     min: float | None
     max: float | None
     step: float
+    mode: ThresholdsMode = "absolute"
 
 
 def _parse_number(value, raw):
@@ -32,11 +40,14 @@ def _parse_number(value, raw):
     return number
 
 
-def parse_thresholds(raw_thresholds: list[str]) -> list[float] | ThresholdRange:
+def parse_thresholds(
+    raw_thresholds: list[str], mode: ThresholdsMode = "absolute"
+) -> list[float] | ThresholdRange:
     """Parse the `thresholds` query parameter.
 
     Either a list of values (`thresholds=0&thresholds=5`), or a single range
     `min:max:step` where min and/or max may be omitted (`:30:5`, `10::5`, `::5`).
+    The `relative` mode only applies to a range, and requires min.
     """
     raw_thresholds = [item.strip() for item in raw_thresholds if item.strip() != ""]
     if not raw_thresholds:
@@ -48,6 +59,10 @@ def parse_thresholds(raw_thresholds: list[str]) -> list[float] | ThresholdRange:
             threshold = _parse_number(item, item)
             if threshold not in thresholds:
                 thresholds.append(threshold)
+        if mode == "relative":
+            raise exceptions.InvalidThresholds(
+                raw_thresholds, "The relative mode only applies to a range 'min:max:step'."
+            )
         return thresholds
 
     if len(raw_thresholds) > 1:
@@ -72,16 +87,21 @@ def parse_thresholds(raw_thresholds: list[str]) -> list[float] | ThresholdRange:
         and threshold_min > threshold_max
     ):
         raise exceptions.InvalidThresholds(raw, "min must be lower than or equal to max.")
-    return ThresholdRange(threshold_min, threshold_max, step)
+    if mode == "relative" and threshold_min is None:
+        raise exceptions.InvalidThresholds(raw, "min is required in relative mode.")
+    return ThresholdRange(threshold_min, threshold_max, step, mode)
 
 
 def resolve_thresholds(thresholds: list[float] | ThresholdRange, val) -> list[float]:
     """Compute the thresholds of a ThresholdRange (explicit lists are returned as is).
 
-    Thresholds are the multiples of step within [lower, upper], where
-    lower/upper are min/max when given, or the min/max of the data otherwise.
+    In absolute mode, thresholds are the multiples of step within [lower, upper],
+    where lower/upper are min/max when given, or the min/max of the data otherwise.
     They are round values that stay the same from one time step (or bbox) to
     another. Both bounds are inclusive.
+
+    In relative mode, thresholds are min + k * step within [min, upper]: e.g.
+    3:15:5 gives 3, 8, 13, 15 (instead of 3, 5, 10, 15 in absolute mode).
 
     Bounds explicitly given (min and/or max) are also added to the thresholds,
     if they are not already multiples of step: e.g. 0.01:4.98:0.05 gives
@@ -107,15 +127,18 @@ def resolve_thresholds(thresholds: list[float] | ThresholdRange, val) -> list[fl
     if lower > upper:
         return []
 
-    # First multiple of step >= lower. Floating point noise may push the
-    # quotient just above an integer (e.g. 0.3 / 0.1): step back if the
-    # previous multiple is still >= lower.
-    k_start = math.ceil(lower / step)
-    if round((k_start - 1) * step, THRESHOLD_DECIMALS) >= lower:
+    # Thresholds are origin + k * step
+    origin = lower if thresholds.mode == "relative" else 0.0
+
+    # First threshold >= lower. Floating point noise may push the quotient
+    # just above an integer (e.g. 0.3 / 0.1): step back if the previous
+    # threshold is still >= lower.
+    k_start = math.ceil((lower - origin) / step)
+    if round(origin + (k_start - 1) * step, THRESHOLD_DECIMALS) >= lower:
         k_start -= 1
-    # Last multiple of step <= upper (same floating point issue, e.g. 0.8 / 0.2)
-    k_end = math.floor(upper / step)
-    if round((k_end + 1) * step, THRESHOLD_DECIMALS) <= upper:
+    # Last threshold <= upper (same floating point issue, e.g. 0.8 / 0.2)
+    k_end = math.floor((upper - origin) / step)
+    if round(origin + (k_end + 1) * step, THRESHOLD_DECIMALS) <= upper:
         k_end += 1
 
     count = max(0, k_end - k_start + 1)
@@ -125,7 +148,7 @@ def resolve_thresholds(thresholds: list[float] | ThresholdRange, val) -> list[fl
             f"{thresholds.max if thresholds.max is not None else ''}:{step}",
             f"This range produces {count} thresholds, the maximum is {MAX_THRESHOLDS}. Use a larger step.",
         )
-    values = [round(k * step, THRESHOLD_DECIMALS) for k in range(k_start, k_end + 1)]
+    values = [round(origin + k * step, THRESHOLD_DECIMALS) for k in range(k_start, k_end + 1)]
 
     explicit_bounds = [b for b in (thresholds.min, thresholds.max) if b is not None]
     for bound in explicit_bounds:

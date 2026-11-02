@@ -5,7 +5,7 @@ from starlette.concurrency import run_in_threadpool
 
 import src.schemas.requests as models
 from src import exceptions
-from src.processing.isoline import parse_thresholds
+from src.processing.isoline import ThresholdsMode, parse_thresholds
 from src.services import isoline as isoline_service
 from src.utils.data import parse_query_dict
 
@@ -31,6 +31,14 @@ async def isoline_data(
             "they are not added), e.g. '::5', '0::5', ':30:5'."
         ),
     ],
+    thresholds_mode: Annotated[
+        ThresholdsMode,
+        Query(
+            description="How a range 'min:max:step' is computed: 'absolute' gives the multiples "
+            "of step (3:15:5 gives 3, 5, 10, 15), 'relative' gives min + k * step (3:15:5 gives "
+            "3, 8, 13, 15). The relative mode requires min, and doesn't apply to a list of values."
+        ),
+    ] = "absolute",
 ):
     interp_vars_params = base.interp_vars_params
     if interp_vars_params is not None and ":" in interp_vars_params:
@@ -57,7 +65,7 @@ async def isoline_data(
         request,
         base.dataset,
         base.variable,
-        parse_thresholds(thresholds),
+        parse_thresholds(thresholds, thresholds_mode),
         time=time.time,
         format=base.format,
         config=config,
