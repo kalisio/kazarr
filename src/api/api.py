@@ -2,6 +2,7 @@ import os
 import sys
 from typing import Any
 
+import dask
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_swagger_ui_html
@@ -11,6 +12,18 @@ from starlette.middleware.gzip import GZipMiddleware
 
 from src import exceptions
 from src.api.routers import dataset, extract, isoline, mesh, probe, select
+
+# Number of threads of the dask scheduler. Dask uses one thread per CPU by
+# default, and each thread decompresses its own zarr chunks: memory grows with
+# the number of CPUs of the node, while more threads barely improve throughput.
+# DASK_NUM_WORKERS (read by dask itself) overrides this default.
+DEFAULT_DASK_NUM_WORKERS = 2
+if dask.config.get("num_workers", None) is None:
+    dask.config.set(num_workers=DEFAULT_DASK_NUM_WORKERS)
+log.info(
+    "[KAZARR] Dask threaded scheduler with {count} threads",
+    count=dask.config.get("num_workers"),
+)
 
 app = FastAPI(
     title="kazarr API",

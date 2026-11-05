@@ -1,5 +1,4 @@
 import numpy as np
-import pyvista as pv
 from loguru import logger as log
 from scipy.interpolate import (
     RBFInterpolator,
@@ -15,6 +14,9 @@ from src.utils.spatial import get_cached_ckdtree
 def cell_to_point_conversion(
     lons, lats, levels, vals, variable, mesh_type, is_regular_grid, is_3d=False
 ):
+    # Imported on demand: pyvista loads VTK, ~95 MB of memory per process
+    import pyvista as pv
+
     lons_points, lats_points, levels_points = extrapolate_edges_from_cell_data(
         lons, lats, levels, "radial" if mesh_type == "radial" else "rectilinear"
     )

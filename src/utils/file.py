@@ -22,6 +22,7 @@ BUCKET_NAME_ENV_VAR = "BUCKET_NAME"
 CACHE_LIMIT_MARGIN = 0.9  # 90% of the specified cache size limit
 LRU_CACHE_SIZE_ENV_VAR = "LRU_CACHE_SIZE"
 DEFAULT_LRU_CACHE_SIZE = 5
+DASK_CHUNKS_ENV_VAR = "DASK_CHUNKS"
 
 
 def get_lru_cache_size():
@@ -30,6 +31,15 @@ def get_lru_cache_size():
         return max(0, int(cache_size))
     except ValueError:
         return DEFAULT_LRU_CACHE_SIZE
+
+
+def get_dask_chunks():
+    """Dask chunking of opened datasets. By default the zarr chunks are kept
+    ("native"): reading a value only loads the zarr chunk containing it, while
+    "auto" merges them into blocks of ~128MB that are loaded entirely."""
+    if os.getenv(DASK_CHUNKS_ENV_VAR, "native").lower() == "auto":
+        return "auto"
+    return {}
 
 
 def get_datasets_path():
@@ -58,7 +68,8 @@ def _load_versioned(path, version):
     if not s3_credentials_exists():
         try:
             return xr.open_zarr(
-                os.path.join(get_datasets_path().rstrip("/"), path), chunks="auto"
+                os.path.join(get_datasets_path().rstrip("/"), path),
+                chunks=get_dask_chunks(),
             )
         except Exception:
             raise exceptions.DatasetNotFound(path.replace(ZARR_EXTENSION, ""))
@@ -98,7 +109,7 @@ def _load_versioned(path, version):
         # Will try to open consolidated metadata first (https://docs.xarray.dev/en/latest/generated/xarray.open_zarr.html#xarray.open_zarr)
         # Will try to determine zarr_format (v2 or v3) automatically
         # chunks must be defined to enable dask lazy loading
-        dataset = xr.open_zarr(store, chunks="auto")
+        dataset = xr.open_zarr(store, chunks=get_dask_chunks())
     except NoCredentialsError:
         raise exceptions.GenericInternalError("S3 credentials not found.")
     except zarr.errors.GroupNotFoundError:

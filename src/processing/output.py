@@ -1,7 +1,6 @@
 import struct
 
 import numpy as np
-import pyvista as pv
 
 from src import exceptions
 from src.utils.serialization import json_array
@@ -10,6 +9,9 @@ from src.utils.serialization import json_array
 def prepare_mesh_output(
     lons, lats, levels, vals, variable, mask_cropped, step_row, step_col
 ):
+    # Imported on demand: pyvista loads VTK, ~95 MB of memory per process
+    import pyvista as pv
+
     if levels is None:
         levels = np.zeros_like(lons)
 

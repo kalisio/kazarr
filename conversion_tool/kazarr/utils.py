@@ -16,6 +16,7 @@ import s3fs
 import zarr
 from botocore.exceptions import NoCredentialsError
 from dask import array as da
+from dask.utils import parse_bytes
 
 from kazarr.exceptions import (
     ConfigurationError,
@@ -30,6 +31,8 @@ BUCKET_NAME_ENV_VAR = "BUCKET_NAME"
 LON_VARIABLE_KEY = "variables.lon"
 LAT_VARIABLE_KEY = "variables.lat"
 LEVEL_VARIABLE_KEY = "variables.level"
+CHUNK_SIZE_KEY = "chunk_size"
+DEFAULT_CHUNK_SIZE_MB = 100
 
 logger = logging.getLogger(__name__)
 
@@ -223,33 +226,61 @@ def get_optimal_chunks_for_zarr(data_array, target_size="100MB"):
     return uniform_chunks
 
 
-def rechunk_if_needed(dataset, target_size_mb=100, tolerance=0.3):
+def get_chunk_size_mb(dataset, config):
+    """Target size of the Zarr chunks in MiB, from the 'chunk_size' config
+    parameter: a number of MiB (16) or a size string ("16MiB", "1GB")."""
+    chunk_size = get_dataset_config_value(
+        dataset, config, CHUNK_SIZE_KEY, default=DEFAULT_CHUNK_SIZE_MB
+    )
+    try:
+        if isinstance(chunk_size, str):
+            chunk_size_mb = parse_bytes(chunk_size) / (1024**2)
+        else:
+            chunk_size_mb = float(chunk_size)
+    except (TypeError, ValueError) as e:
+        raise ConfigurationError(
+            f"Invalid '{CHUNK_SIZE_KEY}' config parameter: {chunk_size!r}. "
+            'Expected a number of MiB (16) or a size ("16MiB", "1GB").'
+        ) from e
+    if chunk_size_mb <= 0:
+        raise ConfigurationError(
+            f"Invalid '{CHUNK_SIZE_KEY}' config parameter: {chunk_size!r}. It must be positive."
+        )
+    return chunk_size_mb
+
+
+def rechunk_if_needed(dataset, target_size_mb=DEFAULT_CHUNK_SIZE_MB, tolerance=0.3):
+    """Rechunk the variables whose chunks are not uniform, or whose size is
+    not within target_size_mb +/- tolerance."""
     for var_name, variable in dataset.variables.items():
         if variable.chunks is None:
             continue
 
-        for dim_chunks in variable.chunks:
-            if len(dim_chunks) <= 1:
-                continue
+        chunk_shape = [c[0] for c in variable.chunks]
+        bytes_per_chunk = np.prod(chunk_shape) * variable.dtype.itemsize
+        current_chunk_mb = bytes_per_chunk / (1024**2)
+        # Small chunks can only be merged if the variable is split in several chunks
+        is_split = any(len(dim_chunks) > 1 for dim_chunks in variable.chunks)
+        chunks_too_small = is_split and current_chunk_mb < target_size_mb * (
+            1 - tolerance
+        )
+        chunks_too_large = current_chunk_mb > target_size_mb * (1 + tolerance)
 
-            # Check if chunks are too small compared to target size
-            chunk_shape = [c[0] for c in variable.chunks]
-            bytes_per_chunk = np.prod(chunk_shape) * variable.dtype.itemsize
-            current_chunk_mb = bytes_per_chunk / (1024**2)
-            chunks_too_small = current_chunk_mb < target_size_mb * (1 - tolerance)
+        # Check if all main chunks are the same size (uniform)
+        # Last chunk is often smaller, so we ignore it for the uniformity check
+        is_uniform = all(
+            len(set(dim_chunks[:-1])) <= 1 for dim_chunks in variable.chunks
+        )
 
-            # Check if all main chunks are the same size (uniform)
-            is_uniform = True
-            for dim_chunks in variable.chunks:
-                # Last chunk is often smaller, so we ignore it for the uniformity check
-                if len(dim_chunks) > 1 and len(set(dim_chunks[:-1])) > 1:
-                    is_uniform = False
-                    break
-
-            if not is_uniform or chunks_too_small:
-                # Rechunk variable to uniform chunk sizes based on Dask's optimal chunking
-                optimal_chunks = get_optimal_chunks_for_zarr(variable)
-                dataset[var_name] = variable.chunk(optimal_chunks)
+        if not is_uniform or chunks_too_small or chunks_too_large:
+            # Rechunk variable to uniform chunk sizes based on Dask's optimal chunking
+            optimal_chunks = get_optimal_chunks_for_zarr(
+                variable, target_size=f"{int(target_size_mb * 1024**2)}B"
+            )
+            rechunked = variable.chunk(optimal_chunks)
+            # Chunks inherited from a source Zarr store would conflict with the new ones
+            rechunked.encoding.pop("chunks", None)
+            dataset[var_name] = rechunked
 
     return dataset
 

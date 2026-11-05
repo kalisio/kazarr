@@ -2,7 +2,6 @@ import threading
 from typing import Any
 
 import numpy as np
-import pyvista as pv
 
 from src import exceptions
 from src.processing.bbox import (
@@ -165,6 +164,9 @@ def get_mesh(
         out = {"type": "FeatureCollection", "features": features}
     else:
         step_logger.step_start("Prepare output (mesh)")
+        # Imported on demand: pyvista loads VTK, ~95 MB of memory per process
+        import pyvista as pv
+
         if is_point_list:
             points = np.column_stack((lons_points, lats_points, levels_points))
             cloud = pv.PolyData(points)

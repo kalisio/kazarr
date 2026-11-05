@@ -39,6 +39,7 @@ from kazarr.utils import (
     add_to_global_config_update,
     dataset_exists,
     dget,
+    get_chunk_size_mb,
     get_dataset_config_value,
     get_dataset_history,
     get_redundant_dimensions,
@@ -490,7 +491,7 @@ def load_and_merge_from_grib(dataset, config):
     if sub_datasets:
         merged_dataset = xr.merge(sub_datasets)
         new_dataset = rechunk_if_needed(
-            merged_dataset
+            merged_dataset, get_chunk_size_mb(merged_dataset, config)
         )  # Re-chunk usually needed after merge
     else:
         new_dataset = None
@@ -1418,7 +1419,7 @@ def save(dataset, config):
 
     logger.info("Saving dataset to Zarr format to %s...", write_path)
 
-    dataset = rechunk_if_needed(dataset)
+    dataset = rechunk_if_needed(dataset, get_chunk_size_mb(dataset, config))
 
     zarr_kwargs = {
         "mode": "w",

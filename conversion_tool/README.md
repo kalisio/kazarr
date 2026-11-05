@@ -465,6 +465,7 @@ Save the resulting Zarr dataset to local storage or S3.
 | `save_path`          | String  | Path to save the dataset. Defaults to `INPUT_PATH` with `.zarr` extension. Prefix with `s3://` for [S3](#s3-configuration).            |
 | `version`            | Integer | Zarr format version (2 or 3). Default: 3                                                                          |
 | `float64_to_float32` | Boolean | Convert float64 data to float32 to save space. Default: false                                                     |
+| `chunk_size`         | Number or String | Target size of the uncompressed Zarr chunks, as a number of MiB (`16`) or a size (`"16MiB"`, `"1GB"`). Variables whose chunks are not uniform, or are more than 30% smaller (when split) or larger than this size, are rechunked. Also used after the merge of `load_and_merge_from_grib`. Default: 100 |
 
 ### `clean`
 
