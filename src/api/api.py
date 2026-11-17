@@ -1,5 +1,7 @@
 import os
 import sys
+import tomllib
+from pathlib import Path
 from typing import Any
 
 import dask
@@ -16,6 +18,8 @@ from src.api.routers import dataset, extract, isoline, mesh, probe, select
 # Number of threads of the dask scheduler. Dask uses one thread per CPU by
 # default, and each thread decompresses its own zarr chunks: memory grows with
 # the number of CPUs of the node, while more threads barely improve throughput.
+# Dask creates a pool for each thread computing a request: this is the number of
+# threads per request, not per process (concurrent requests add up).
 # DASK_NUM_WORKERS (read by dask itself) overrides this default.
 DEFAULT_DASK_NUM_WORKERS = 2
 if dask.config.get("num_workers", None) is None:
@@ -25,9 +29,23 @@ log.info(
     count=dask.config.get("num_workers"),
 )
 
+
+def _read_version() -> str:
+    """Read the project version from pyproject.toml."""
+    pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
+    try:
+        with pyproject.open("rb") as f:
+            return tomllib.load(f)["project"]["version"]
+    except (OSError, KeyError, tomllib.TOMLDecodeError) as e:
+        log.warning("[KAZARR] Unable to read version from {path}: {err}", path=pyproject, err=e)
+        return "unknown"
+
+
+APP_VERSION = _read_version()
+
 app = FastAPI(
     title="kazarr API",
-    version=os.getenv("APP_VERSION", "0.1.0"),
+    version=APP_VERSION,
     description="A lightweight FastAPI service that exposes endpoints to interact with Zarr datasets stored in a Simple Storage Service (S3)",
     contact={
         "name": "Kalisio",
@@ -145,7 +163,7 @@ async def request_cancelled_handler(request: Request, exc: exceptions.RequestCan
 def read_root() -> Any:
     return {
         "name": "kazarr API",
-        "version": os.getenv("APP_VERSION", "0.1.0"),
+        "version": APP_VERSION,
         "description": "A lightweight FastAPI service that exposes endpoints to interact with Zarr datasets stored in a Simple Storage Service (S3)",
         "endpoints": [
             "/health",

@@ -3,6 +3,7 @@ import copy
 import datetime
 import json
 import os
+import threading
 from functools import lru_cache
 
 import s3fs
@@ -46,11 +47,47 @@ def get_datasets_path():
     return os.getenv("DATASETS_PATH", "/")
 
 
+# S3 filesystem of the process, see get_s3_filesystem()
+_s3_filesystem: tuple[int, s3fs.S3FileSystem] | None = None
+_s3_filesystem_lock = threading.Lock()
+
+
+def get_s3_filesystem():
+    """Return the S3 filesystem used to access datasets.
+
+    fsspec caches filesystem instances per process and, by default, each
+    instance caches directory listings forever (``use_listings_cache=True``,
+    ``listings_expiry_time=None``). With several replicas, each process would
+    then keep the bucket tree it saw first, so datasets added or removed later
+    would show up on some replicas only. Listings are therefore always fetched
+    from S3; dataset contents remain cached by ``_load_versioned`` and
+    ``S3CachedStore``.
+
+    fsspec also caches one instance per thread, and never releases them. Each
+    instance creates its own S3 client, which loads the botocore service models
+    (about 13 MB). Requests run in threads that are regularly replaced (idle
+    anyio workers, dask pools), so the memory grew with every new thread. A
+    single instance is shared by all the threads of the process instead: its
+    calls run in the event loop thread of fsspec, whatever the calling thread.
+    """
+    global _s3_filesystem
+    pid = os.getpid()
+    with _s3_filesystem_lock:
+        if _s3_filesystem is None or _s3_filesystem[0] != pid:
+            _s3_filesystem = (
+                pid,
+                s3fs.S3FileSystem(
+                    anon=False, use_listings_cache=False, skip_instance_cache=True
+                ),
+            )
+        return _s3_filesystem[1]
+
+
 def s3_credentials_exists():
     bucket = os.getenv(BUCKET_NAME_ENV_VAR)
     if bucket is None:
         return False
-    s3_store = s3fs.S3FileSystem(anon=False)
+    s3_store = get_s3_filesystem()
     try:
         s3_store.ls(os.path.join(bucket, get_datasets_path()))
         return True
@@ -92,7 +129,7 @@ def _load_versioned(path, version):
                 root=os.path.join(
                     bucket, get_datasets_path(), path.replace(S3_PREFIX, "")
                 ),
-                s3=s3fs.S3FileSystem(anon=False),
+                s3=get_s3_filesystem(),
             )
         else:
             dataset_id = path.replace(S3_PREFIX, "")
@@ -129,7 +166,7 @@ def load(path):
 
 # Load JSON file from S3
 def load_json(path):
-    s3_store = s3fs.S3FileSystem(anon=False)
+    s3_store = get_s3_filesystem()
     bucket = os.getenv(BUCKET_NAME_ENV_VAR)
     if bucket is None:
         raise exceptions.GenericInternalError(
@@ -164,7 +201,7 @@ def find_datasets(path="/"):
         return datasets
 
     # Search all folders recursively that ends with .zarr
-    s3_store = s3fs.S3FileSystem(anon=False)
+    s3_store = get_s3_filesystem()
     bucket = os.getenv(BUCKET_NAME_ENV_VAR)
     if bucket is None:
         raise exceptions.GenericInternalError(
@@ -217,7 +254,7 @@ def get_dataset_last_modified(dataset_id: str) -> os.stat_result | str | None:
     bucket = os.getenv(BUCKET_NAME_ENV_VAR)
     if bucket is None:
         return None
-    s3_store = s3fs.S3FileSystem(anon=False)
+    s3_store = get_s3_filesystem()
     try:
         s3_path = os.path.join(bucket, get_datasets_path().lstrip("/"), path)
         # Often .zmetadata is updated when dataset changes
@@ -267,7 +304,7 @@ class S3CachedStore(Store):
     ):
         super().__init__(read_only=True)
         self.s3_root = s3_root.rstrip("/")
-        self.s3 = s3fs.S3FileSystem(anon=False)
+        self.s3 = get_s3_filesystem()
         self.expiry_seconds = expiry_seconds
         self.dataset_id = dataset_id.strip("/")
 
@@ -282,6 +319,12 @@ class S3CachedStore(Store):
             size_limit=max_size_bytes,
             eviction_policy="least-recently-used",
         )
+
+    def __dask_tokenize__(self):
+        # xarray tokenizes the store when opening a dataset. By default dask
+        # pickles it, and unpickling the S3 filesystem creates a new instance
+        # (with its own S3 client) cached by fsspec for the current thread.
+        return (type(self).__name__, self.s3_root, self.cache.directory, self.dataset_id)
 
     @property
     def supports_writes(self) -> bool:
