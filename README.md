@@ -384,9 +384,11 @@ For the `extract` and `probe` endpoints, you can pass interpolation options usin
 | LRU_CACHE_SIZE        | Max number of datasets kept in the in-memory `lru_cache`                                                  | 5             |
 | KDTREE_MAX_CACHE_SIZE | Max number of cKDTree cached                                                                              | 10            |
 | GZIP_COMPRESSION_LEVEL | Compression level of the responses, from 1 (fastest) to 9 (smallest). `0` disables compression (e.g. when a reverse proxy already compresses) | 1             |
-| DASK_NUM_WORKERS      | Number of threads of the dask scheduler. Memory usage grows with it (each thread decompresses its own zarr chunks) | 2             |
+| DASK_NUM_WORKERS      | Number of threads of the dask scheduler **per request** (dask creates a pool for each thread computing a request). Memory usage grows with it (each thread decompresses its own zarr chunks) | 2             |
 | MALLOC_ARENA_MAX      | Max number of glibc heaps so that freed memory goes back to the system           | 2             |
 | MALLOC_MMAP_THRESHOLD_ | Size (in bytes) above which glibc allocates with `mmap`, which gives memory back when freed. | 1048576       |
+| DATASET_VERSION_TTL   | Duration (in seconds) during which the last modification date of a dataset stored on S3 is reused instead of being requested again. A dataset updated on S3 is seen by the API after at most this delay. `0` disables it | 5             |
+| COORDS_PRELOAD_MAX_SIZE | Max total size of the coordinates (lon, lat, level) of a dataset loaded in memory when it is opened, so that they are not read again on each request (e.g. 1024KB, 256MB, 1GB). `0` disables it | 256MB         |
 
 > [!IMPORTANT]
 > With some S3 provider, some errors about checksum calculation can occur (error: `botocore.exceptions.ClientError: An error occurred (InvalidArgument) when calling the PutObject operation: x-amz-content-sha256 must be UNSIGNED-PAYLOAD, or a valid sha256 value.`). In that case, you should set `AWS_REQUEST_CHECKSUM_CALCULATION` environment variable to `when_required`

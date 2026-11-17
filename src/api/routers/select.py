@@ -1,8 +1,8 @@
 import asyncio
 import threading
-from typing import Annotated, Any
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
 from starlette.concurrency import run_in_threadpool
 
 import src.schemas.requests as models
@@ -22,7 +22,7 @@ async def free_selection_data(
     request: Request,
     base: Annotated[models.BaseParams, Depends()],
     time: Annotated[models.TimeParams, Depends()],
-) -> Any:
+):
     interp_vars_params = base.interp_vars_params
     if interp_vars_params is not None and ":" in interp_vars_params:
         interp_vars_params = parse_query_dict(interp_vars_params)
@@ -45,7 +45,7 @@ async def free_selection_data(
     cancel_event = threading.Event()
     watcher_task = asyncio.create_task(watch_disconnection(request, cancel_event))
     try:
-        return await run_in_threadpool(
+        content = await run_in_threadpool(
             extraction.free_selection,
             request,
             base.dataset,
@@ -55,3 +55,4 @@ async def free_selection_data(
         )
     finally:
         watcher_task.cancel()
+    return Response(content=content, media_type="application/json")

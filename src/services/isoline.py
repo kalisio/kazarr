@@ -1,3 +1,4 @@
+import threading
 from typing import Any
 
 from fastapi import Request
@@ -23,7 +24,7 @@ from src.utils.data import (
     sel,
 )
 from src.utils.file import load_dataset
-from src.utils.logging import StepDurationLogger
+from src.utils.logging import StepLoggerAndAborter
 from src.utils.requests import get_from_query
 
 # Number of grid cells added around the bounding box, so that isolines reach its edges
@@ -38,12 +39,15 @@ def isoline(
     time: str | None = None,
     format: str = "raw",
     config: dict[str, Any] | ExtractionConfig | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> bytes:
     """Compute isolines and return them serialized as JSON bytes."""
     if not isinstance(config, ExtractionConfig):
         config = ExtractionConfig.model_validate(config or {})
-    step_logger = StepDurationLogger(
-        "isoline", parameters=(dataset_id, variable, thresholds, time, format, config)
+    step_logger = StepLoggerAndAborter(
+        "isoline",
+        parameters=(dataset_id, variable, thresholds, time, format, config),
+        cancel_event=cancel_event,
     )
 
     step_logger.step_start("Load dataset and config")

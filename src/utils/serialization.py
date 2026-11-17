@@ -39,6 +39,9 @@ def json_array(values, flatten=True) -> np.ndarray | list:
     array = np.asarray(values)
     if flatten:
         array = array.ravel()
+    elif array.ndim == 0:
+        # np.ascontiguousarray would turn a scalar into a 1 element array
+        return array.item()
     if array.dtype.kind == "f" and array.dtype.itemsize < 8:
         array = array.astype(np.float64)
     elif array.dtype.kind not in "fiub":

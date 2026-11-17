@@ -1,8 +1,8 @@
 import asyncio
 import threading
-from typing import Annotated, Any
+from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, Query, Request
+from fastapi import APIRouter, Body, Depends, Query, Request, Response
 from starlette.concurrency import run_in_threadpool
 
 import src.schemas.requests as models
@@ -29,7 +29,7 @@ async def probe_data(
     level: Annotated[
         float | None, Query(description="The level coordinate to probe")
     ] = None,
-) -> Any:
+):
     interp_vars_params = base.interp_vars_params
     if interp_vars_params is not None and ":" in interp_vars_params:
         interp_vars_params = parse_query_dict(interp_vars_params)
@@ -75,7 +75,7 @@ async def probe_data(
     cancel_event = threading.Event()
     watcher_task = asyncio.create_task(watch_disconnection(request, cancel_event))
     try:
-        return await run_in_threadpool(
+        content = await run_in_threadpool(
             extraction.probe,
             request,
             base.dataset,
@@ -90,6 +90,7 @@ async def probe_data(
         )
     finally:
         watcher_task.cancel()
+    return Response(content=content, media_type="application/json")
 
 
 @router.post(
@@ -102,7 +103,7 @@ async def probe_data_multi(
     body: Annotated[models.MultiProbeBody, Body()],
     time: Annotated[models.MultiTimeParams, Depends()],
     spatial_interp: Annotated[models.SpatialInterpolationParams, Depends()],
-) -> Any:
+):
     interp_vars_params = base.interp_vars_params
     if interp_vars_params is not None and ":" in interp_vars_params:
         interp_vars_params = parse_query_dict(interp_vars_params)
@@ -148,7 +149,7 @@ async def probe_data_multi(
     cancel_event = threading.Event()
     watcher_task = asyncio.create_task(watch_disconnection(request, cancel_event))
     try:
-        return await run_in_threadpool(
+        content = await run_in_threadpool(
             extraction.probe,
             request,
             base.dataset,
@@ -163,3 +164,4 @@ async def probe_data_multi(
         )
     finally:
         watcher_task.cancel()
+    return Response(content=content, media_type="application/json")

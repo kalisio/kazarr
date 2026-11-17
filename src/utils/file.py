@@ -4,6 +4,7 @@ import datetime
 import json
 import os
 import threading
+import time
 from functools import lru_cache
 
 import s3fs
@@ -16,6 +17,7 @@ from zarr.abc.store import Store
 from zarr.core.buffer import Buffer, BufferPrototype
 
 from src import exceptions
+from src.utils.data import dget, get_dataset_level_vars
 
 ZARR_EXTENSION = ".zarr"
 S3_PREFIX = "s3://"
@@ -24,6 +26,26 @@ CACHE_LIMIT_MARGIN = 0.9  # 90% of the specified cache size limit
 LRU_CACHE_SIZE_ENV_VAR = "LRU_CACHE_SIZE"
 DEFAULT_LRU_CACHE_SIZE = 5
 DASK_CHUNKS_ENV_VAR = "DASK_CHUNKS"
+# Duration, in seconds, during which the last modification date of a dataset
+# stored on S3 is reused instead of being requested again (0 disables it).
+# A dataset updated on S3 is then seen by the API after at most this delay.
+DATASET_VERSION_TTL_ENV_VAR = "DATASET_VERSION_TTL"
+DEFAULT_DATASET_VERSION_TTL = 5
+# Above this number of entries, expired versions are purged from the cache
+DATASET_VERSION_CACHE_PURGE_SIZE = 1000
+# Max total size of the coordinates (lon, lat, level) of a dataset loaded in
+# memory when the dataset is opened, so that they are not read again from the
+# storage on each request (0 disables it)
+COORDS_PRELOAD_MAX_SIZE_ENV_VAR = "COORDS_PRELOAD_MAX_SIZE"
+DEFAULT_COORDS_PRELOAD_MAX_SIZE = "256MB"
+
+# S3 roots (bucket + datasets path) for which the access has been confirmed.
+# Only a success is kept: a failed check (e.g. a transient network error) is
+# done again on the next request.
+_s3_access_confirmed = set()
+# dataset_id -> (expiration time, last modification date)
+_dataset_versions = {}
+_dataset_versions_lock = threading.Lock()
 
 
 def get_lru_cache_size():
@@ -83,18 +105,86 @@ def get_s3_filesystem():
         return _s3_filesystem[1]
 
 
+def get_dataset_version_ttl():
+    ttl = os.getenv(DATASET_VERSION_TTL_ENV_VAR, str(DEFAULT_DATASET_VERSION_TTL))
+    try:
+        return max(0.0, float(ttl))
+    except ValueError:
+        return DEFAULT_DATASET_VERSION_TTL
+
+
 def s3_credentials_exists():
     bucket = os.getenv(BUCKET_NAME_ENV_VAR)
     if bucket is None:
         return False
+    s3_root = os.path.join(bucket, get_datasets_path())
+    if s3_root in _s3_access_confirmed:
+        return True
     s3_store = get_s3_filesystem()
     try:
-        s3_store.ls(os.path.join(bucket, get_datasets_path()))
-        return True
+        s3_store.ls(s3_root)
     except NoCredentialsError:
         return False
     except Exception:
         return False
+    _s3_access_confirmed.add(s3_root)
+    return True
+
+
+def get_coords_preload_max_size():
+    max_size = os.getenv(
+        COORDS_PRELOAD_MAX_SIZE_ENV_VAR, DEFAULT_COORDS_PRELOAD_MAX_SIZE
+    )
+    if max_size.strip() == "0":
+        return 0
+    size = get_cache_size_bytes(max_size)
+    return (
+        size
+        if size is not None
+        else get_cache_size_bytes(DEFAULT_COORDS_PRELOAD_MAX_SIZE)
+    )
+
+
+def preload_coordinates(dataset):
+    """Load the lon, lat and level variables of a dataset in memory.
+
+    Opened with dask, these variables are otherwise read again from the
+    storage on each request (e.g. 2D lon/lat arrays of curvilinear grids).
+    Index coordinates are already in memory. Variables are loaded in this
+    order until the size limit is reached.
+    """
+    max_size = get_coords_preload_max_size()
+    if max_size <= 0:
+        return dataset
+    config = dataset.attrs.get("kazarr", {})
+    names = [dget(config, "variables.lon"), dget(config, "variables.lat")]
+    level_vars = get_dataset_level_vars(dataset, config)
+    if isinstance(level_vars, str):
+        names.append(level_vars)
+    elif isinstance(level_vars, dict):
+        names.extend(level_vars.keys())
+
+    loaded_coords, loaded_vars = {}, {}
+    total_size = 0
+    for name in dict.fromkeys(names):
+        if name is None or name not in dataset or name in dataset.indexes:
+            continue
+        nbytes = dataset[name].nbytes
+        if total_size + nbytes > max_size:
+            log.info(
+                "[KAZARR] Variable {name} ({size} bytes) not preloaded: size limit reached",
+                name=name,
+                size=nbytes,
+            )
+            continue
+        target = loaded_coords if name in dataset.coords else loaded_vars
+        target[name] = dataset[name].compute()
+        total_size += nbytes
+    if loaded_coords:
+        dataset = dataset.assign_coords(loaded_coords)
+    if loaded_vars:
+        dataset = dataset.assign(loaded_vars)
+    return dataset
 
 
 # Internal cached loader — keyed by (path, version) so that updating a dataset
@@ -104,12 +194,13 @@ def s3_credentials_exists():
 def _load_versioned(path, version):
     if not s3_credentials_exists():
         try:
-            return xr.open_zarr(
+            dataset = xr.open_zarr(
                 os.path.join(get_datasets_path().rstrip("/"), path),
                 chunks=get_dask_chunks(),
             )
         except Exception:
             raise exceptions.DatasetNotFound(path.replace(ZARR_EXTENSION, ""))
+        return preload_coordinates(dataset)
 
     bucket = os.getenv(BUCKET_NAME_ENV_VAR)
     if bucket is None:
@@ -146,7 +237,7 @@ def _load_versioned(path, version):
         # Will try to open consolidated metadata first (https://docs.xarray.dev/en/latest/generated/xarray.open_zarr.html#xarray.open_zarr)
         # Will try to determine zarr_format (v2 or v3) automatically
         # chunks must be defined to enable dask lazy loading
-        dataset = xr.open_zarr(store, chunks=get_dask_chunks())
+        dataset = preload_coordinates(xr.open_zarr(store, chunks=get_dask_chunks()))
     except NoCredentialsError:
         raise exceptions.GenericInternalError("S3 credentials not found.")
     except zarr.errors.GroupNotFoundError:
@@ -254,25 +345,47 @@ def get_dataset_last_modified(dataset_id: str) -> os.stat_result | str | None:
     bucket = os.getenv(BUCKET_NAME_ENV_VAR)
     if bucket is None:
         return None
-    s3_store = get_s3_filesystem()
+
+    ttl = get_dataset_version_ttl()
+    now = time.monotonic()
+    with _dataset_versions_lock:
+        cached = _dataset_versions.get(dataset_id)
+    if cached is not None and cached[0] > now:
+        return cached[1]
+
     try:
-        s3_path = os.path.join(bucket, get_datasets_path().lstrip("/"), path)
-        # Often .zmetadata is updated when dataset changes
-        zmetadata_path = os.path.join(s3_path, ".zmetadata")
-        if s3_store.exists(zmetadata_path):
-            info = s3_store.info(zmetadata_path)
-            return info.get("LastModified")
-        # Fallback to the directory itself
-        info = s3_store.info(s3_path)
-        return info.get("LastModified")
+        last_modified = _get_s3_dataset_last_modified(bucket, path)
     except FileNotFoundError:
         log.info(
             f"[Kazarr] Could not get last modified date for {dataset_id}: dataset not found on S3."
         )
-        return None
+        last_modified = None
     except Exception as e:
+        # Not cached: the date is requested again on the next call
         log.warning(f"[Kazarr] Could not get last modified date for {dataset_id}: {e}")
         return None
+
+    if ttl > 0:
+        with _dataset_versions_lock:
+            if len(_dataset_versions) >= DATASET_VERSION_CACHE_PURGE_SIZE:
+                for key in [k for k, v in _dataset_versions.items() if v[0] <= now]:
+                    del _dataset_versions[key]
+            _dataset_versions[dataset_id] = (now + ttl, last_modified)
+    return last_modified
+
+
+def _get_s3_dataset_last_modified(bucket, path):
+    s3_store = get_s3_filesystem()
+    s3_path = os.path.join(bucket, get_datasets_path().lstrip("/"), path)
+    # Often .zmetadata is updated when dataset changes.
+    # refresh=True bypasses the s3fs listings cache, which could hold an
+    # outdated date once the dataset directory has been listed.
+    try:
+        info = s3_store.info(os.path.join(s3_path, ".zmetadata"), refresh=True)
+    except FileNotFoundError:
+        # Fallback to the directory itself
+        info = s3_store.info(s3_path, refresh=True)
+    return info.get("LastModified")
 
 
 # Convert cache size string (e.g., "1024MB") to bytes

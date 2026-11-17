@@ -917,7 +917,8 @@ def probe(
     format: str = "raw",
     config: dict[str, Any] | ExtractionConfig | None = None,
     cancel_event: threading.Event | None = None,
-) -> dict[str, Any]:
+) -> bytes:
+    """Probe data at the given points and return it serialized as JSON bytes."""
     if not isinstance(config, ExtractionConfig):
         config = ExtractionConfig.model_validate(config or {})
 
@@ -1750,8 +1751,10 @@ def probe(
             format=format,
             errors=group_errors,
         )
+        step_logger.step_start("Serialize output")
+        content = serialization.dumps(out)
         step_logger.end()
-        return out
+        return content
 
     # Path: one error code (or None) per vertex, aligned with the path times.
     # Grid: overridden below with one error list per point, aligned with times.
@@ -1810,8 +1813,13 @@ def probe(
     else:
         raise exceptions.BadConfigurationVariable(f"Unsupported format: {format}")
 
+    # Serialized here (in the worker thread) with orjson rather than by FastAPI
+    # in the event loop
+    step_logger.step_start("Serialize output")
+    content = serialization.dumps(out)
+
     step_logger.end()
-    return out
+    return content
 
 
 def free_selection(
@@ -1820,7 +1828,8 @@ def free_selection(
     variable: str,
     config: dict[str, Any] | ExtractionConfig | None = None,
     cancel_event: threading.Event | None = None,
-) -> dict[str, Any]:
+) -> bytes:
+    """Select data freely and return it serialized as JSON bytes."""
     if not isinstance(config, ExtractionConfig):
         config = ExtractionConfig.model_validate(config or {})
     step_logger = StepLoggerAndAborter(
@@ -1861,9 +1870,13 @@ def free_selection(
 
     data_values = data.values if hasattr(data, "values") else np.asarray(data)
     if np.issubdtype(data_values.dtype, np.number):
-        data = np.where(np.isnan(data_values), None, data_values).tolist()
+        # NaN are serialized as null by orjson
+        data = serialization.json_array(data_values, flatten=False)
     else:
         data = data_values.tolist()
 
+    step_logger.step_start("Serialize output")
+    content = serialization.dumps({"data": data})
+
     step_logger.end()
-    return {"data": data}
+    return content

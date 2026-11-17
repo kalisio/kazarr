@@ -1,8 +1,8 @@
 import asyncio
 import threading
-from typing import Annotated, Any
+from typing import Annotated
 
-from fastapi import APIRouter, Path, Query, Request
+from fastapi import APIRouter, Path, Query, Request, Response
 from starlette.concurrency import run_in_threadpool
 
 from src.services import mesh as mesh_service
@@ -47,7 +47,7 @@ async def mesh(
             description="The variable to use as level coordinate for the mesh geometry. This will override the dataset configuration and the 'variable' parameter.",
         ),
     ] = None,
-) -> Any:
+):
     config = {
         "is_3d": is_3d,
         "variable": variable,
@@ -58,7 +58,7 @@ async def mesh(
     cancel_event = threading.Event()
     watcher_task = asyncio.create_task(watch_disconnection(request, cancel_event))
     try:
-        return await run_in_threadpool(
+        content = await run_in_threadpool(
             mesh_service.get_mesh,
             dataset,
             format=format,
@@ -67,3 +67,4 @@ async def mesh(
         )
     finally:
         watcher_task.cancel()
+    return Response(content=content, media_type="application/json")

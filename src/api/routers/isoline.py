@@ -1,3 +1,5 @@
+import asyncio
+import threading
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request, Response
@@ -8,6 +10,7 @@ from src import exceptions
 from src.processing.isoline import ThresholdsMode, parse_thresholds
 from src.services import isoline as isoline_service
 from src.utils.data import parse_query_dict
+from src.utils.requests import watch_disconnection
 
 router = APIRouter(tags=["Isoline"])
 
@@ -60,14 +63,22 @@ async def isoline_data(
         },
     }
 
-    content = await run_in_threadpool(
-        isoline_service.isoline,
-        request,
-        base.dataset,
-        base.variable,
-        parse_thresholds(thresholds, thresholds_mode),
-        time=time.time,
-        format=base.format,
-        config=config,
-    )
+    parsed_thresholds = parse_thresholds(thresholds, thresholds_mode)
+
+    cancel_event = threading.Event()
+    watcher_task = asyncio.create_task(watch_disconnection(request, cancel_event))
+    try:
+        content = await run_in_threadpool(
+            isoline_service.isoline,
+            request,
+            base.dataset,
+            base.variable,
+            parsed_thresholds,
+            time=time.time,
+            format=base.format,
+            config=config,
+            cancel_event=cancel_event,
+        )
+    finally:
+        watcher_task.cancel()
     return Response(content=content, media_type="application/json")

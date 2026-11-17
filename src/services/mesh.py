@@ -1,3 +1,4 @@
+import itertools
 import threading
 from typing import Any
 
@@ -11,6 +12,7 @@ from src.processing.bbox import (
 from src.processing.contexts import BBoxContext
 from src.processing.interpolation import extrapolate_edges_from_cell_data
 from src.schemas.config import MeshExtractionConfig
+from src.utils import serialization
 from src.utils.data import dget, dgets, get_dataset_level_vars, get_level_var
 from src.utils.file import load_dataset
 from src.utils.logging import StepLoggerAndAborter
@@ -21,7 +23,8 @@ def get_mesh(
     format: str = "mesh",
     config: dict[str, Any] | MeshExtractionConfig | None = None,
     cancel_event: threading.Event | None = None,
-) -> dict[str, Any]:
+) -> bytes:
+    """Build the mesh of a dataset and return it serialized as JSON bytes."""
 
     if not isinstance(config, MeshExtractionConfig):
         config = MeshExtractionConfig.model_validate(config or {})
@@ -139,28 +142,27 @@ def get_mesh(
 
     if format == "geojson":
         step_logger.step_start("Prepare output (GeoJSON)")
-        flat_lons = lons_points.flatten()
-        flat_lats = lats_points.flatten()
-        flat_levels = levels_points.flatten()
-
-        features = []
-        for index, _ in np.ndenumerate(lons_points):
-            feature_id = "_".join(map(str, index))
-            flat_idx = np.ravel_multi_index(index, lons_points.shape)
-            features.append(
-                {
-                    "type": "Feature",
-                    "geometry": {
-                        "type": "Point",
-                        "coordinates": [
-                            float(flat_lons[flat_idx]),
-                            float(flat_lats[flat_idx]),
-                            float(flat_levels[flat_idx]),
-                        ],
-                    },
-                    "properties": {"id": feature_id},
-                }
+        # Coordinates converted to Python floats at once, in C order (same
+        # order as np.ndenumerate / itertools.product over the array indices)
+        coordinates = np.column_stack(
+            (
+                np.ravel(lons_points).astype(float),
+                np.ravel(lats_points).astype(float),
+                np.ravel(levels_points).astype(float),
             )
+        ).tolist()
+        feature_ids = (
+            "_".join(map(str, index))
+            for index in itertools.product(*(range(n) for n in lons_points.shape))
+        )
+        features = [
+            {
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": coords},
+                "properties": {"id": feature_id},
+            }
+            for coords, feature_id in zip(coordinates, feature_ids)
+        ]
         out = {"type": "FeatureCollection", "features": features}
     else:
         step_logger.step_start("Prepare output (mesh)")
@@ -208,10 +210,15 @@ def get_mesh(
             indices = cells.reshape((-1, 4))[:, 1:].flatten()
 
         out = {
-            "vertices": vertices.tolist(),
-            "indices": indices.tolist(),
+            "vertices": serialization.json_array(vertices),
+            "indices": serialization.json_array(indices),
             "is_3d": config.is_3d,
         }
 
+    # Serialized here (in the worker thread) with orjson, which handles numpy
+    # arrays natively, rather than by FastAPI in the event loop
+    step_logger.step_start("Serialize output")
+    content = serialization.dumps(out)
+
     step_logger.end()
-    return out
+    return content

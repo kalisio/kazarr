@@ -1,16 +1,29 @@
+import asyncio
 import threading
 
 from fastapi import Request
+
+# Delay, in seconds, between two checks of the client connection
+DISCONNECTION_POLL_INTERVAL = 0.2
 
 
 async def watch_disconnection(request: Request, cancel_event: threading.Event):
     """
     Asynchronous task that waits for the client to disconnect.
     When disconnected, it sets the thread-safe event.
+
+    `request.is_disconnected()` only reports the current state without waiting,
+    so it is polled until the client disconnects or the task is cancelled
+    (once the response is computed).
     """
     try:
-        if await request.is_disconnected():
-            cancel_event.set()
+        while not cancel_event.is_set():
+            if await request.is_disconnected():
+                cancel_event.set()
+                return
+            await asyncio.sleep(DISCONNECTION_POLL_INTERVAL)
+    except asyncio.CancelledError:
+        raise
     except Exception:
         cancel_event.set()
 
