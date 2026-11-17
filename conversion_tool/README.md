@@ -465,7 +465,28 @@ Save the resulting Zarr dataset to local storage or S3.
 | `save_path`          | String  | Path to save the dataset. Defaults to `INPUT_PATH` with `.zarr` extension. Prefix with `s3://` for [S3](#s3-configuration).            |
 | `version`            | Integer | Zarr format version (2 or 3). Default: 3                                                                          |
 | `float64_to_float32` | Boolean | Convert float64 data to float32 to save space. Default: false                                                     |
-| `chunk_size`         | Number or String | Target size of the uncompressed Zarr chunks, as a number of MiB (`16`) or a size (`"16MiB"`, `"1GB"`). Variables whose chunks are not uniform, or are more than 30% smaller (when split) or larger than this size, are rechunked. Also used after the merge of `load_and_merge_from_grib`. Default: 100 |
+| `chunk_size`         | Number or String | Target size of the uncompressed Zarr chunks, as a number of MiB (`16`) or a size (`"16MiB"`, `"1GB"`). See [Chunks](#chunks). Also used after the merge of `load_and_merge_from_grib`. Default: 8 |
+| `chunks`             | Object  | Chunk size of some dimensions, e.g. `{"step": 1, "isobaricInhPa": 1}`, for all the variables having them. `-1` stands for the whole dimension. The other dimensions share what is left of `chunk_size`. See [Chunks](#chunks). Optional |
+
+#### Chunks
+
+A chunk is the unit that kazarr downloads and decompresses: reading a single value reads its whole chunk. Chunks are therefore shaped for maps, which read one time and one level over a spatial window.
+
+The spatial dimensions are the dimensions of the `variables.lon` and `variables.lat` variables: (latitude, longitude) for a regular grid, (y, x) for a curvilinear grid, (node) for an unstructured mesh. For the variables having them:
+
+- When a map (the whole spatial extent at one time and one level) is larger than `chunk_size`, the other dimensions get chunks of 1, and the spatial extent is split into tiles of about `chunk_size`.
+- Otherwise, a chunk holds the whole spatial extent, then as many times (dimensions of `variables.time`) and levels (dimensions of `variables.level`) as fit in `chunk_size`, so that a time series reads few chunks.
+
+For instance, with the default `chunk_size` of 8 MiB, float32 variables get the following chunks:
+
+| Shape                                     | Chunks                    | Size     |
+| ----------------------------------------- | ------------------------- | -------- |
+| 52 times, 24 levels, 717 x 1121 points    | `[2, 1, 717, 1121]`       | 6.4 MB   |
+| 52 times, 1791 x 2801 points              | `[1, 896, 1401]`          | 5.0 MB   |
+| 100 times, 200 x 300 points               | `[34, 200, 300]`          | 8.2 MB   |
+| 100 times, 50000 nodes                    | `[41, 50000]`             | 8.2 MB   |
+
+A smaller `chunk_size` makes maps read less data, at the cost of more objects to write (one per chunk) and of more chunks to read for a time series. The variables without spatial dimension (e.g. the time coordinate), or all of them when the config does not define `variables.lon` and `variables.lat`, are chunked by Dask: they are rechunked when their chunks are not uniform, or are more than 30% smaller (when split) or larger than `chunk_size`.
 
 ### `clean`
 

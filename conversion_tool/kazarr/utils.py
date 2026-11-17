@@ -1,5 +1,6 @@
 import json
 import logging
+import math
 import os
 import shutil
 import time
@@ -31,8 +32,12 @@ BUCKET_NAME_ENV_VAR = "BUCKET_NAME"
 LON_VARIABLE_KEY = "variables.lon"
 LAT_VARIABLE_KEY = "variables.lat"
 LEVEL_VARIABLE_KEY = "variables.level"
+TIME_VARIABLE_KEY = "variables.time"
 CHUNK_SIZE_KEY = "chunk_size"
-DEFAULT_CHUNK_SIZE_MB = 100
+CHUNKS_KEY = "chunks"
+# Small enough for a map (one time, one level) to read little more than what it
+# displays, large enough to keep the number of objects written to S3 low.
+DEFAULT_CHUNK_SIZE_MB = 8
 
 logger = logging.getLogger(__name__)
 
@@ -210,20 +215,128 @@ def log_duration(start_time, message):
     logger.info("{%s} %s", f"{duration:.2f}s", message)
 
 
-def get_optimal_chunks_for_zarr(data_array, target_size="100MB"):
-    shape = data_array.shape
-    dtype = data_array.dtype
-    dims = data_array.dims
-
-    dask_chunks = da.core.normalize_chunks(
-        target_size, shape=shape, dtype=dtype, previous_chunks=None
+def get_optimal_chunks_for_zarr(data_array, target_bytes, fixed_chunks=None):
+    """Dask's automatic chunks of about target_bytes, for the variables without
+    spatial dimensions. The dimensions of fixed_chunks keep their size."""
+    fixed_chunks = fixed_chunks or {}
+    sizes = dict(zip(data_array.dims, data_array.shape, strict=True))
+    chunks = tuple(
+        _clamp_chunk(fixed_chunks[dim], sizes[dim]) if dim in fixed_chunks else "auto"
+        for dim in data_array.dims
     )
+    dask_chunks = da.core.normalize_chunks(
+        chunks,
+        shape=data_array.shape,
+        limit=target_bytes,
+        dtype=data_array.dtype,
+        previous_chunks=None,
+    )
+    return {dim: dask_chunks[i][0] for i, dim in enumerate(data_array.dims)}
 
-    uniform_chunks = {}
-    for i, dim_name in enumerate(dims):
-        uniform_chunks[dim_name] = dask_chunks[i][0]
 
-    return uniform_chunks
+def _clamp_chunk(size, dim_size):
+    """-1 stands for the whole dimension."""
+    return dim_size if size == -1 else min(size, dim_size)
+
+
+def _variable_dims(dataset, config, key):
+    """Dimensions of the variable that the config key (e.g. variables.lon)
+    refers to, or [] if the config does not define it or the dataset lacks it."""
+    if not config:
+        return []
+    try:
+        name = get_dataset_config_value(dataset, config, key)
+    except (ValueError, KeyError, DatasetError, DatasetConfigurationError):
+        return []
+    if isinstance(name, str) and name in dataset.variables:
+        return list(dataset[name].dims)
+    return []
+
+
+def get_dimension_roles(dataset, config):
+    """Spatial, time and level dimensions of the dataset, deduced from the lon,
+    lat, time and level variables of the config. Spatial dimensions are the
+    dimensions of lon and lat: (latitude, longitude) for a regular grid, (y, x)
+    for a curvilinear grid, (node,) for an unstructured mesh."""
+    spatial = list(
+        dict.fromkeys(
+            _variable_dims(dataset, config, LON_VARIABLE_KEY)
+            + _variable_dims(dataset, config, LAT_VARIABLE_KEY)
+        )
+    )
+    time = [
+        d for d in _variable_dims(dataset, config, TIME_VARIABLE_KEY) if d not in spatial
+    ]
+    level = [
+        d
+        for d in _variable_dims(dataset, config, LEVEL_VARIABLE_KEY)
+        if d not in spatial and d not in time
+    ]
+    return {"spatial": spatial, "time": time, "level": level}
+
+
+def get_geospatial_chunks(variable, roles, target_bytes, fixed_chunks=None):
+    """Chunks of about target_bytes suited to maps, which read one time and one
+    level over a spatial window, or None if the variable has no spatial dimension.
+
+    - When a map (the whole spatial extent at one time and one level) is larger
+      than target_bytes, the other dimensions get chunks of 1 and the spatial
+      extent is split into tiles of about target_bytes.
+    - Otherwise, a chunk holds the whole spatial extent, and as many times then
+      levels as fit in target_bytes, so that a time series reads few chunks.
+
+    The dimensions of fixed_chunks keep their size (-1 for the whole dimension),
+    and the other ones share what is left of target_bytes."""
+    sizes = dict(zip(variable.dims, variable.shape, strict=True))
+    spatial = [d for d in roles["spatial"] if d in sizes]
+    if not spatial or 0 in sizes.values():
+        return None
+
+    chunks = {
+        dim: _clamp_chunk(size, sizes[dim])
+        for dim, size in (fixed_chunks or {}).items()
+        if dim in sizes
+    }
+    fixed_bytes = variable.dtype.itemsize * math.prod(chunks.values())
+    free_spatial = [d for d in spatial if d not in chunks]
+    map_bytes = fixed_bytes * math.prod(sizes[d] for d in free_spatial)
+
+    if free_spatial and map_bytes > target_bytes:
+        # Tiles of about the same number of points along each spatial dimension,
+        # with chunks of the same size along a dimension (except the last one)
+        side = max((target_bytes / fixed_bytes) ** (1 / len(free_spatial)), 1)
+        for dim in free_spatial:
+            chunks[dim] = math.ceil(sizes[dim] / math.ceil(sizes[dim] / side))
+    else:
+        for dim in free_spatial:
+            chunks[dim] = sizes[dim]
+        count = max(1, int(target_bytes // map_bytes))
+        others = roles["time"] + roles["level"] + list(variable.dims)
+        for dim in dict.fromkeys(d for d in others if d in sizes and d not in chunks):
+            chunks[dim] = min(sizes[dim], count)
+            count = max(1, count // chunks[dim])
+
+    return {dim: chunks.get(dim, 1) for dim in variable.dims}
+
+
+def get_fixed_chunks(config):
+    """Chunk size of some dimensions, from the 'chunks' config parameter, e.g.
+    {"step": 1, "isobaricInhPa": 1}. -1 stands for the whole dimension."""
+    chunks = get_ci(config, CHUNKS_KEY) if config else None
+    if chunks is None:
+        return {}
+    if not isinstance(chunks, dict):
+        raise ConfigurationError(
+            f"Invalid '{CHUNKS_KEY}' config parameter: {chunks!r}. "
+            'Expected a mapping from dimension names to chunk sizes, e.g. {"time": 1}.'
+        )
+    for dim, size in chunks.items():
+        if isinstance(size, bool) or not isinstance(size, int) or (size < 1 and size != -1):
+            raise ConfigurationError(
+                f"Invalid '{CHUNKS_KEY}' config parameter for dimension '{dim}': {size!r}. "
+                "Expected a positive integer, or -1 for the whole dimension."
+            )
+    return chunks
 
 
 def get_chunk_size_mb(dataset, config):
@@ -249,38 +362,62 @@ def get_chunk_size_mb(dataset, config):
     return chunk_size_mb
 
 
-def rechunk_if_needed(dataset, target_size_mb=DEFAULT_CHUNK_SIZE_MB, tolerance=0.3):
-    """Rechunk the variables whose chunks are not uniform, or whose size is
-    not within target_size_mb +/- tolerance."""
+def rechunk_if_needed(
+    dataset, target_size_mb=DEFAULT_CHUNK_SIZE_MB, tolerance=0.3, config=None
+):
+    """Rechunk the variables to chunks of about target_size_mb.
+
+    The variables with spatial dimensions (see get_dimension_roles, which needs
+    the config) get chunks suited to maps (see get_geospatial_chunks). The other
+    ones are rechunked by Dask when their chunks are not uniform, or their size
+    is not within target_size_mb +/- tolerance. The 'chunks' config parameter
+    fixes the chunk size of some dimensions for all the variables."""
+    roles = get_dimension_roles(dataset, config)
+    fixed_chunks = get_fixed_chunks(config)
+    target_bytes = int(target_size_mb * 1024**2)
+
     for var_name, variable in dataset.variables.items():
         if variable.chunks is None:
             continue
 
-        chunk_shape = [c[0] for c in variable.chunks]
-        bytes_per_chunk = np.prod(chunk_shape) * variable.dtype.itemsize
-        current_chunk_mb = bytes_per_chunk / (1024**2)
-        # Small chunks can only be merged if the variable is split in several chunks
-        is_split = any(len(dim_chunks) > 1 for dim_chunks in variable.chunks)
-        chunks_too_small = is_split and current_chunk_mb < target_size_mb * (
-            1 - tolerance
-        )
-        chunks_too_large = current_chunk_mb > target_size_mb * (1 + tolerance)
-
-        # Check if all main chunks are the same size (uniform)
+        current_chunks = {dim: c[0] for dim, c in zip(variable.dims, variable.chunks, strict=True)}
         # Last chunk is often smaller, so we ignore it for the uniformity check
         is_uniform = all(
             len(set(dim_chunks[:-1])) <= 1 for dim_chunks in variable.chunks
         )
 
-        if not is_uniform or chunks_too_small or chunks_too_large:
-            # Rechunk variable to uniform chunk sizes based on Dask's optimal chunking
-            optimal_chunks = get_optimal_chunks_for_zarr(
-                variable, target_size=f"{int(target_size_mb * 1024**2)}B"
+        new_chunks = get_geospatial_chunks(variable, roles, target_bytes, fixed_chunks)
+        if new_chunks is None:
+            bytes_per_chunk = math.prod(current_chunks.values()) * variable.dtype.itemsize
+            current_chunk_mb = bytes_per_chunk / (1024**2)
+            # Small chunks can only be merged if the variable is split in several chunks
+            is_split = any(len(dim_chunks) > 1 for dim_chunks in variable.chunks)
+            chunks_too_small = is_split and current_chunk_mb < target_size_mb * (
+                1 - tolerance
             )
-            rechunked = variable.chunk(optimal_chunks)
-            # Chunks inherited from a source Zarr store would conflict with the new ones
-            rechunked.encoding.pop("chunks", None)
-            dataset[var_name] = rechunked
+            chunks_too_large = current_chunk_mb > target_size_mb * (1 + tolerance)
+            sizes = dict(zip(variable.dims, variable.shape, strict=True))
+            fixed_differ = any(
+                current_chunks[dim] != _clamp_chunk(size, sizes[dim])
+                for dim, size in fixed_chunks.items()
+                if dim in sizes
+            )
+            if is_uniform and not (chunks_too_small or chunks_too_large or fixed_differ):
+                continue
+            new_chunks = get_optimal_chunks_for_zarr(variable, target_bytes, fixed_chunks)
+        elif is_uniform and new_chunks == current_chunks:
+            continue
+
+        logger.info(
+            "Rechunking variable '%s' to %s (%.1f MiB per chunk)",
+            var_name,
+            new_chunks,
+            math.prod(new_chunks.values()) * variable.dtype.itemsize / 1024**2,
+        )
+        rechunked = variable.chunk(new_chunks)
+        # Chunks inherited from a source Zarr store would conflict with the new ones
+        rechunked.encoding.pop("chunks", None)
+        dataset[var_name] = rechunked
 
     return dataset
 

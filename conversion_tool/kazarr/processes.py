@@ -491,7 +491,7 @@ def load_and_merge_from_grib(dataset, config):
     if sub_datasets:
         merged_dataset = xr.merge(sub_datasets)
         new_dataset = rechunk_if_needed(
-            merged_dataset, get_chunk_size_mb(merged_dataset, config)
+            merged_dataset, get_chunk_size_mb(merged_dataset, config), config=config
         )  # Re-chunk usually needed after merge
     else:
         new_dataset = None
@@ -1419,7 +1419,7 @@ def save(dataset, config):
 
     logger.info("Saving dataset to Zarr format to %s...", write_path)
 
-    dataset = rechunk_if_needed(dataset, get_chunk_size_mb(dataset, config))
+    dataset = rechunk_if_needed(dataset, get_chunk_size_mb(dataset, config), config=config)
 
     zarr_kwargs = {
         "mode": "w",
