@@ -130,6 +130,35 @@ List available templates for new datasets.
 kazarr list-templates [--templates-path PATH]
 ```
 
+### `inspect`
+
+Show which Xarray variable each group of messages of a GRIB file becomes, to help writing templates.
+GRIB keys (`shortName`, `stepType`, `typeOfLevel`) are the ones to use in `filter_by_keys`, while variable names are the ones to use in the following processes (`keep_variables`, `rename_variables`…).
+The file is loaded with `load_from_grib` (only metadata is read), so names are exactly those your pipelines will get, including the suffixes added to [duplicate variables](#load_from_grib) and to variables split by time range. The `timeRange` column gives the duration of statistically processed variables (`1h`, `3h`…), when it is the same for all their messages.
+
+```bash
+kazarr inspect GRIB_FILE [--backend-kwargs JSON] [--custom-eccodes-path PATH] [--json]
+```
+
+*   `GRIB_FILE`: Path of a single GRIB file (local or `s3://`). For S3 files, the GRIB message groups are not listed, only the loaded variables.
+*   `--backend-kwargs JSON`: cfgrib `backend_kwargs`, as in a template, e.g. `'{"filter_by_keys": {"stepType": "max"}}'`.
+*   `--custom-eccodes-path PATH`: Path to custom ecCodes definitions, as for the main command.
+*   `--json`: Output the result as JSON.
+
+```
+shortName  stepType  typeOfLevel        timeRange  paramId  messages     variable      dims                       notes
+2t         min       heightAboveGround  3h         167      4         →  t2m_min       step, latitude, longitude  renamed by kazarr
+2t         max       heightAboveGround  3h         167      4         →  t2m_max       step, latitude, longitude  renamed by kazarr
+ptype      avg       surface            1h         260015   24        →  ptype_avg_1h  step, latitude, longitude  renamed by kazarr
+ptype      avg       surface            3h         260015   8         →  ptype_avg_3h  step, latitude, longitude  renamed by kazarr
+CAPE_INS   instant   unknown            -          0        13        →  -                                        not loaded; unknown parameter (missing ecCodes definition?)
+```
+
+> [!NOTE]
+> Variable names come from the ecCodes `cfVarName`, so they depend on the ecCodes version and on custom definitions. Run `inspect` in the same environment as your conversions.
+
+From Python: `from kazarr.grib_inspect import inspect_grib, format_inspection`.
+
 ## Config
 
 The configuration is a JSON object that defines the parameters for the pipeline processes.
@@ -244,6 +273,12 @@ Load a dataset from GRIB(s) file(s) from local storage or S3.
 | `concat_dim`         | String  | Dimension on which to merge GRIB files, if `load_path` is a directory                                                                               |
 | `store_as_secondary` | Boolean | Whether or not store this dataset as a secondary dataset. Usefull for processes that need multiples datasets. Default: `false`                      |
 | `secondary_tag`      | String  | When `store_as_secondary` is true, define a key to this newly loaded dataset. Default: `secondary_X` where X is the xth loaded dataset as secondary |
+
+When a single GRIB file cannot be opened as one dataset, it is split into several datasets which are then merged. A variable found in several of them (e.g. `ptype` both as an average and as a maximum) is renamed in **all** its occurrences, using the first of `GRIB_stepType` then `GRIB_typeOfLevel` that differs between them: `ptype_avg` and `ptype_max`. These names do not depend on the order of the messages in the file. If no attribute tells the occurrences apart (or if the result would clash with an existing variable), the first occurrence keeps its name and the others are numbered (`ptype_2`, `ptype_3`…), in file order; a warning is then logged.
+
+A single GRIB file may also hold a parameter computed over several durations, e.g. Météo-France `PTYPE_60` and `PTYPE_180` (precipitation type averaged over 1h and over 3h). cfgrib puts them in one variable indexed by the end of their time range, and silently keeps only one message when several of them end at the same step. Such variables are loaded once per time range (`lengthOfTimeRange`) and suffixed with it: `ptype_avg_1h` and `ptype_avg_3h`. Only variables whose time ranges overlap are split: a file holding only 1h averages keeps `ptype_avg`, and accumulations since the start of the forecast (`0-1`, `0-2`…) are left untouched. Variables computed over a single time range get `GRIB_lengthOfTimeRange` and `GRIB_indicatorOfUnitForTimeRange` attributes. To load only one time range, filter on it: `{"filter_by_keys": {"shortName": "ptype", "lengthOfTimeRange": 3}}`.
+
+When merging GRIB files, `load_and_merge_from_grib` writes `concatenated_<discriminator>_<index>.grib2` files in the input folder. These files are never used as inputs of another merge.
 
 ### `load_from_zarr`
 

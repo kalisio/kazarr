@@ -11,6 +11,47 @@ from kazarr.api import (
 )
 
 
+def _run_inspect(argv):
+    # Imported here so that GRIB dependencies are only needed by this command
+    from kazarr.grib_inspect import (
+        format_inspection,
+        format_inspection_json,
+        inspect_grib,
+    )
+
+    parser = argparse.ArgumentParser(
+        prog="kazarr inspect",
+        description=(
+            "Show which Xarray variable each group of messages of a GRIB file becomes. "
+            "Use the GRIB keys (shortName, stepType, typeOfLevel) in filter_by_keys, "
+            "and the variable names in the following processes (keep_variables, rename_variables...)."
+        ),
+    )
+    parser.add_argument(
+        "input_path", type=str, help="Path of a single GRIB file (local or s3://)"
+    )
+    parser.add_argument(
+        "--backend-kwargs",
+        type=json.loads,
+        default=None,
+        help='cfgrib backend_kwargs as JSON string, as in a template (e.g. \'{"filter_by_keys": {"stepType": "max"}}\')',
+    )
+    parser.add_argument(
+        "--custom-eccodes-path",
+        type=str,
+        help="Path to a folder containing extra ecCodes definitions",
+    )
+    parser.add_argument("--json", action="store_true", help="Output the result as JSON")
+    args = parser.parse_args(argv)
+
+    rows = inspect_grib(
+        args.input_path,
+        backend_kwargs=args.backend_kwargs,
+        custom_eccodes_path=args.custom_eccodes_path,
+    )
+    print(format_inspection_json(rows) if args.json else format_inspection(rows))
+
+
 def _run():
     """Core CLI logic. Raises exceptions on error."""
     # Handle list-templates subcommand
@@ -32,10 +73,17 @@ def _run():
             print(f"- {template}")
         return
 
+    # Handle inspect subcommand
+    if len(sys.argv) > 1 and sys.argv[1] == "inspect":
+        _run_inspect(sys.argv[2:])
+        return
+
     epilog_text = """
 other commands:
   list-templates        List available templates for processing.
                         Usage: kazarr list-templates [--templates-path PATH]
+  inspect               Show which Xarray variable each group of messages of a GRIB file becomes.
+                        Usage: kazarr inspect GRIB_FILE [--backend-kwargs JSON] [--custom-eccodes-path PATH] [--json]
 """
 
     parser = argparse.ArgumentParser(
