@@ -1,3 +1,4 @@
+import importlib.util
 import itertools
 import logging
 import os
@@ -334,6 +335,16 @@ def open_grib_file(path, backend_kwargs=None):
 
 def init_dask_dashboard(dataset, config):
     """Initialize the Dask dashboard to monitor computation progress and load."""
+    # bokeh is a development-only dependency (see the "dev" dependency group in
+    # pyproject.toml): without it distributed cannot serve the dashboard nor
+    # render the performance report, so skip this step instead of failing.
+    if importlib.util.find_spec("bokeh") is None:
+        logger.warning(
+            "Dask dashboard requested but bokeh is not installed, skipping it. "
+            "Install the development dependencies (`uv sync`) or `pip install 'bokeh>=3.1'`."
+        )
+        return dataset, config
+
     client = Client()
     link = client.dashboard_link
     message = "Dask dashboard available at: "

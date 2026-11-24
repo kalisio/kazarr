@@ -7,7 +7,7 @@ name = "kazarr-conversion-tool"
 version = "1.1.1"
 description = "A tool to process various data formats to Zarr datasets compatible with the kazarr service"
 readme = "README.md"
-requires-python = ">=3.11,<3.14"
+requires-python = ">=3.11,<3.15"
 license = { text = "MIT" }
 keywords = ["zarr", "netcdf", "grib", "xarray", "conversion", "kalisio"]
 
@@ -20,10 +20,7 @@ dependencies = [
     "pyproj==3.7.2",
     "dask[distributed]==2026.3.0",
     "s3fs==2025.10.0",
-    "matplotlib==3.10.7",
-    "pyvista==0.46.4",
     "platformdirs==4.10.0",
-    "bokeh==3.0.0",
 ]
 
 [project.optional-dependencies]
@@ -47,6 +44,10 @@ grib = ["cfgrib>=0.9.15.1", "eccodes>=2.45"]
 [dependency-groups]
 # Required to build the standalone executable
 build = ["pyinstaller>=6.21.0"]
+# Development-only tooling, installed by default by `uv sync` but not shipped
+# with the published package. bokeh powers the Dask dashboard and the
+# performance report enabled by --dask-dashboard (distributed needs >=3.1).
+dev = ["bokeh==3.9.2"]
 
 [project.scripts]
 kazarr = "kazarr.cli:main"

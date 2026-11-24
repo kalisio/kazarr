@@ -6,7 +6,7 @@ A tool to create Zarr datasets from NetCDF or GRIB2 files.
 
 ### As a library
 
-The tool requires Python 3.11+. You can install it by using **pip**:
+The tool supports Python 3.11 to 3.14. You can install it by using **pip**:
 
 ```bash
 pip install kazarr-conversion-tool[grib] --index-url https://test.pypi.org/simple --extra-index-url https://pypi.org/simple
@@ -115,7 +115,7 @@ kazarr [OPTIONS] INPUT_PATH
 *   `--data-mapping`: Whether to map data on mesh vertices or celles [default: vertices].
 *   `--mesh-type`: Type of mesh to generate (default: auto, which infers from data between regular and rectilinear but not able to handle radial meshes)
 *   `--custom-eccodes-path`: Path to a folder containing extra ecCodes. This path must be set to the parent folder containing the grib1, grib2, etc. subdirectories.
-*   `--dask-dashboard`: Start a Dask dashboard for monitoring the processing
+*   `--dask-dashboard`: Start a Dask dashboard for monitoring the processing (requires `bokeh>=3.1`, only installed with the development dependencies: `uv sync` or `pip install 'bokeh>=3.1'`)
 *   `--s3-storage-class`: Define which class to use for saving Zarr dataset to S3 [default: `STANDARD`]  
 choices: `STANDARD`, `REDUCED_REDUNDANCY`, `STANDARD_IA`, `ONEZONE_IA`, `INTELLIGENT_TIERING`, `GLACIER`, `DEEP_ARCHIVE`, `OUTPOSTS`, `GLACIER_IR`, `SNOW`, `EXPRESS_ONEZONE`, `FSX_OPENZFS`
 

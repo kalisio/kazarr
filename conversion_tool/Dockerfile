@@ -53,7 +53,7 @@ WORKDIR ${HOME}
 # issue this whole native-library setup exists to avoid. The frozen kazarr
 # executable itself doesn't need it: PyInstaller bundles its own copy of
 # libeccodes.so and resolves it via its own bundle path at runtime.
-RUN chmod -R g=u /app && uv sync --group build --all-extras --no-cache && \
+RUN chmod -R g=u /app && uv sync --group build --no-dev --all-extras --no-cache && \
   LD_LIBRARY_PATH="/opt/eccodes/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}" \
     uv run pyinstaller -F -n kazarr \
       --collect-all eccodes \
