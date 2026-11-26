@@ -153,12 +153,16 @@ class SpatialInterpolationParams:
             " An explicit `interp_spatial_method` takes precedence."
         ),
     )
-    interp_spatial_method: Literal["nearest", "linear", "cubic", "idw", "rbf"] | None = Query(
+    interp_spatial_method: (
+        Literal["nearest", "linear", "cubic", "idw", "rbf", "polar_bilinear"] | None
+    ) = Query(
         None,
         description=(
             "The method to use for spatial interpolation. Takes precedence over"
             " `interp_spatial`. Defaults to 'linear' with `interp_spatial=true`,"
-            " and to 'nearest' otherwise."
+            " and to 'nearest' otherwise. 'polar_bilinear' (bilinear interpolation"
+            " in polar coordinates) is only available on the probe endpoints, for"
+            " polar grids detected by the conversion tool."
         ),
     )
     interp_spatial_params: str = Query(

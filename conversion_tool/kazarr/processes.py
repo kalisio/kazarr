@@ -1,3 +1,4 @@
+import hashlib
 import importlib.util
 import itertools
 import logging
@@ -29,6 +30,7 @@ from kazarr.exceptions import (
     LastOperationNotCompletedError,
     MissingEnvironmentVariableError,
 )
+from kazarr.polar import POLAR_GRID_DETECTION_KEY, POLAR_GRID_KEY, detect_polar_grid
 from kazarr.s3.upload_stats import register_stats_s3_filesystem_on_workers
 from kazarr.utils import (
     BUCKET_NAME_ENV_VAR,
@@ -1555,6 +1557,125 @@ def simplify_grid(dataset, config):
     return dataset, config
 
 
+def _coordinates_fingerprint(lons, lats):
+    """Fingerprint of the node coordinates, to tell whether the polar grid
+    detection made earlier still applies to the current coordinates."""
+    digest = hashlib.blake2b(digest_size=16)
+    for coord in (lons, lats):
+        values = np.ascontiguousarray(coord.values)
+        digest.update(
+            f"{coord.name}|{coord.dims}|{values.shape}|{values.dtype}".encode()
+        )
+        digest.update(values.tobytes())
+    return digest.hexdigest()
+
+
+def _apply_polar_grid_detection(config, detection):
+    """Set the result of a polar grid detection in the config."""
+    config.pop(POLAR_GRID_KEY, None)
+    metadata = detection["metadata"]
+    if metadata is not None:
+        config[POLAR_GRID_KEY] = metadata
+        if (config.get("mesh_type", "auto") or "auto") == "auto":
+            config["mesh_type"] = "radial"
+    return config
+
+
+def _polar_grid_coordinates(dataset, config):
+    """Longitudes / latitudes to run the polar grid detection on, or None when
+    it does not apply (mesh type, missing or unstructured coordinates)."""
+    mesh_type = config.get("mesh_type", "auto") or "auto"
+    if mesh_type not in ("auto", "radial"):
+        return None
+    lon_var = get_dataset_config_value(dataset, config, LON_VARIABLE_KEY)
+    lat_var = get_dataset_config_value(dataset, config, LAT_VARIABLE_KEY)
+    if lon_var not in dataset or lat_var not in dataset:
+        return None
+    lons, lats = dataset[lon_var], dataset[lat_var]
+    if lons.ndim < 2 or lons.dims != lats.dims:
+        if mesh_type == "radial":
+            logger.warning(
+                "Mesh type is 'radial' but longitudes / latitudes are not structured 2D arrays: "
+                "no polar grid structure stored."
+            )
+        return None
+    return lons, lats
+
+
+def detect_polar_grid_structure(dataset, config):
+    """Detect a polar (radar like) grid and store its structure in the config.
+
+    Only run when the mesh type is "auto" or "radial". When a polar grid is
+    detected, its center, the azimuth of each beam and the range of each gate
+    are stored under the "polar_grid" key (used by the "polar_bilinear"
+    interpolation of probes), and an "auto" mesh type becomes "radial".
+    The detection never fails the conversion.
+
+    The `save` process runs it, unless it was already run (e.g. explicitly in a
+    pipeline, sub-pipelines included) on the same coordinates: the result is
+    recorded with a fingerprint of the coordinates, so that it is reused only
+    while they are not changed by a later process (reprojection...).
+    """
+    config.pop(POLAR_GRID_KEY, None)
+    coords = _polar_grid_coordinates(dataset, config)
+    if coords is None:
+        # Set rather than removed: the key may be propagated out of a sub-pipeline
+        config[POLAR_GRID_DETECTION_KEY] = None
+        return dataset, config
+    lons, lats = coords
+
+    try:
+        metadata, reason = detect_polar_grid(lons.values, lats.values, lons.dims)
+    except Exception as e:
+        metadata, reason = None, f"detection failed ({e})"
+
+    detection = {
+        "fingerprint": _coordinates_fingerprint(lons, lats),
+        "metadata": metadata,
+    }
+    config[POLAR_GRID_DETECTION_KEY] = detection
+    # Propagate the result out of a sub-pipeline, up to the `save` process
+    add_to_global_config_update(config, POLAR_GRID_DETECTION_KEY)
+    config = _apply_polar_grid_detection(config, detection)
+
+    if metadata is None:
+        mesh_type = config.get("mesh_type", "auto") or "auto"
+        log = logger.warning if mesh_type == "radial" else logger.info
+        log("Grid is not detected as a polar grid: %s.", reason)
+        return dataset, config
+
+    logger.info(
+        "Polar grid detected: center (%.6f, %.6f), %d beams (%s), %d gates from %.1f m to %.1f m.",
+        metadata["center"]["lon"],
+        metadata["center"]["lat"],
+        len(metadata["azimuths"]),
+        metadata["closure"],
+        len(metadata["ranges"]),
+        min(metadata["ranges"]),
+        max(metadata["ranges"]),
+    )
+    return dataset, config
+
+
+def _ensure_polar_grid_structure(dataset, config):
+    """Reuse the polar grid detection already made on the same coordinates,
+    or run it."""
+    detection = config.get(POLAR_GRID_DETECTION_KEY)
+    if detection is not None:
+        coords = _polar_grid_coordinates(dataset, config)
+        if coords is not None and detection["fingerprint"] == _coordinates_fingerprint(
+            *coords
+        ):
+            logger.info(
+                "Polar grid detection already made on the same coordinates: reused."
+            )
+            return dataset, _apply_polar_grid_detection(config, detection)
+        logger.info(
+            "Coordinates changed since the last polar grid detection: run it again."
+        )
+    return detect_polar_grid_structure(dataset, config)
+
+
 def save(dataset, config):
     """Save the final dataset to Zarr format locally or on S3."""
     path = get_dataset_config_value(dataset, config, "save_path")
@@ -1575,6 +1696,9 @@ def save(dataset, config):
         dataset, config, "float64_to_float32", default=False
     )
 
+    # Before any float32 conversion, to detect it with the full precision
+    dataset, config = _ensure_polar_grid_structure(dataset, config)
+
     if float64_to_float32:
         for var in dataset.variables:
             if dataset[var].dtype == np.float64:
@@ -1585,6 +1709,7 @@ def save(dataset, config):
         "dimensions",
         "mesh_data_on_cells",
         "mesh_type",
+        POLAR_GRID_KEY,
         "description",
     ]
     kazarr_metadata = {k: v for k, v in config.items() if k in keep_keys}
@@ -1644,7 +1769,9 @@ def save(dataset, config):
 
     logger.info("Saving dataset to Zarr format to %s...", write_path)
 
-    dataset = rechunk_if_needed(dataset, get_chunk_size_mb(dataset, config), config=config)
+    dataset = rechunk_if_needed(
+        dataset, get_chunk_size_mb(dataset, config), config=config
+    )
 
     zarr_kwargs = {
         "mode": "w",

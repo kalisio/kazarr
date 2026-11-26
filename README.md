@@ -115,7 +115,7 @@ The `probe` endpoint accepts the following query parameters:
 | `time`                  | The time value/slice to probe.                                                                            |    ✓     | `None`        |
 | `interp_time` | Whether to interpolate values on time dimension (linearly, unless `interp_vars_method` is given) or to get the closest time step. Shortcut to `interp_vars=YOUR_TIME_VARIABLE` | ✓ | `False` |
 | `interp_spatial` | Whether to interpolate spatially: `true` = interpolate (`linear` unless `interp_spatial_method` is given), `false` = strict mode (no interpolation; for probes on point lists, the probe must match one of the points, see [Strict mode](#strict-mode-point-lists)), not set = `nearest` | ✓ | `None` |
-| `interp_spatial_method` | The method to use for spatial interpolation (Supported: `nearest`, `linear`, `cubic`, `idw`, `rbf`). Takes precedence over `interp_spatial` | ✓ | `linear` with `interp_spatial=true`, else `nearest` |
+| `interp_spatial_method` | The method to use for spatial interpolation (Supported: `nearest`, `linear`, `cubic`, `idw`, `rbf`, `polar_bilinear`, see [Polar grids](#probe-spatial-interpolation-polar-grids)). Takes precedence over `interp_spatial` | ✓ | `linear` with `interp_spatial=true`, else `nearest` |
 | `interp_spatial_params` | Parameters for spatial interpolation (e.g. `padding:1.0`)                                                 |    ✓     | `padding:1.0` |
 | `interp_vars`           | Variables to interpolate during probe                                                                     |    ✓     | `[]`          |
 | `interp_vars_method` | Method for variable/time interpolation. Overrides the default method (see [Interpolation defaults](#interpolation-defaults-and-precedence)) | ✓ | `linear` with `interp_time`/`interp_vars`, else `nearest` |
@@ -141,7 +141,7 @@ The `probes` endpoint accepts the following query parameters:
 | `time`                  | The time value/slice to probe.                                                                            |    ✓     | `None`        |
 | `interp_time` | Whether to interpolate values on time dimension (linearly, unless `interp_vars_method` is given) or to get the closest time step. Shortcut to `interp_vars=YOUR_TIME_VARIABLE` | ✓ | `False` |
 | `interp_spatial` | Whether to interpolate spatially: `true` = interpolate (`linear` unless `interp_spatial_method` is given), `false` = strict mode (no interpolation; for probes on point lists, the probe must match one of the points, see [Strict mode](#strict-mode-point-lists)), not set = `nearest` | ✓ | `None` |
-| `interp_spatial_method` | The method to use for spatial interpolation (Supported: `nearest`, `linear`, `cubic`, `idw`, `rbf`). Takes precedence over `interp_spatial` | ✓ | `linear` with `interp_spatial=true`, else `nearest` |
+| `interp_spatial_method` | The method to use for spatial interpolation (Supported: `nearest`, `linear`, `cubic`, `idw`, `rbf`, `polar_bilinear`, see [Polar grids](#probe-spatial-interpolation-polar-grids)). Takes precedence over `interp_spatial` | ✓ | `linear` with `interp_spatial=true`, else `nearest` |
 | `interp_spatial_params` | Parameters for spatial interpolation (e.g. `padding:1.0`)                                                 |    ✓     | `padding:1.0` |
 | `interp_vars`           | Variables to interpolate during probe                                                                     |    ✓     | `[]`          |
 | `interp_vars_method` | Method for variable/time interpolation. Overrides the default method (see [Interpolation defaults](#interpolation-defaults-and-precedence)) | ✓ | `linear` with `interp_time`/`interp_vars`, else `nearest` |
@@ -303,7 +303,7 @@ Interpolation is applied in four different scenarios:
      - *1D Level Variables*: Falls back to Xarray interpolation. Ensure `interp_spatial_method` is among the supported methods listed in Scenario 1.
      - *Multi-dimensional Level Variables*: Currently restricted to `linear` or `nearest` methods.
 4. **Point Probing**: Used by the `probe` endpoint to retrieve values over time.
-   - *Supported methods*: Currently, only `IDW` (Inverse Distance Weighting) is supported.
+   - *Supported methods*: `nearest`, `IDW` (Inverse Distance Weighting, used for any other method on irregular grids) and, on polar grids, `polar_bilinear` (see [Polar grids](#probe-spatial-interpolation-polar-grids)).
    - *Parameters*:
      - `k`: Number of nearest neighbors to use (k-nearest-neighbors selection). **Default strategy** when neither `k` nor `radius` is given.
      - `radius`: Maximum search radius for neighbors (radius-based selection). Only used when explicitly given; ignored if `k` is also given.
@@ -328,6 +328,15 @@ For the two irregular-grid cases, a few implementation details worth knowing:
 - **Cartographic (cartesian) conversion**: horizontal coordinates are projected onto the unit sphere as 3D cartesian `(x, y, z)` points before being fed to the KD-tree. This avoids two issues inherent to searching a raw `(lon, lat)` point cloud with a generic distance-based algorithm: the antimeridian discontinuity (-180°/180°) and the compression of longitude distances near the poles. `deg_to_chord_distance`/`chord_to_deg_distance` convert between real angular degrees and the tree's native (chord) distance — an exact conversion, valid at any angle, not an approximation.
 - **`level_scale` and radians (irregular level only)**: combining horizontal degrees with a vertical axis in raw physical units (meters, hPa, ...) in a single distance metric is meaningless without first making them comparable. `level_scale` converts the level axis into "degree-equivalents" (how many native level units count as 1 horizontal degree). That degree-equivalent value is then converted to radians before being stored in the KD-tree, to match the scale of the cartesian `(x, y, z)` chord coordinates (which are themselves radian-scale, not degree-scale) — otherwise the level axis would still dominate (or be dominated by) the spatial axes in the tree's own distance ordering, biasing which neighbors get selected. This bakes `level_scale` into neighbor *selection* itself (both `k` and `radius` modes), not just the final IDW weighting.
 - **`k` vs `radius`**: `k` selects a fixed number of nearest neighbors (via `cKDTree.query`); `radius` instead selects every neighbor within a given distance (via `cKDTree.query_ball_point`), which can vary per point. `k` is the default, since it never risks an empty neighbor search on a sparse patch of the grid; passing `radius` opts into distance-bounded selection instead. If both are given, `k` takes precedence.
+
+### Probe Spatial Interpolation: Polar grids
+
+`interp_spatial_method=polar_bilinear` performs a bilinear interpolation in polar coordinates (range, azimuth) on polar (radar like) grids. It is only available on the `probe`/`probes` endpoints.
+
+- **Grid structure**: it relies on the structure of the polar grid (center, azimuth of every beam, range of every gate), detected by the conversion tool and stored in the dataset metadata (`polar_grid`). Datasets which are not polar grids, or which were converted before this detection was added, return a `BAD_SELECTION` error: convert them again.
+- **Interpolation**: the geodesic (WGS84) range and azimuth of the probe from the center locate its polar cell, whose 4 nodes are weighted bilinearly in range and azimuth. Missing (`NaN`) nodes are ignored, the weights of the others being renormalized.
+- **Boundaries**: probes beyond the last gate, or outside the sector of a non full circle grid, are outside the grid (`LOCATION_OUT_OF_BOUNDS`). Probes closer to the center than the first gate are interpolated between the two surrounding beams, at the first gate.
+- **Limitations**: levels defined on the grid nodes (multi-dimensional level variable) and polar grids with several horizontal grids (e.g. several radar elevations) are not supported.
 
 ### Interpolation defaults and precedence
 
@@ -505,6 +514,41 @@ host_bucket = http://localhost:3900
 use_https = False
 ```
 Then synchronize any data from your local file system to garage with `s3cmd -c ./s3cmd.cfg sync ./zarr-data/ s3://zarr-data`.
+
+## Load tests
+
+The `perf` folder contains load tests based on [Locust](https://locust.io/), used to measure latencies and memory usage under concurrent requests (e.g. before and after a change of the caches or of the dask configuration).
+
+By default, `perf/run.py`:
+1. generates synthetic datasets (a regular grid and a curvilinear grid) in `perf/data/<size>`, once per size preset (`small`, `medium` or `large`),
+2. starts a local server on these datasets, with the given environment variables,
+3. sends requests from concurrent users (metadata, probe, probes, extract with or without bbox, isoline) during the given duration,
+4. samples the memory (RSS) of the server processes before, during and after the load,
+5. writes a report in `perf/results/<name>`: `summary.md`, `summary.json`, `memory.csv`, `memory.png` and the raw Locust CSV files.
+
+```bash
+uv run --group perf python -m perf.run --size medium --users 20 --duration 60s --name baseline
+```
+
+Main options (see `python -m perf.run --help`):
+
+| Option | Description | Default |
+|---|---|---|
+| `--size` | Size of the synthetic datasets (`small`, `medium`, `large`) | `small` |
+| `-u`, `--users` | Number of concurrent users | `10` |
+| `-r`, `--spawn-rate` | Users started per second | `2` |
+| `-t`, `--duration` | Load duration (e.g. `30s`, `5m`) | `60s` |
+| `--scenarios` | Scenario weights, e.g. `probe=5,isoline=2` | all scenarios |
+| `-w`, `--workers` | Number of uvicorn workers of the local server | `1` |
+| `--env KEY=VALUE` | Environment variable of the local server (repeatable) | |
+| `--memory-limit` | Memory limit in MB, drawn on the graph and compared to the peak | |
+| `--host`, `--datasets` | Target a running instance with its own datasets (`id1,id2:variable`), without memory sampling | |
+
+Two reports can be compared with:
+
+```bash
+uv run --group perf python -m perf.compare perf/results/baseline perf/results/lru1
+```
 
 ## Contributing
 

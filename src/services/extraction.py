@@ -9,6 +9,11 @@ from loguru import logger as log
 from src import exceptions
 from src.processing import bbox, interpolation, output
 from src.processing.contexts import BBoxContext, MultiTimeRange, TimeRange
+from src.processing.polar import (
+    POLAR_BILINEAR_METHOD,
+    get_polar_grid,
+    polar_bilinear_stencil,
+)
 from src.schemas.config import ExtractionConfig
 from src.utils import serialization
 from src.utils.data import (
@@ -267,6 +272,10 @@ def extract(
     interp_vars_method = config.interpolation.vars.method
     interp_vars_params = config.interpolation.vars.params or {}
     interp_spatial_method = config.interpolation.spatial.method
+    if interp_spatial_method == POLAR_BILINEAR_METHOD:
+        raise exceptions.BadSelection(
+            f"Spatial interpolation '{POLAR_BILINEAR_METHOD}' is only supported by the probe endpoints."
+        )
     interp_spatial_params = config.interpolation.spatial.params or {}
     index_padding = interp_spatial_params.pop("index_padding", 2)
     spatial_padding = interp_spatial_params.pop("padding", 1.0)
@@ -1065,6 +1074,23 @@ def probe(
         and longitudes.dims != latitudes.dims
     )
     has_regular_level = level_var is not None and dataset[level_var].ndim == 1
+
+    # Bilinear interpolation in polar coordinates: the structure of the polar
+    # grid is read from the dataset metadata (set by the conversion tool).
+    use_polar = interp_spatial_method == POLAR_BILINEAR_METHOD
+    polar_grid = None
+    if use_polar:
+        if is_regular_grid:
+            raise exceptions.BadSelection(
+                f"Spatial interpolation '{POLAR_BILINEAR_METHOD}' is only available for polar grids."
+            )
+        polar_grid = get_polar_grid(dataset_id, dataset_config, longitudes.dims)
+        if any(size != 1 for size in polar_grid.get("leading_dims", {}).values()):
+            raise exceptions.BadSelection(
+                f"Spatial interpolation '{POLAR_BILINEAR_METHOD}' is not supported for "
+                "polar grids with several horizontal grids (e.g. several elevations)."
+            )
+
     if with_level and has_regular_level and interp_spatial_method != "nearest":
         spatial_interp_vars.append(level_var)
     if is_regular_grid and interp_spatial_method != "nearest":
@@ -1076,6 +1102,11 @@ def probe(
         query_level = get_from_query(level_var, point.level, request)
         parsed_levels.append(float(query_level) if query_level is not None else None)
     with_level = any(lvl is not None for lvl in parsed_levels)
+    if use_polar and with_level and not has_regular_level:
+        raise exceptions.BadSelection(
+            f"Spatial interpolation '{POLAR_BILINEAR_METHOD}' does not support levels "
+            "defined on the polar grid nodes."
+        )
 
     knn_k = interp_spatial_params.get("k")
     use_knn = knn_k is not None or "radius" not in interp_spatial_params
@@ -1111,7 +1142,7 @@ def probe(
         )
 
     tree = None
-    if not is_regular_grid:
+    if not is_regular_grid and not use_polar:
         # Project (lon, lat) to 3D Cartesian (x, y, z) on the unit sphere.
         # Raw degrees are geometrically invalid: they distort distances outside
         # the equator, compress near the poles, and break across the antimeridian.
@@ -1201,8 +1232,10 @@ def probe(
     # NaN below, as a regular grid does when interpolating outside its extent.
     # Point lists (1D lon/lat) have no cell topology and are not checked.
     outside_mask = np.zeros(len(points), dtype=bool)
+    # Polar bilinear interpolation flags the probes outside the grid itself (see below).
     is_structured_irregular_grid = (
         not is_regular_grid
+        and not use_polar
         and longitudes.ndim >= 2
         and longitudes.dims == latitudes.dims
     )
@@ -1293,6 +1326,20 @@ def probe(
                 "lat": float(np.ravel(lat_values)[nearest_idx[0]]),
             }
 
+    # Polar bilinear interpolation: the polar cell (4 nodes) and weights of
+    # every probe. Probes beyond the last gate or outside the sector of the
+    # grid are outside; probes closer to the center than the first gate are
+    # inside (interpolated between the beams, at the first gate).
+    polar_stencil = None
+    if use_polar and points_data:
+        step_logger.step_start("Compute polar cells of the probes")
+        polar_stencil = polar_bilinear_stencil(
+            polar_grid,
+            [p["lon"] for p in points_data],
+            [p["lat"] for p in points_data],
+        )
+        outside_mask = polar_stencil.outside.copy()
+
     if outside_mask.any():
         log.info(
             "[KAZARR] {n}/{total} probe(s) outside the grid of dataset {dataset_id}",
@@ -1319,8 +1366,26 @@ def probe(
             nearest_point=strict_nearest_point,
         )
 
+    if polar_stencil is not None:
+        # The 4 nodes of the polar cell act as the neighbors of IDW, with the
+        # bilinear weights. Leading dimensions of the grid all have size 1.
+        n_neighbors = polar_stencil.weights.shape[1]
+        for i in range(len(points_data)):
+            indexers = {}
+            for dim in longitudes.dims:
+                if dim == polar_grid["azimuth_dim"]:
+                    vals = polar_stencil.azimuth_indices[i]
+                elif dim == polar_grid["range_dim"]:
+                    vals = polar_stencil.range_indices[i]
+                else:
+                    vals = np.zeros(n_neighbors, dtype=int)
+                indexers[dim] = xr.DataArray(vals, dims=["neighbor"])
+            points_data[i]["spatial_indexers"] = indexers
+            points_data[i]["weights_da"] = xr.DataArray(
+                polar_stencil.weights[i], dims=["neighbor"]
+            )
     # Query all target points at once instead of in a Python loop for massive speedups.
-    if not is_regular_grid and target_pts:
+    elif not is_regular_grid and target_pts:
         target_pts_arr = np.array(target_pts)
         if interp_spatial_method != "nearest":
             # IDW Interpolation on unstructured grid.
@@ -1668,6 +1733,16 @@ def probe(
             neighbor_data = filtered_da.isel(**batch_spatial_indexers)
             all_nan_mask = neighbor_data.isnull().all(dim="neighbor")
             interpolated_values = (neighbor_data * batch_weights_da).sum(dim="neighbor")
+            # Missing (NaN) neighbors are skipped by the sum: the weights of
+            # the valid ones are renormalized so that they still sum to 1
+            # (otherwise the result would be biased toward 0 near masked
+            # nodes). This applies to IDW neighbors and polar cell nodes.
+            valid_weights = batch_weights_da.where(neighbor_data.notnull(), 0.0).sum(
+                dim="neighbor"
+            )
+            interpolated_values = interpolated_values / valid_weights.where(
+                valid_weights > 0
+            )
             interpolated_values = interpolated_values.where(~all_nan_mask)
             da_result = interpolated_values
         else:

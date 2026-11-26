@@ -315,7 +315,7 @@ export function buildServer (options = {}) {
         'quintic', 'polynomial', 'pchip', 'barycentric', 'krogh', 'akima', 'makima'
       ]).optional().describe('Variable interpolation method.'),
       interp_vars_params: z.string().optional().describe('Variable interpolation extra params.'),
-      interp_spatial_method: z.enum(['nearest', 'linear', 'cubic', 'idw', 'rbf']).optional().describe(
+      interp_spatial_method: z.enum(['nearest', 'linear', 'cubic', 'idw', 'rbf', 'polar_bilinear']).optional().describe(
         'Spatial interpolation method used to compute the value at the exact probe location.'
       ),
       interp_spatial_params: z.string().optional().describe('Spatial interpolation extra params.'),
@@ -371,7 +371,7 @@ export function buildServer (options = {}) {
         'quintic', 'polynomial', 'pchip', 'barycentric', 'krogh', 'akima', 'makima'
       ]).optional().describe('Variable interpolation method.'),
       interp_vars_params: z.string().optional().describe('Variable interpolation extra params.'),
-      interp_spatial_method: z.enum(['nearest', 'linear', 'cubic', 'idw', 'rbf']).optional().describe(
+      interp_spatial_method: z.enum(['nearest', 'linear', 'cubic', 'idw', 'rbf', 'polar_bilinear']).optional().describe(
         'Spatial interpolation method.'
       ),
       interp_spatial_params: z.string().optional().describe('Spatial interpolation extra params.'),

@@ -113,7 +113,7 @@ kazarr [OPTIONS] INPUT_PATH
 *   `-p, --pipeline TEXT`: [Pipeline](#pipelines) to use for processing the new dataset [default: preprocess].
 *   `--templates-path PATH`: Path to [templates](#templates) configuration file [default: templates.json].
 *   `--data-mapping`: Whether to map data on mesh vertices or celles [default: vertices].
-*   `--mesh-type`: Type of mesh to generate (default: auto, which infers from data between regular and rectilinear but not able to handle radial meshes)
+*   `--mesh-type`: Type of mesh to generate (default: auto, which infers from data between regular and rectilinear). With `auto` or `radial`, polar (radar like) grids are detected when saving the dataset (see [`detect_polar_grid_structure`](#detect_polar_grid_structure)): their structure (center, azimuths, ranges) is stored in the dataset metadata under `polar_grid`, for the `polar_bilinear` probe interpolation of the API, and `auto` becomes `radial`. The azimuth axis must be the second to last dimension of the longitude / latitude arrays and the range axis the last one.
 *   `--custom-eccodes-path`: Path to a folder containing extra ecCodes. This path must be set to the parent folder containing the grib1, grib2, etc. subdirectories.
 *   `--dask-dashboard`: Start a Dask dashboard for monitoring the processing (requires `bokeh>=3.1`, only installed with the development dependencies: `uv sync` or `pip install 'bokeh>=3.1'`)
 *   `--s3-storage-class`: Define which class to use for saving Zarr dataset to S3 [default: `STANDARD`]  
@@ -488,6 +488,20 @@ This process can result in a fully regular grid, a hybrid grid (e.g., 1D `level`
 | `variables.lon`         | String | Name of the longitude variable        |
 | `variables.lat`         | String | Name of the latitude variable         |
 | `variables.level`       | String | Name of the level variable (Optional) |
+
+### `detect_polar_grid_structure`
+
+Detects a polar (radar like) grid, only when `mesh_type` is `auto` or `radial`, and stores its structure (center, azimuths, ranges) under `polar_grid` in the dataset metadata, for the `polar_bilinear` probe interpolation of the API. With `auto`, `mesh_type` becomes `radial`. The azimuth axis must be the second to last dimension of the longitude / latitude arrays and the range axis the last one. The detection never fails the conversion.
+
+`save` always makes sure this detection is done, so this process is only needed in a pipeline to run it earlier, e.g. before a process which depends on `mesh_type`. `save` then reuses its result, sub-pipelines included, as long as the longitudes / latitudes were not changed in the meantime (e.g. by `reproject_coordinates`): otherwise the detection is run again.
+
+**Parameters:**
+
+| Name            | Type   | Description                                                   |
+| --------------- | ------ | ------------------------------------------------------------- |
+| `variables.lon` | String | Name of the longitude variable                                |
+| `variables.lat` | String | Name of the latitude variable                                 |
+| `mesh_type`     | String | Mesh type: the detection only runs with `auto` or `radial`. Default: `auto` |
 
 ### `save`
 
