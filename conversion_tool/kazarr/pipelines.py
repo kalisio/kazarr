@@ -1,4 +1,5 @@
 import copy
+import inspect
 import logging
 import time
 
@@ -14,6 +15,28 @@ from kazarr.utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _is_process(obj):
+    """Processes are the public functions defined in the processes module:
+    neither its private helpers nor what it imports (from kazarr.utils...)."""
+    return inspect.isfunction(obj) and obj.__module__ == proc.__name__
+
+
+def get_process(name):
+    """Return the process with the given name (snake_case or camelCase)."""
+    for candidate in dict.fromkeys((name, camel_to_snake(name))):
+        if candidate.startswith("_"):
+            continue
+        target_process = getattr(proc, candidate, None)
+        if _is_process(target_process):
+            return target_process
+    available = sorted(
+        n for n, obj in vars(proc).items() if not n.startswith("_") and _is_process(obj)
+    )
+    raise PipelineError(
+        f'Process not found: "{name}". Available processes: {", ".join(available)}.'
+    )
 
 
 def pipeline(config, name, dataset=None):
@@ -99,18 +122,10 @@ def pipeline(config, name, dataset=None):
                 config["variables"]["time"] = new_time_var
             continue
 
+        target_process = get_process(process_name)
         process_start_time = time.time()
-        try:
-            target_process = getattr(proc, process_name)
-            dataset, config = target_process(dataset, {**config, **process_params})
-            log_duration(process_start_time, f'Completed process "{process_name}"')
-        except AttributeError as e:
-            try:
-                target_process = getattr(proc, camel_to_snake(process_name))
-                dataset, config = target_process(dataset, {**config, **process_params})
-                log_duration(process_start_time, f'Completed process "{process_name}"')
-            except Exception:
-                raise e
+        dataset, config = target_process(dataset, {**config, **process_params})
+        log_duration(process_start_time, f'Completed process "{process_name}"')
     log_duration(start_time, f'Completed pipeline "{name}"')
     return dataset, config
 

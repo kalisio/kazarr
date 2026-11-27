@@ -10,12 +10,12 @@ be suffixed by kazarr to tell apart duplicates. This module lists both side by s
 import json
 import os
 
-from kazarr.processes import (
+from kazarr.grib import (
     GRIB_TIME_RANGE_ATTRS,
     GRIB_TIME_RANGE_KEYS,
     grib_time_range_suffix,
-    load_from_grib,
 )
+from kazarr.processes import load_from_grib
 from kazarr.utils import S3_PREFIX, load_custom_eccodes
 
 try:

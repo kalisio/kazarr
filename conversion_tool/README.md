@@ -225,7 +225,7 @@ By exploring the dataset, you can quickly deduce your pipeline needs:
 
 ## Processes
 
-These are the processes you can use in your pipelines.
+These are the processes you can use in your pipelines, by their name in snake_case (`simplify_grid`) or camelCase (`simplifyGrid`). Any other name stops the pipeline with a `PIPELINE_ERROR` listing the available processes.
 Some processes require specific parameters in the configuration.
 
 You can define those parameters globally at the root of the config object, or directly in the pipeline as following:
